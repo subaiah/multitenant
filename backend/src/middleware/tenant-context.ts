@@ -17,8 +17,12 @@ declare module 'fastify' {
 }
 
 export const tenantContext = async (request: FastifyRequest, reply: FastifyReply) => {
-  // Skip tenant context for health check and auth routes
-  if (request.url.startsWith('/health') || request.url.startsWith('/auth')) {
+  // Skip tenant context for health check, auth routes, and BFF auth routes
+  if (
+    request.url.startsWith('/health') ||
+    request.url.startsWith('/auth') ||
+    request.url.startsWith('/bff/auth')
+  ) {
     return;
   }
 
