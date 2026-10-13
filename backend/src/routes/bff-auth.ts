@@ -23,10 +23,6 @@ const otpVerifySchema = z.object({
   code: z.string().length(6),
 });
 
-const refreshTokenSchema = z.object({
-  refreshToken: z.string(),
-});
-
 // Helper function to generate secure random token
 function generateSecureToken(): string {
   return crypto.randomBytes(64).toString('hex');
@@ -94,6 +90,11 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid credentials', 401);
     }
 
+    const tenantId = user.tenantId;
+    if (!tenantId || tenantId !== tenant.id) {
+      throw new AppError('User is not associated with this tenant', 403);
+    }
+
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
@@ -121,7 +122,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate access token (short-lived)
     const accessToken = fastify.jwt.sign({
       userId: user.id,
-      tenantId: user.tenantId,
+      tenantId,
       userType: user.userType,
       type: 'access',
     }, {
@@ -136,9 +137,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store refresh token in database
     await prisma.refreshToken.create({
-       {
+      data: {
         userId: user.id,
-        tenantId: user.tenantId,
+        tenantId,
         token: refreshTokenValue,
         familyId,
         expiresAt: refreshExpiresAt,
@@ -150,13 +151,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Log activity
     await prisma.activity.create({
-       {
-        tenantId: user.tenantId,
+      data: {
+        tenantId,
         userId: user.id,
         action: 'logged in via BFF',
         target: 'system',
@@ -213,7 +214,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
         },
       },
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const { email, tenantSlug } = otpRequestSchema.parse(request.body);
 
     // Find tenant
@@ -250,6 +251,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       return { message: 'If the email exists, an OTP has been sent' };
     }
 
+    if (user.tenantId !== tenant.id) {
+      throw new AppError('User is not associated with this tenant', 403);
+    }
+
     // Delete any existing OTPs for this email
     await prisma.otpCode.deleteMany({
       where: {
@@ -265,7 +270,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store OTP
     await prisma.otpCode.create({
-       {
+      data: {
         tenantId: tenant.id,
         email,
         code,
@@ -340,7 +345,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Mark OTP as verified
     await prisma.otpCode.update({
       where: { id: otpRecord.id },
-       { verified: true },
+      data: { verified: true },
     });
 
     // Find user
@@ -355,6 +360,11 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User not found', 404);
     }
 
+    const tenantId = user.tenantId;
+    if (!tenantId || tenantId !== tenant.id) {
+      throw new AppError('User is not associated with this tenant', 403);
+    }
+
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
@@ -366,7 +376,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate access token
     const accessToken = fastify.jwt.sign({
       userId: user.id,
-      tenantId: user.tenantId,
+      tenantId,
       userType: user.userType,
       type: 'access',
     }, {
@@ -381,9 +391,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store refresh token
     await prisma.refreshToken.create({
-       {
+      data: {
         userId: user.id,
-        tenantId: user.tenantId,
+        tenantId,
         token: refreshTokenValue,
         familyId,
         expiresAt: refreshExpiresAt,
@@ -395,13 +405,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Log activity
     await prisma.activity.create({
-       {
-        tenantId: user.tenantId,
+      data: {
+        tenantId,
         userId: user.id,
         action: 'logged in via OTP',
         target: 'system',
@@ -460,19 +470,23 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Find refresh token in database
     const storedToken = await prisma.refreshToken.findUnique({
       where: { token: refreshTokenValue },
-      include: {
-        user: {
-          select: {
-            id: true,
-            tenantId: true,
-            userType: true,
-            status: true,
-          },
-        },
-      },
     });
 
     if (!storedToken) {
+      throw new AppError('Invalid refresh token', 401);
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: storedToken.userId },
+      select: {
+        id: true,
+        tenantId: true,
+        userType: true,
+        status: true,
+      },
+    });
+
+    if (!user || user.tenantId !== storedToken.tenantId) {
       throw new AppError('Invalid refresh token', 401);
     }
 
@@ -481,7 +495,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       // Token reuse detected - revoke entire family
       await prisma.refreshToken.updateMany({
         where: { familyId: storedToken.familyId },
-         { revokedAt: new Date() },
+        data: { revokedAt: new Date() },
       });
 
       throw new AppError('Token reuse detected - all sessions revoked', 401);
@@ -493,7 +507,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Check if user is still active
-    if (storedToken.user.status !== 'ACTIVE') {
+    if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
 
@@ -505,12 +519,12 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Revoke old token
     await prisma.refreshToken.update({
       where: { id: storedToken.id },
-       { revokedAt: new Date() },
+      data: { revokedAt: new Date() },
     });
 
     // Create new refresh token with same family
     await prisma.refreshToken.create({
-       {
+      data: {
         userId: storedToken.userId,
         tenantId: storedToken.tenantId,
         token: newRefreshTokenValue,
@@ -523,9 +537,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Generate new access token
     const newAccessToken = fastify.jwt.sign({
-      userId: storedToken.user.id,
-      tenantId: storedToken.user.tenantId,
-      userType: storedToken.user.userType,
+      userId: user.id,
+      tenantId: storedToken.tenantId,
+      userType: user.userType,
       type: 'access',
     }, {
       expiresIn: config.accessTokenExpiry,
@@ -568,7 +582,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       // Revoke refresh token
       await prisma.refreshToken.updateMany({
         where: { token: refreshTokenValue },
-         { revokedAt: new Date() },
+        data: { revokedAt: new Date() },
       });
     }
 
@@ -587,7 +601,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       tags: ['bff-auth'],
       summary: 'Get current authenticated user',
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const accessToken = request.cookies.access_token;
 
     if (!accessToken) {
@@ -639,7 +653,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       tags: ['bff-auth'],
       summary: 'Check authentication status',
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const accessToken = request.cookies.access_token;
     const refreshToken = request.cookies.refresh_token;
 
@@ -668,7 +682,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       // Revoke all refresh tokens for this user
       await prisma.refreshToken.updateMany({
         where: { userId: decoded.userId },
-         { revokedAt: new Date() },
+        data: { revokedAt: new Date() },
       });
 
       // Clear cookies
@@ -677,7 +691,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Log activity
       await prisma.activity.create({
-         {
+        data: {
           tenantId: decoded.tenantId,
           userId: decoded.userId,
           action: 'revoked all sessions',
@@ -700,7 +714,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       tags: ['bff-auth'],
       summary: 'Get active sessions for current user',
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const accessToken = request.cookies.access_token;
 
     if (!accessToken) {
