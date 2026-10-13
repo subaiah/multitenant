@@ -1,5 +1,6 @@
 // Prisma schema for multi-tenant application management
 // Supports three isolation strategies: Database per Tenant, Schema per Tenant, Shared Tables
+// Uses snake_case for database tables and columns via @map and @@map
 
 generator client {
   provider = "prisma-client-js"
@@ -18,14 +19,14 @@ model Tenant {
   status          TenantStatus
   
   // Branding
-  logoUrl         String?
-  primaryColor    String?   @default("#3b82f6")
-  customDomain    String?   @unique
-  loginTitle      String?
-  loginSubtitle   String?
+  logoUrl         String?   @map("logo_url")
+  primaryColor    String?   @default("#3b82f6") @map("primary_color")
+  customDomain    String?   @unique @map("custom_domain")
+  loginTitle      String?   @map("login_title")
+  loginSubtitle   String?   @map("login_subtitle")
   
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
   
   // Relations
   users           User[]
@@ -35,6 +36,7 @@ model Tenant {
   apiConfig       ApiConfig?
   activities      Activity[]
   
+  @@map("tenants")
   @@index([slug])
   @@index([status])
 }
@@ -54,19 +56,20 @@ enum TenantStatus {
 
 // User model - users belong to a tenant
 model User {
-  id              String    @id @default(uuid())
-  tenantId        String
+  id              String     @id @default(uuid())
+  tenantId        String     @map("tenant_id")
   email           String
   name            String?
-  role            UserRole  @default(USER)
+  role            UserRole   @default(USER)
   status          UserStatus @default(ACTIVE)
-  lastLoginAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?  @map("last_login_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
   
   // Relations
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  @@map("users")
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([email])
@@ -86,24 +89,25 @@ enum UserStatus {
 
 // Application model - applications belong to a tenant
 model Application {
-  id              String          @id @default(uuid())
-  tenantId        String
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
   name            String
   description     String?
   status          ApplicationStatus
   version         String
   environment     Environment
   url             String
-  cpu             Int             @default(0)
-  memory          Int             @default(0)
-  requests        Int             @default(0)
-  lastDeployedAt  DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  cpu             Int               @default(0)
+  memory          Int               @default(0)
+  requests        Int               @default(0)
+  lastDeployedAt  DateTime?         @map("last_deployed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
   
   // Relations
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  @@map("applications")
   @@index([tenantId])
   @@index([status])
   @@index([environment])
@@ -125,22 +129,24 @@ enum Environment {
 // Database configuration per tenant
 model DatabaseConfig {
   id                String            @id @default(uuid())
-  tenantId          String            @unique
+  tenantId          String            @unique @map("tenant_id")
   strategy          DatabaseStrategy
   provider          DatabaseProvider
   region            String
-  backupEnabled     Boolean           @default(false)
-  encryptionAtRest  Boolean           @default(false)
-  maxConnections    Int               @default(100)
-  storageLimit      String
-  connectionString  String?           // For database-per-tenant
-  schemaName        String?           // For schema-per-tenant
-  tenantColumn      String?           // For shared-tables
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  backupEnabled     Boolean           @default(false) @map("backup_enabled")
+  encryptionAtRest  Boolean           @default(false) @map("encryption_at_rest")
+  maxConnections    Int               @default(100) @map("max_connections")
+  storageLimit      String            @map("storage_limit")
+  connectionString  String?           @map("connection_string")
+  schemaName        String?           @map("schema_name")
+  tenantColumn      String?           @map("tenant_column")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
   
   // Relations
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@map("database_configs")
 }
 
 enum DatabaseStrategy {
@@ -158,18 +164,20 @@ enum DatabaseProvider {
 
 // Authentication configuration per tenant
 model AuthConfig {
-  id              String        @id @default(uuid())
-  tenantId        String        @unique
-  mfaEnabled      Boolean       @default(false)
-  sessionTimeout  Int           @default(60) // minutes
-  passwordPolicy  PasswordPolicy @default(STANDARD)
-  ssoOnly         Boolean       @default(false)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id              String         @id @default(uuid())
+  tenantId        String         @unique @map("tenant_id")
+  mfaEnabled      Boolean        @default(false) @map("mfa_enabled")
+  sessionTimeout  Int            @default(60) @map("session_timeout")
+  passwordPolicy  PasswordPolicy @default(STANDARD) @map("password_policy")
+  ssoOnly         Boolean        @default(false) @map("sso_only")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
   
   // Relations
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   providers       AuthProvider[]
+  
+  @@map("auth_configs")
 }
 
 enum PasswordPolicy {
@@ -180,28 +188,29 @@ enum PasswordPolicy {
 
 // Authentication providers per tenant
 model AuthProvider {
-  id              String        @id @default(uuid())
-  authConfigId    String
+  id              String           @id @default(uuid())
+  authConfigId    String           @map("auth_config_id")
   provider        AuthProviderType
-  enabled         Boolean       @default(false)
-  clientId        String?
-  clientSecret    String?       // Encrypted in production
-  tenantId        String?       // For Entra ID
-  domain          String?       // For Okta, Auth0, Custom OIDC
-  scopes          String[]      // Array of OAuth scopes
-  autoProvision   Boolean       @default(false)
+  enabled         Boolean          @default(false)
+  clientId        String?          @map("client_id")
+  clientSecret    String?          @map("client_secret")
+  tenantId        String?          @map("tenant_id")
+  domain          String?
+  scopes          String[]
+  autoProvision   Boolean          @default(false) @map("auto_provision")
   
   // OAuth configuration
-  authorizeUrl    String?       // Authorization endpoint
-  tokenUrl        String?       // Token endpoint
-  userInfoUrl     String?       // User info endpoint
+  authorizeUrl    String?          @map("authorize_url")
+  tokenUrl        String?          @map("token_url")
+  userInfoUrl     String?          @map("user_info_url")
   
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
   
   // Relations
-  authConfig      AuthConfig    @relation(fields: [authConfigId], references: [id], onDelete: Cascade)
+  authConfig      AuthConfig       @relation(fields: [authConfigId], references: [id], onDelete: Cascade)
   
+  @@map("auth_providers")
   @@index([authConfigId])
 }
 
@@ -216,21 +225,23 @@ enum AuthProviderType {
 
 // API configuration per tenant
 model ApiConfig {
-  id              String        @id @default(uuid())
-  tenantId        String        @unique
-  bffEnabled      Boolean       @default(false)
-  bffUrl          String?
-  apiGateway      ApiGateway
-  rateLimit       Int           @default(5000) // requests per hour
-  corsEnabled     Boolean       @default(true)
-  allowedOrigins  String[]      // Array of allowed origins
-  authType        ApiAuthType   @default(JWT)
-  versioning      ApiVersioning @default(URL)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id              String         @id @default(uuid())
+  tenantId        String         @unique @map("tenant_id")
+  bffEnabled      Boolean        @default(false) @map("bff_enabled")
+  bffUrl          String?        @map("bff_url")
+  apiGateway      ApiGateway     @map("api_gateway")
+  rateLimit       Int            @default(5000) @map("rate_limit")
+  corsEnabled     Boolean        @default(true) @map("cors_enabled")
+  allowedOrigins  String[]       @map("allowed_origins")
+  authType        ApiAuthType    @default(JWT) @map("auth_type")
+  versioning      ApiVersioning  @default(URL)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
   
   // Relations
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@map("api_configs")
 }
 
 enum ApiGateway {
@@ -255,18 +266,19 @@ enum ApiVersioning {
 
 // Activity log for audit trail
 model Activity {
-  id          String        @id @default(uuid())
-  tenantId    String
-  userId      String?
+  id          String       @id @default(uuid())
+  tenantId    String       @map("tenant_id")
+  userId      String?      @map("user_id")
   action      String
   target      String
   type        ActivityType
   metadata    Json?
-  createdAt   DateTime      @default(now())
+  createdAt   DateTime     @default(now()) @map("created_at")
   
   // Relations
-  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  @@map("activities")
   @@index([tenantId])
   @@index([type])
   @@index([createdAt])
@@ -285,13 +297,14 @@ enum ActivityType {
 // OAuth session state for secure OAuth flow
 model OAuthSession {
   id            String    @id @default(uuid())
-  state         String    @unique  // CSRF protection state
-  providerId    String
-  tenantId      String
-  redirectUri   String
-  expiresAt     DateTime
-  createdAt     DateTime  @default(now())
+  state         String    @unique
+  providerId    String    @map("provider_id")
+  tenantId      String    @map("tenant_id")
+  redirectUri   String    @map("redirect_uri")
+  expiresAt     DateTime  @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
   
+  @@map("oauth_sessions")
   @@index([state])
   @@index([expiresAt])
 }
