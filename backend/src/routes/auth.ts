@@ -184,7 +184,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store OAuth session
     await prisma.oAuthSession.create({
-       {
+      data: {
         state,
         providerId: authProvider.id,
         tenantId: tenant.id,
@@ -314,7 +314,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       user = await prisma.user.create({
-         {
+        data: {
           tenantId: tenant.id,
           email: userInfo.email,
           name: userInfo.name,
@@ -331,7 +331,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Delete OAuth session
@@ -347,7 +347,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: tenant.id,
         userId: user.id,
         action: 'logged in via OAuth',
@@ -428,7 +428,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Generate JWT token
@@ -441,7 +441,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: user.tenantId,
         userId: user.id,
         action: 'logged in',
@@ -497,7 +497,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const result = await prisma.$transaction(async (tx) => {
       // Create tenant
       const tenant = await tx.tenant.create({
-         {
+        data: {
           name: tenantName,
           slug: tenantSlug,
           plan: 'TRIAL',
@@ -510,7 +510,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Create admin user
       const user = await tx.user.create({
-         {
+        data: {
           tenantId: tenant.id,
           email,
           name,
@@ -521,7 +521,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Create default database config
       await tx.databaseConfig.create({
-         {
+        data: {
           tenantId: tenant.id,
           strategy: 'SHARED_TABLES',
           provider: 'POSTGRESQL',
@@ -533,7 +533,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Create default auth config
       await tx.authConfig.create({
-         {
+        data: {
           tenantId: tenant.id,
           mfaEnabled: false,
           sessionTimeout: 60,
@@ -544,7 +544,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Create default API config
       await tx.apiConfig.create({
-         {
+        data: {
           tenantId: tenant.id,
           bffEnabled: false,
           apiGateway: 'CUSTOM',
