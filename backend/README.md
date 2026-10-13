@@ -125,18 +125,18 @@ npm run prisma:seed
 npm run dev
 ```
 
-The server will start at `http://localhost:3000`
+The server will start at `http://localhost:4000`
 
 ### 5. Access API Documentation
 
-Open `http://localhost:3000/docs` in your browser to view the Swagger UI.
+Open `http://localhost:4000/docs` in your browser to view the Swagger UI.
 
 ## 🔐 Authentication
 
 ### Register a New Tenant
 
 ```bash
-curl -X POST http://localhost:3000/auth/register \
+curl -X POST http://localhost:4000/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@example.com",
@@ -167,7 +167,7 @@ Response:
 ### Login
 
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:4000/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@example.com",
@@ -180,7 +180,7 @@ curl -X POST http://localhost:3000/auth/login \
 Include the JWT token in the Authorization header:
 
 ```bash
-curl -X GET http://localhost:3000/tenants/current \
+curl -X GET http://localhost:4000/tenants/current \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
   -H "x-tenant-id: uuid"
 ```
@@ -409,10 +409,10 @@ CMD ["node", "dist/server.js"]
 
 ```bash
 # Basic health check
-curl http://localhost:3000/health
+curl http://localhost:4000/health
 
 # Detailed health with DB status
-curl http://localhost:3000/health/detailed
+curl http://localhost:4000/health/detailed
 ```
 
 ### Logging

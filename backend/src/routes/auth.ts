@@ -197,7 +197,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     let authorizeUrl = '';
     const params = new URLSearchParams({
       client_id: authProvider.clientId || '',
-      redirect_uri: `${process.env.APP_URL}/auth/callback`,
+      redirect_uri: `${process.env.APP_URL || 'http://localhost:5173'}/auth/callback`,
       response_type: 'code',
       scope: authProvider.scopes.join(' '),
       state,

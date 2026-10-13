@@ -8,7 +8,7 @@ const envSchema = z.object({
 
   // Server
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().default('3000').transform(Number),
+  PORT: z.string().default('4000').transform(Number),
   HOST: z.string().default('0.0.0.0'),
 
   // JWT

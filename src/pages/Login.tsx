@@ -100,7 +100,7 @@ export default function Login() {
       }
 
       try {
-        const response = await fetch(`http://localhost:3000/auth/tenant/${tenantSlug}`);
+        const response = await fetch(`http://localhost:4000/auth/tenant/${tenantSlug}`);
         
         if (!response.ok) {
           throw new Error('Tenant not found');
@@ -125,7 +125,7 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:3000/auth/oauth/initiate', {
+      const response = await fetch('http://localhost:4000/auth/oauth/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -159,7 +159,7 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:3000/auth/login', {
+      const response = await fetch('http://localhost:4000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

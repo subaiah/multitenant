@@ -3,7 +3,7 @@
 ## 🎯 Problem Statement
 
 You asked for:
-1. ✅ Tenant-specific login pages (e.g., `http://localhost:3000/acme-corp`)
+1. ✅ Tenant-specific login pages (e.g., `http://localhost:5173/acme-corp`)
 2. ✅ Provider selection when tenant has multiple SSO providers configured
 3. ✅ Better approach than single login page
 

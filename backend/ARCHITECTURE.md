@@ -326,7 +326,7 @@ The codebase is structured for easy testing:
 ## 📚 API Documentation
 
 Auto-generated Swagger documentation available at:
-- **URL**: `http://localhost:3000/docs`
+- **URL**: `http://localhost:4000/docs`
 - **Format**: OpenAPI 3.0
 - **Interactive**: Test endpoints directly from browser
 

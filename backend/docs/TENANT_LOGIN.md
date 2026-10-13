@@ -409,10 +409,10 @@ await prisma.activity.create({
 curl http://localhost:5173/acme-corp/login
 
 # Get tenant info
-curl http://localhost:3000/auth/tenant/acme-corp
+curl http://localhost:4000/auth/tenant/acme-corp
 
 # Initiate OAuth
-curl -X POST http://localhost:3000/auth/oauth/initiate \
+curl -X POST http://localhost:4000/auth/oauth/initiate \
   -H "Content-Type: application/json" \
   -d '{
     "tenantSlug": "acme-corp",
@@ -423,7 +423,7 @@ curl -X POST http://localhost:3000/auth/oauth/initiate \
 
 ### Test Email/Password Login
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:4000/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@acme-corp.com",

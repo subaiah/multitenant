@@ -23,8 +23,8 @@ This will:
 - Run migrations automatically
 - Seed the database with sample data
 
-Access the API at: `http://localhost:3000`
-API Documentation: `http://localhost:3000/docs`
+Access the API at: `http://localhost:4000`
+API Documentation: `http://localhost:4000/docs`
 
 ## Option 2: Manual Setup
 
@@ -82,7 +82,7 @@ npm run dev
 ### 1. Register a New Tenant
 
 ```bash
-curl -X POST http://localhost:3000/auth/register \
+curl -X POST http://localhost:4000/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@test.com",
@@ -97,7 +97,7 @@ Save the `token` and `tenant.id` from the response.
 ### 2. Login
 
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:4000/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@test.com",
@@ -108,14 +108,14 @@ curl -X POST http://localhost:3000/auth/login \
 ### 3. Access Protected Routes
 
 ```bash
-curl http://localhost:3000/tenants/current \
+curl http://localhost:4000/tenants/current \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "x-tenant-id: YOUR_TENANT_ID"
 ```
 
 ### 4. View API Documentation
 
-Open `http://localhost:3000/docs` in your browser.
+Open `http://localhost:4000/docs` in your browser.
 
 ## Sample Data
 
@@ -130,7 +130,7 @@ The seed script creates:
 
 ```bash
 # Acme Corporation
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:4000/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@acme-corp.com",
@@ -185,7 +185,7 @@ npm run prisma:seed
 
 ## Next Steps
 
-1. **Explore the API**: Visit `http://localhost:3000/docs`
+1. **Explore the API**: Visit `http://localhost:4000/docs`
 2. **Configure Multi-Tenancy**: Set up database isolation strategies
 3. **Add SSO Providers**: Configure authentication providers
 4. **Set Up BFF**: Enable Backend for Frontend pattern
@@ -215,7 +215,7 @@ docker-compose logs -f   # View logs
 ## Support
 
 - Check the [full README](./README.md) for detailed documentation
-- View API docs at `http://localhost:3000/docs`
+- View API docs at `http://localhost:4000/docs`
 - Open Prisma Studio: `npm run prisma:studio`
 
 Happy coding! 🚀
