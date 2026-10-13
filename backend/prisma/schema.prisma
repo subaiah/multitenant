@@ -334,6 +334,27 @@ model OtpCode {
   @@map("otp_codes")
 }
 
+// Refresh tokens for BFF session management
+model RefreshToken {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  tenantId      String    @map("tenant_id")
+  token         String    @unique
+  familyId      String    @map("family_id") // For token rotation detection
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  userAgent     String?   @map("user_agent")
+  ipAddress     String?   @map("ip_address")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  @@index([userId])
+  @@index([token])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
 // Permission model - defines granular permissions
 model Permission {
   id          String    @id @default(uuid())

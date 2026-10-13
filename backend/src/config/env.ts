@@ -28,6 +28,13 @@ const envSchema = z.object({
   // Multi-tenancy
   DEFAULT_TENANT_STRATEGY: z.enum(['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES']).default('SHARED_TABLES'),
   TENANT_HEADER: z.string().default('x-tenant-id'),
+
+  // BFF Configuration
+  BFF_URL: z.string().default('http://localhost:4000'),
+  FRONTEND_URL: z.string().default('http://localhost:5173'),
+  COOKIE_SECRET: z.string().default('cookie-secret-change-in-production-min-32-chars'),
+  ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
+  REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
 });
 
 // Parse and validate environment variables
@@ -59,6 +66,13 @@ export const config = {
   // Multi-tenancy
   defaultTenantStrategy: env.DEFAULT_TENANT_STRATEGY,
   tenantHeader: env.TENANT_HEADER,
+
+  // BFF Configuration
+  bffUrl: env.BFF_URL,
+  frontendUrl: env.FRONTEND_URL,
+  cookieSecret: env.COOKIE_SECRET,
+  accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
+  refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
 } as const;
 
 export type Config = typeof config;

@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
+import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
@@ -13,6 +14,7 @@ import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { activityRoutes } from './routes/activities.js';
 import { bffRoutes } from './routes/bff.js';
+import { bffAuthRoutes } from './routes/bff-auth.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
@@ -49,6 +51,16 @@ async function registerPlugins() {
     secret: config.jwtSecret,
     sign: {
       expiresIn: config.jwtExpiresIn,
+    },
+  });
+
+  // Cookie support for BFF
+  await fastify.register(cookie, {
+    secret: config.cookieSecret,
+    parseOptions: {
+      httpOnly: true,
+      secure: config.nodeEnv === 'production',
+      sameSite: 'lax',
     },
   });
 
@@ -110,6 +122,9 @@ async function registerRoutes() {
 
   // Authentication routes (no auth required)
   await fastify.register(authRoutes, { prefix: '/auth' });
+
+  // BFF Authentication routes (handles cookies, no JWT auth required)
+  await fastify.register(bffAuthRoutes, { prefix: '/bff/auth' });
 
   // Protected routes (require authentication)
   await fastify.register(async (protectedRoutes) => {

@@ -162,9 +162,10 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/auth/password-login', {
+      const response = await fetch('http://localhost:4000/bff/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Include cookies for BFF authentication
         body: JSON.stringify({
           email,
           tenantSlug: tenant.slug,
@@ -177,12 +178,7 @@ export default function Login() {
         throw new Error(error.message || 'Login failed');
       }
 
-      const data = await response.json();
-      
-      // Store token and redirect
-      localStorage.setItem('authToken', data.token);
-      localStorage.setItem('tenantId', data.tenant.id);
-      
+      // BFF sets httpOnly cookies, no need to store tokens in localStorage
       navigate('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -200,9 +196,10 @@ export default function Login() {
     setDevOtp(null);
 
     try {
-      const response = await fetch('http://localhost:4000/auth/otp/request', {
+      const response = await fetch('http://localhost:4000/bff/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Include cookies for BFF authentication
         body: JSON.stringify({
           email,
           tenantSlug: tenant.slug,
@@ -238,9 +235,10 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/auth/otp/verify', {
+      const response = await fetch('http://localhost:4000/bff/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Include cookies for BFF authentication
         body: JSON.stringify({
           email,
           tenantSlug: tenant.slug,
@@ -253,12 +251,7 @@ export default function Login() {
         throw new Error(error.message || 'OTP verification failed');
       }
 
-      const data = await response.json();
-      
-      // Store token and redirect
-      localStorage.setItem('authToken', data.token);
-      localStorage.setItem('tenantId', data.tenant.id);
-      
+      // BFF sets httpOnly cookies, no need to store tokens in localStorage
       navigate('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'OTP verification failed');
