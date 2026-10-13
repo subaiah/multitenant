@@ -50,10 +50,79 @@ export function isTenantUser(userType: UserType): boolean {
 }
 
 /**
- * Get user permissions from their roles
+ * Get user permissions from their roles (both direct and group-based)
  */
-export async function getUserPermissions(userId: string): Promise<string[]> {
-  const userRoles = await prisma.userRole.findMany({
+export async function getUserPermissions(userId: string, tenantId?: string): Promise<string[]> {
+  const permissions = new Set<string>();
+  
+  // 1. Get direct role assignments (new model)
+  const directAssignments = await prisma.roleAssignment.findMany({
+    where: {
+      userId,
+      principalType: 'USER',
+      status: 'ACTIVE',
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+      ...(tenantId ? { tenantId } : {}),
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  
+  // 2. Get group memberships
+  const groupMemberships = await prisma.groupMembership.findMany({
+    where: {
+      userId,
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+      ...(tenantId ? { tenantId } : {}),
+    },
+    select: { groupId: true },
+  });
+  
+  // 3. Get group-based role assignments
+  const groupAssignments = await prisma.roleAssignment.findMany({
+    where: {
+      groupId: { in: groupMemberships.map(m => m.groupId) },
+      principalType: 'GROUP',
+      status: 'ACTIVE',
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+      ...(tenantId ? { tenantId } : {}),
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  
+  // 4. Get legacy UserRole assignments (for backward compatibility)
+  const legacyRoles = await prisma.userRole.findMany({
     where: { userId },
     include: {
       role: {
@@ -67,10 +136,19 @@ export async function getUserPermissions(userId: string): Promise<string[]> {
       },
     },
   });
-
-  const permissions = new Set<string>();
   
-  for (const userRole of userRoles) {
+  // 5. Combine all permissions
+  const allAssignments = [...directAssignments, ...groupAssignments];
+  
+  for (const assignment of allAssignments) {
+    for (const rolePermission of assignment.role.permissions) {
+      const permString = `${rolePermission.permission.resource}:${rolePermission.permission.action}`;
+      permissions.add(permString);
+    }
+  }
+  
+  // Add legacy role permissions
+  for (const userRole of legacyRoles) {
     for (const rolePermission of userRole.role.permissions) {
       const permString = `${rolePermission.permission.resource}:${rolePermission.permission.action}`;
       permissions.add(permString);
@@ -81,17 +159,139 @@ export async function getUserPermissions(userId: string): Promise<string[]> {
 }
 
 /**
- * Check if user has a specific permission
+ * Check if user has a specific permission with scope validation
  */
-export async function hasPermission(userId: string, resource: string, action: string): Promise<boolean> {
-  const permissions = await getUserPermissions(userId);
+export async function hasPermission(
+  userId: string,
+  tenantId: string,
+  resource: string,
+  action: string,
+  scopeType?: string,
+  scopeId?: string
+): Promise<boolean> {
   const permString = `${resource}:${action}`;
   
-  // Check for wildcard permissions
-  return permissions.includes(permString) || 
-         permissions.includes(`${resource}:*`) ||
-         permissions.includes(`*:${action}`) ||
-         permissions.includes('*:*');
+  // 1. Check direct user assignments (new RoleAssignment model)
+  const directAssignments = await prisma.roleAssignment.findMany({
+    where: {
+      tenantId,
+      userId,
+      principalType: 'USER',
+      status: 'ACTIVE',
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  
+  // 2. Check group-based assignments
+  const groupMemberships = await prisma.groupMembership.findMany({
+    where: {
+      tenantId,
+      userId,
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+    },
+    select: { groupId: true },
+  });
+  
+  const groupAssignments = await prisma.roleAssignment.findMany({
+    where: {
+      tenantId,
+      groupId: { in: groupMemberships.map(m => m.groupId) },
+      principalType: 'GROUP',
+      status: 'ACTIVE',
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  
+  // 3. Combine all assignments
+  const allAssignments = [...directAssignments, ...groupAssignments];
+  
+  // 4. Filter by scope if provided
+  let validAssignments = allAssignments;
+  if (scopeType && scopeId) {
+    validAssignments = allAssignments.filter(assignment => {
+      // Check if assignment scope is compatible with requested scope
+      return isScopeCompatible(assignment.scopeType, assignment.scopeId, scopeType, scopeId);
+    });
+  }
+  
+  // 5. Check for wildcard permissions
+  const hasWildcard = validAssignments.some(assignment =>
+    assignment.role.permissions.some(rp => {
+      const perm = rp.permission.name;
+      return perm === '*:*' || 
+             perm === `${resource}:*` || 
+             perm === `*:${action}` ||
+             perm === permString;
+    })
+  );
+  
+  if (hasWildcard) {
+    return true;
+  }
+  
+  // 6. Check for explicit permission
+  return validAssignments.some(assignment =>
+    assignment.role.permissions.some(rp => rp.permission.name === permString)
+  );
+}
+
+/**
+ * Check if assignment scope is compatible with requested scope
+ */
+function isScopeCompatible(
+  assignmentScopeType: string,
+  assignmentScopeId: string,
+  requestedScopeType: string,
+  requestedScopeId: string
+): boolean {
+  // Exact match
+  if (assignmentScopeType === requestedScopeType && assignmentScopeId === requestedScopeId) {
+    return true;
+  }
+  
+  // Tenant scope covers everything in tenant
+  if (assignmentScopeType === 'TENANT' && assignmentScopeId === requestedScopeId) {
+    return true;
+  }
+  
+  // TODO: Add hierarchical scope checking for ORGANIZATION and ORG_UNIT
+  // This will be implemented in Phase 2 when org hierarchy is added
+  
+  return false;
 }
 
 /**

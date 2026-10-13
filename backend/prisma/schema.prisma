@@ -36,6 +36,9 @@ model Tenant {
   apiConfig       ApiConfig?
   activities      Activity[]
   roles           Role[]
+  groups          Group[]
+  groupMemberships GroupMembership[]
+  roleAssignments RoleAssignment[]
   
   @@map("tenants")
   @@index([slug])
@@ -71,6 +74,8 @@ model User {
   // Relations
   tenant          Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   roles           UserRole[]
+  groupMemberships GroupMembership[]
+  roleAssignments RoleAssignment[]
   
   @@map("users")
   @@unique([tenantId, email])
@@ -319,6 +324,51 @@ model OAuthSession {
   @@index([expiresAt])
 }
 
+// Group model for managing collections of users
+model Group {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  description String?
+  groupType   String   @default("MANUAL") @map("group_type") // MANUAL, SYNCED, RULE_BASED
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members     GroupMembership[]
+  roleAssignments RoleAssignment[]
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([status])
+  @@map("groups")
+}
+
+// Group membership - links users to groups
+model GroupMembership {
+  id        String    @id @default(uuid())
+  tenantId  String    @map("tenant_id")
+  groupId   String    @map("group_id")
+  userId    String    @map("user_id")
+  validFrom DateTime  @default(now()) @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([tenantId, groupId, userId])
+  @@index([tenantId, userId])
+  @@index([groupId])
+  @@index([validFrom, validTo])
+  @@map("group_memberships")
+}
+
 // OTP codes for passwordless authentication
 model OtpCode {
   id          String    @id @default(uuid())
@@ -385,6 +435,7 @@ model Role {
   tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   permissions RolePermission[]
   users       UserRole[]
+  roleAssignments RoleAssignment[]
   
   @@unique([tenantId, name])
   @@map("roles")
@@ -405,7 +456,38 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-// User-Role mapping (many-to-many)
+// Role Assignment - enhanced with scope and principal type support
+model RoleAssignment {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  roleId        String    @map("role_id")
+  principalType String    @map("principal_type") // USER, GROUP
+  userId        String?   @map("user_id")
+  groupId       String?   @map("group_id")
+  scopeType     String    @default("TENANT") @map("scope_type") // TENANT, ORGANIZATION, ORG_UNIT, RESOURCE
+  scopeId       String    @map("scope_id")
+  validFrom     DateTime  @default(now()) @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role          Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group         Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  
+  // Indexes for efficient queries
+  @@index([tenantId, userId, status])
+  @@index([tenantId, groupId, status])
+  @@index([roleId])
+  @@index([scopeType, scopeId])
+  @@index([validFrom, validTo])
+  @@map("role_assignments")
+}
+
+// Legacy UserRole model - kept for backward compatibility during migration
 model UserRole {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")

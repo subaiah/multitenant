@@ -20,6 +20,7 @@ import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
 import { healthRoutes } from './routes/health.js';
 import { roleRoutes } from './routes/roles.js';
+import { groupRoutes } from './routes/groups.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
 
@@ -160,6 +161,9 @@ async function registerRoutes() {
 
     // Role management
     await protectedRoutes.register(roleRoutes, { prefix: '/roles' });
+
+    // Group management
+    await protectedRoutes.register(groupRoutes, { prefix: '/groups' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });
