@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma, pool } from '../src/lib/prisma.js';
 import { hashPassword } from '../src/utils/auth.js';
-
-const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting database seed...');
@@ -334,4 +332,5 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
+    await pool.end();
   });
