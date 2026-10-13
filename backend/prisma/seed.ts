@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { hashPassword } from '../src/utils/auth.js';
 
 const prisma = new PrismaClient();
 
@@ -58,12 +59,17 @@ async function main() {
   // Create users for each tenant
   const users = [];
   for (const tenant of tenants) {
+    // Hash passwords for test users
+    const adminPasswordHash = await hashPassword('admin123');
+    const userPasswordHash = await hashPassword('user123');
+
     const tenantUsers = await Promise.all([
       prisma.user.create({
         data: {
           tenantId: tenant.id,
           email: `admin@${tenant.slug}.com`,
           name: 'Admin User',
+          passwordHash: adminPasswordHash,
           role: 'ADMIN',
           status: 'ACTIVE',
         },
@@ -73,6 +79,7 @@ async function main() {
           tenantId: tenant.id,
           email: `user@${tenant.slug}.com`,
           name: 'Regular User',
+          passwordHash: userPasswordHash,
           role: 'USER',
           status: 'ACTIVE',
         },
@@ -154,6 +161,8 @@ async function main() {
           sessionTimeout: 60,
           passwordPolicy: 'STRONG',
           ssoOnly: false,
+          otpEnabled: true,
+          otpExpiry: 5, // 5 minutes
         },
       })
     )

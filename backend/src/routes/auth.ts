@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import crypto from 'crypto';
+import { generateOtp, verifyPassword, hashPassword, getOtpExpiration } from '../utils/auth.js';
+import { config } from '../config/env.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -463,6 +465,383 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         name: user.tenant.name,
       },
     };
+  });
+
+  // Request OTP for passwordless login
+  fastify.post('/otp/request', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Request OTP for passwordless login',
+      body: {
+        type: 'object',
+        required: ['email', 'tenantSlug'],
+        properties: {
+          email: { type: 'string', format: 'email' },
+          tenantSlug: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { email, tenantSlug } = request.body as { email: string; tenantSlug: string };
+
+    // Find tenant
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+      include: {
+        authConfig: true,
+      },
+    });
+
+    if (!tenant) {
+      throw new AppError('Tenant not found', 404);
+    }
+
+    if (tenant.status === 'SUSPENDED') {
+      throw new AppError('Tenant is suspended', 403);
+    }
+
+    // Check if OTP is enabled
+    if (!tenant.authConfig?.otpEnabled) {
+      throw new AppError('OTP authentication is not enabled for this tenant', 400);
+    }
+
+    // Check if user exists
+    const user = await prisma.user.findFirst({
+      where: {
+        tenantId: tenant.id,
+        email,
+      },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      // But for development, we can be more explicit
+      if (config.nodeEnv === 'development') {
+        throw new AppError('User not found', 404);
+      }
+      // In production, return success anyway to prevent email enumeration
+      return { message: 'If the email exists, an OTP has been sent' };
+    }
+
+    // Delete any existing OTPs for this email
+    await prisma.otpCode.deleteMany({
+      where: {
+        tenantId: tenant.id,
+        email,
+      },
+    });
+
+    // Generate OTP
+    const code = generateOtp();
+    const expiresAt = getOtpExpiration(tenant.authConfig.otpExpiry);
+
+    // Store OTP
+    await prisma.otpCode.create({
+       {
+        tenantId: tenant.id,
+        email,
+        code,
+        expiresAt,
+      },
+    });
+
+    // In development, return the OTP for testing
+    if (config.nodeEnv === 'development') {
+      return {
+        message: 'OTP generated successfully',
+        otp: code, // Only in development!
+        expiresAt,
+      };
+    }
+
+    // In production, send OTP via email/SMS
+    // TODO: Integrate with email service (SendGrid, AWS SES, etc.)
+    // await sendOtpEmail(email, code);
+
+    return {
+      message: 'OTP sent successfully',
+      expiresAt,
+    };
+  });
+
+  // Verify OTP and login
+  fastify.post('/otp/verify', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Verify OTP and login',
+      body: {
+        type: 'object',
+        required: ['email', 'tenantSlug', 'code'],
+        properties: {
+          email: { type: 'string', format: 'email' },
+          tenantSlug: { type: 'string' },
+          code: { type: 'string', minLength: 6, maxLength: 6 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { email, tenantSlug, code } = request.body as {
+      email: string;
+      tenantSlug: string;
+      code: string;
+    };
+
+    // Find tenant
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+    });
+
+    if (!tenant) {
+      throw new AppError('Tenant not found', 404);
+    }
+
+    // Find OTP
+    const otpRecord = await prisma.otpCode.findFirst({
+      where: {
+        tenantId: tenant.id,
+        email,
+        code,
+        verified: false,
+      },
+    });
+
+    if (!otpRecord) {
+      throw new AppError('Invalid OTP', 401);
+    }
+
+    // Check if OTP has expired
+    if (new Date() > otpRecord.expiresAt) {
+      await prisma.otpCode.delete({ where: { id: otpRecord.id } });
+      throw new AppError('OTP has expired', 401);
+    }
+
+    // Mark OTP as verified
+    await prisma.otpCode.update({
+      where: { id: otpRecord.id },
+       { verified: true },
+    });
+
+    // Find user
+    const user = await prisma.user.findFirst({
+      where: {
+        tenantId: tenant.id,
+        email,
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new AppError('User account is not active', 403);
+    }
+
+    if (user.tenant.status === 'SUSPENDED') {
+      throw new AppError('Tenant is suspended', 403);
+    }
+
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+       { lastLoginAt: new Date() },
+    });
+
+    // Generate JWT token
+    const token = fastify.jwt.sign({
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      provider: 'OTP',
+    });
+
+    // Log activity
+    await prisma.activity.create({
+       {
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'logged in via OTP',
+        target: 'system',
+        type: 'AUTH',
+      },
+    });
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      tenant: {
+        id: user.tenant.id,
+        name: user.tenant.name,
+      },
+    };
+  });
+
+  // Password-based login
+  fastify.post('/password-login', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Login with email and password',
+      body: {
+        type: 'object',
+        required: ['email', 'password', 'tenantSlug'],
+        properties: {
+          email: { type: 'string', format: 'email' },
+          password: { type: 'string' },
+          tenantSlug: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { email, password, tenantSlug } = request.body as {
+      email: string;
+      password: string;
+      tenantSlug: string;
+    };
+
+    // Find tenant
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+      include: {
+        authConfig: true,
+      },
+    });
+
+    if (!tenant) {
+      throw new AppError('Tenant not found', 404);
+    }
+
+    if (tenant.status === 'SUSPENDED') {
+      throw new AppError('Tenant is suspended', 403);
+    }
+
+    // Check if SSO only
+    if (tenant.authConfig?.ssoOnly) {
+      throw new AppError('This tenant requires SSO authentication', 403);
+    }
+
+    // Find user
+    const user = await prisma.user.findFirst({
+      where: {
+        tenantId: tenant.id,
+        email,
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
+    if (!user.passwordHash) {
+      throw new AppError('Password not set for this user. Please use SSO or set a password first.', 400);
+    }
+
+    // Verify password
+    const isValid = await verifyPassword(password, user.passwordHash);
+    if (!isValid) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new AppError('User account is not active', 403);
+    }
+
+    if (user.tenant.status === 'SUSPENDED') {
+      throw new AppError('Tenant is suspended', 403);
+    }
+
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+       { lastLoginAt: new Date() },
+    });
+
+    // Generate JWT token
+    const token = fastify.jwt.sign({
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      provider: 'PASSWORD',
+    });
+
+    // Log activity
+    await prisma.activity.create({
+       {
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'logged in with password',
+        target: 'system',
+        type: 'AUTH',
+      },
+    });
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      tenant: {
+        id: user.tenant.id,
+        name: user.tenant.name,
+      },
+    };
+  });
+
+  // Set password for user
+  fastify.post('/set-password', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Set password for user',
+      security: [{ bearerAuth: [] }],
+      body: {
+        type: 'object',
+        required: ['password'],
+        properties: {
+          password: { type: 'string', minLength: 8 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    await request.jwtVerify();
+
+    const { password } = request.body as { password: string };
+    const userId = (request.user as any).userId;
+
+    // Hash password
+    const passwordHash = await hashPassword(password);
+
+    // Update user
+    await prisma.user.update({
+      where: { id: userId },
+       { passwordHash },
+    });
+
+    return { message: 'Password set successfully' };
   });
 
   // Register (creates tenant and admin user)

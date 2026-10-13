@@ -60,6 +60,7 @@ model User {
   tenantId        String     @map("tenant_id")
   email           String
   name            String?
+  passwordHash    String?    @map("password_hash")
   role            UserRole   @default(USER)
   status          UserStatus @default(ACTIVE)
   lastLoginAt     DateTime?  @map("last_login_at")
@@ -170,6 +171,8 @@ model AuthConfig {
   sessionTimeout  Int            @default(60) @map("session_timeout")
   passwordPolicy  PasswordPolicy @default(STANDARD) @map("password_policy")
   ssoOnly         Boolean        @default(false) @map("sso_only")
+  otpEnabled      Boolean        @default(true) @map("otp_enabled")
+  otpExpiry       Int            @default(5) @map("otp_expiry")
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
   
@@ -307,4 +310,19 @@ model OAuthSession {
   @@map("oauth_sessions")
   @@index([state])
   @@index([expiresAt])
+}
+
+// OTP codes for passwordless authentication
+model OtpCode {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  email       String
+  code        String
+  expiresAt   DateTime  @map("expires_at")
+  verified    Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  @@index([tenantId, email, code])
+  @@index([expiresAt])
+  @@map("otp_codes")
 }

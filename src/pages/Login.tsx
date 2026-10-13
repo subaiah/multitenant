@@ -13,6 +13,7 @@ interface TenantInfo {
   status: string;
   authConfig?: {
     ssoOnly: boolean;
+    otpEnabled: boolean;
     providers: Array<{
       id: string;
       provider: string;
@@ -74,9 +75,11 @@ export default function Login() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password'>('provider-selection');
+  const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password' | 'otp'>('provider-selection');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Handle OAuth callback
@@ -159,12 +162,12 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/auth/login', {
+      const response = await fetch('http://localhost:4000/auth/password-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
           password,
         }),
       });
@@ -183,6 +186,82 @@ export default function Login() {
       navigate('/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
+      setSubmitting(false);
+    }
+  };
+
+  const handleRequestOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!tenant) return;
+
+    setSubmitting(true);
+    setError(null);
+    setDevOtp(null);
+
+    try {
+      const response = await fetch('http://localhost:4000/auth/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          tenantSlug: tenant.slug,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to request OTP');
+      }
+
+      const data = await response.json();
+      
+      // In development, show the OTP
+      if (data.otp) {
+        setDevOtp(data.otp);
+      }
+      
+      // Move to OTP input step
+      setLoginMode('otp');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to request OTP');
+      setSubmitting(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!tenant) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await fetch('http://localhost:4000/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          tenantSlug: tenant.slug,
+          code: otp,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'OTP verification failed');
+      }
+
+      const data = await response.json();
+      
+      // Store token and redirect
+      localStorage.setItem('authToken', data.token);
+      localStorage.setItem('tenantId', data.tenant.id);
+      
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'OTP verification failed');
       setSubmitting(false);
     }
   };
@@ -364,11 +443,44 @@ export default function Login() {
                   </>
                 ) : (
                   <>
-                    <span>Sign In</span>
+                    <span>Sign In with Password</span>
                     <ArrowRight size={16} />
                   </>
                 )}
               </button>
+
+              {/* OTP Option */}
+              {tenant?.authConfig?.otpEnabled && (
+                <div className="relative my-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200 dark:border-slate-700"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white dark:bg-slate-800 text-slate-500">or</span>
+                  </div>
+                </div>
+              )}
+
+              {tenant?.authConfig?.otpEnabled && (
+                <button
+                  type="button"
+                  onClick={handleRequestOtp}
+                  disabled={submitting || !email}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-600"></div>
+                      <span>Requesting OTP...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In with OTP</span>
+                      <ArrowRight size={16} />
+                    </>
+                  )}
+                </button>
+              )}
 
               {hasProviders && loginMode === 'email-password' && (
                 <button
@@ -379,6 +491,84 @@ export default function Login() {
                   ← Back to sign-in options
                 </button>
               )}
+            </form>
+          )}
+
+          {/* OTP Login */}
+          {loginMode === 'otp' && (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              {/* Development OTP Display */}
+              {devOtp && (
+                <div className="p-4 bg-green-50 dark:bg-green-500/10 border-2 border-green-300 dark:border-green-500/50 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 size={20} className="text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-green-800 dark:text-green-300 mb-2">
+                        Development Mode - Your OTP:
+                      </p>
+                      <div className="bg-white dark:bg-slate-900 px-4 py-3 rounded-lg border-2 border-dashed border-green-400 dark:border-green-500">
+                        <p className="text-3xl font-mono font-bold text-center text-green-700 dark:text-green-400 tracking-widest">
+                          {devOtp}
+                        </p>
+                      </div>
+                      <p className="text-xs text-green-700 dark:text-green-400 mt-2">
+                        This OTP is shown for development purposes only
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
+                  Enter OTP Code
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    required
+                    maxLength={6}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 text-center text-2xl font-mono tracking-widest"
+                    placeholder="000000"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                  Enter the 6-digit code sent to {email}
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting || otp.length !== 6}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
+                style={{ backgroundColor: primaryColor }}
+              >
+                {submitting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verify & Sign In</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginMode('email-password');
+                  setOtp('');
+                  setDevOtp(null);
+                }}
+                className="w-full text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+              >
+                ← Back to email/password
+              </button>
             </form>
           )}
 
