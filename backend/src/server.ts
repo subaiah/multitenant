@@ -17,6 +17,7 @@ import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
 import { healthRoutes } from './routes/health.js';
+import { roleRoutes } from './routes/roles.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
 
@@ -141,6 +142,9 @@ async function registerRoutes() {
 
     // API configuration
     await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
+
+    // Role management
+    await protectedRoutes.register(roleRoutes, { prefix: '/roles' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });

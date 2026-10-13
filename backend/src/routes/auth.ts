@@ -343,7 +343,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const token = fastify.jwt.sign({
       userId: user.id,
       tenantId: tenant.id,
-      role: user.role,
+      userType: user.userType,
       provider: authProvider.provider,
     });
 
@@ -437,7 +437,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const token = fastify.jwt.sign({
       userId: user.id,
       tenantId: user.tenantId,
-      role: user.role,
+      userType: user.userType,
       provider: 'PASSWORD',
     });
 
@@ -893,8 +893,62 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
           tenantId: tenant.id,
           email,
           name,
-          role: 'ADMIN',
+          userType: 'TENANT_ADMIN',
           status: 'ACTIVE',
+        },
+      });
+
+      // Create default roles for tenant
+      const tenantAdminRole = await tx.role.create({
+         {
+          tenantId: tenant.id,
+          name: 'Tenant Admin',
+          description: 'Full access to tenant resources',
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+         {
+          tenantId: tenant.id,
+          name: 'Tenant Manager',
+          description: 'Can manage applications and users',
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+         {
+          tenantId: tenant.id,
+          name: 'Developer',
+          description: 'Can manage applications',
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+         {
+          tenantId: tenant.id,
+          name: 'User',
+          description: 'Can view and use applications',
+          isSystem: true,
+        },
+      });
+
+      await tx.role.create({
+         {
+          tenantId: tenant.id,
+          name: 'Viewer',
+          description: 'Read-only access',
+          isSystem: true,
+        },
+      });
+
+      // Assign Tenant Admin role to the admin user
+      await tx.userRole.create({
+         {
+          userId: user.id,
+          roleId: tenantAdminRole.id,
         },
       });
 
@@ -942,7 +996,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const token = fastify.jwt.sign({
       userId: result.user.id,
       tenantId: result.tenant.id,
-      role: result.user.role,
+      userType: result.user.userType,
       provider: 'PASSWORD',
     });
 

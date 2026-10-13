@@ -35,6 +35,7 @@ model Tenant {
   authConfig      AuthConfig?
   apiConfig       ApiConfig?
   activities      Activity[]
+  roles           Role[]
   
   @@map("tenants")
   @@index([slug])
@@ -57,29 +58,35 @@ enum TenantStatus {
 // User model - users belong to a tenant
 model User {
   id              String     @id @default(uuid())
-  tenantId        String     @map("tenant_id")
+  tenantId        String?    @map("tenant_id") // Nullable for platform users
   email           String
   name            String?
   passwordHash    String?    @map("password_hash")
-  role            UserRole   @default(USER)
+  userType        UserType   @default(TENANT_USER) @map("user_type")
   status          UserStatus @default(ACTIVE)
   lastLoginAt     DateTime?  @map("last_login_at")
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
   
   // Relations
-  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roles           UserRole[]
   
   @@map("users")
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([email])
+  @@index([userType])
 }
 
-enum UserRole {
-  ADMIN
-  MANAGER
-  USER
+enum UserType {
+  PLATFORM_ADMIN
+  PLATFORM_USER
+  TENANT_ADMIN
+  TENANT_MANAGER
+  TENANT_USER
+  TENANT_DEVELOPER
+  TENANT_VIEWER
 }
 
 enum UserStatus {
@@ -325,4 +332,68 @@ model OtpCode {
   @@index([tenantId, email, code])
   @@index([expiresAt])
   @@map("otp_codes")
+}
+
+// Permission model - defines granular permissions
+model Permission {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  resource    String    // e.g., "tenants", "applications", "users"
+  action      String    // e.g., "create", "read", "update", "delete"
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  roles       RolePermission[]
+  
+  @@map("permissions")
+  @@index([resource, action])
+}
+
+// Role model - custom roles per tenant
+model Role {
+  id          String    @id @default(uuid())
+  tenantId    String?   @map("tenant_id") // Null for platform roles
+  name        String
+  description String?
+  isSystem    Boolean   @default(false) @map("is_system") // System roles can't be deleted
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       UserRole[]
+  
+  @@unique([tenantId, name])
+  @@map("roles")
+  @@index([tenantId])
+}
+
+// Role-Permission mapping (many-to-many)
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// User-Role mapping (many-to-many)
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, roleId])
+  @@map("user_roles")
 }
