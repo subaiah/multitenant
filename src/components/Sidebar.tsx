@@ -69,7 +69,8 @@ const navItems: NavItem[] = [
     path: '/users',
     children: [
       { id: 'users-all', label: 'All Users', path: '/users' },
-      { id: 'users-roles', label: 'Roles & Permissions', path: '/users?tab=roles' },
+      { id: 'users-groups', label: 'Groups', path: '/groups' },
+      { id: 'users-roles', label: 'Role Assignments', path: '/role-assignments' },
     ],
   },
   { id: 'security', label: 'Security', icon: Shield, path: '/security' },

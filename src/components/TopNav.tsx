@@ -56,7 +56,17 @@ const navItems: NavItem[] = [
   { id: 'data-isolation', label: 'Data Isolation', icon: Database, path: '/data-isolation' },
   { id: 'authentication', label: 'Authentication', icon: Key, path: '/authentication' },
   { id: 'api', label: 'API & BFF', icon: Code, path: '/api' },
-  { id: 'users', label: 'Users', icon: Users, path: '/users' },
+  {
+    id: 'users',
+    label: 'Users',
+    icon: Users,
+    path: '/users',
+    children: [
+      { id: 'users-all', label: 'All Users', path: '/users' },
+      { id: 'users-groups', label: 'Groups', path: '/groups' },
+      { id: 'users-roles', label: 'Role Assignments', path: '/role-assignments' },
+    ],
+  },
   { id: 'security', label: 'Security', icon: Shield, path: '/security' },
   { id: 'billing', label: 'Billing', icon: CreditCard, path: '/billing' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3, path: '/analytics' },

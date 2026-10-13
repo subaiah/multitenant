@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { User, Mail, Building2, Shield, Calendar, Save, Loader2 } from 'lucide-react';
-import { getCurrentUser, apiPatch } from '../lib/api-client';
+import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase } from 'lucide-react';
+import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
 
 interface UserInfo {
   id: string;
@@ -15,9 +15,31 @@ interface TenantInfo {
   slug: string;
 }
 
+interface GroupMembership {
+  id: string;
+  name: string;
+  description?: string;
+  validFrom: string;
+  validTo?: string;
+}
+
+interface RoleAssignment {
+  id: string;
+  roleId: string;
+  roleName: string;
+  roleDescription?: string;
+  scopeType: string;
+  scopeId: string;
+  validFrom: string;
+  validTo?: string;
+  permissions: string[];
+}
+
 export default function Profile() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
+  const [groups, setGroups] = useState<GroupMembership[]>([]);
+  const [roleAssignments, setRoleAssignments] = useState<RoleAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
@@ -30,6 +52,11 @@ export default function Profile() {
         setUser(data.user);
         setTenant(data.tenant);
         setName(data.user.name || '');
+
+        // Fetch user's groups and role assignments
+        const userRolesData = await apiGet(`/roles/user/${data.user.id}`);
+        setGroups(userRolesData.groups || []);
+        setRoleAssignments(userRolesData.roleAssignments || []);
       } catch (error) {
         console.error('Failed to fetch user:', error);
       } finally {
@@ -204,6 +231,122 @@ export default function Profile() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Group Memberships */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <Users size={20} className="text-blue-500" />
+              Group Memberships
+            </h3>
+            {groups.length > 0 ? (
+              <div className="space-y-3">
+                {groups.map((group) => (
+                  <div
+                    key={group.id}
+                    className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-medium text-slate-800 dark:text-white">{group.name}</p>
+                        {group.description && (
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                            {group.description}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                          <Calendar size={12} />
+                          <span>From {new Date(group.validFrom).toLocaleDateString()}</span>
+                          {group.validTo && (
+                            <>
+                              <span>•</span>
+                              <span>Until {new Date(group.validTo).toLocaleDateString()}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                You are not a member of any groups.
+              </p>
+            )}
+          </div>
+
+          {/* Role Assignments */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <Briefcase size={20} className="text-blue-500" />
+              Role Assignments
+            </h3>
+            {roleAssignments.length > 0 ? (
+              <div className="space-y-3">
+                {roleAssignments.map((assignment) => (
+                  <div
+                    key={assignment.id}
+                    className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-medium text-slate-800 dark:text-white">
+                          {assignment.roleName}
+                        </p>
+                        {assignment.roleDescription && (
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                            {assignment.roleDescription}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-4 mt-2">
+                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <Shield size={12} />
+                            <span>Scope: {assignment.scopeType}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <Calendar size={12} />
+                            <span>From {new Date(assignment.validFrom).toLocaleDateString()}</span>
+                            {assignment.validTo && (
+                              <>
+                                <span>•</span>
+                                <span>Until {new Date(assignment.validTo).toLocaleDateString()}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {assignment.permissions && assignment.permissions.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                              Permissions:
+                            </p>
+                            <div className="flex flex-wrap gap-1">
+                              {assignment.permissions.slice(0, 5).map((perm, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded"
+                                >
+                                  {perm}
+                                </span>
+                              ))}
+                              {assignment.permissions.length > 5 && (
+                                <span className="px-2 py-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                  +{assignment.permissions.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                You have no role assignments.
+              </p>
+            )}
           </div>
 
           {/* Save button */}

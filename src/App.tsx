@@ -12,6 +12,8 @@ import Authentication from './pages/Authentication';
 import ApiManagement from './pages/ApiManagement';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
+import Groups from './pages/Groups';
+import RoleAssignments from './pages/RoleAssignments';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -60,6 +62,8 @@ export default function App() {
             <Route path="/authentication" element={<Authentication />} />
             <Route path="/api" element={<ApiManagement />} />
             <Route path="/users" element={<PlaceholderPage title="User Management" description="Manage users, roles, and permissions across all tenants" />} />
+            <Route path="/groups" element={<Groups />} />
+            <Route path="/role-assignments" element={<RoleAssignments />} />
             <Route path="/security" element={<PlaceholderPage title="Security" description="Configure security policies, audit logs, and compliance settings" />} />
             <Route path="/billing" element={<PlaceholderPage title="Billing" description="Manage subscriptions, invoices, and payment processing" />} />
             <Route path="/analytics" element={<PlaceholderPage title="Analytics" description="View detailed analytics and reports across all tenants" />} />
