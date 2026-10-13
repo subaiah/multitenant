@@ -27,6 +27,11 @@
   ],
   "author": "",
   "license": "MIT",
+  "allowScripts": {
+    "prisma": true,
+    "@prisma/engines": true,
+    "esbuild": true
+  },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.2",
