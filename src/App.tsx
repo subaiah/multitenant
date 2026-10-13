@@ -11,6 +11,7 @@ import DataIsolation from './pages/DataIsolation';
 import Authentication from './pages/Authentication';
 import ApiManagement from './pages/ApiManagement';
 import Login from './pages/Login';
+import Profile from './pages/Profile';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -50,6 +51,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/profile" element={<Profile />} />
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/activity" element={<ActivityLog />} />
