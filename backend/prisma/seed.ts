@@ -13,6 +13,9 @@ async function main() {
         slug: 'acme-corp',
         plan: 'ENTERPRISE',
         status: 'ACTIVE',
+        primaryColor: '#3b82f6',
+        loginTitle: 'Welcome to Acme Corporation',
+        loginSubtitle: 'Sign in with your corporate account',
       },
     }),
     prisma.tenant.create({
@@ -21,6 +24,9 @@ async function main() {
         slug: 'techstart',
         plan: 'PROFESSIONAL',
         status: 'ACTIVE',
+        primaryColor: '#10b981',
+        loginTitle: 'TechStart Portal',
+        loginSubtitle: 'Access your workspace',
       },
     }),
     prisma.tenant.create({
@@ -29,6 +35,9 @@ async function main() {
         slug: 'global-media',
         plan: 'PROFESSIONAL',
         status: 'ACTIVE',
+        primaryColor: '#8b5cf6',
+        loginTitle: 'Global Media Login',
+        loginSubtitle: 'Continue with your organization credentials',
       },
     }),
     prisma.tenant.create({
@@ -37,6 +46,9 @@ async function main() {
         slug: 'startup-labs',
         plan: 'STARTER',
         status: 'TRIAL',
+        primaryColor: '#f59e0b',
+        loginTitle: 'Startup Labs',
+        loginSubtitle: 'Sign in to your trial account',
       },
     }),
   ]);
@@ -149,8 +161,9 @@ async function main() {
 
   console.log(`✅ Created ${authConfigs.length} auth configurations`);
 
-  // Create auth providers
+  // Create auth providers - multiple providers per tenant
   const authProviders = await Promise.all([
+    // Acme Corporation - Entra ID + Google (multiple providers)
     prisma.authProvider.create({
       data: {
         authConfigId: authConfigs[0].id,
@@ -160,16 +173,78 @@ async function main() {
         tenantId: 'acme.onmicrosoft.com',
         scopes: ['openid', 'profile', 'email'],
         autoProvision: true,
+        authorizeUrl: 'https://login.microsoftonline.com/acme.onmicrosoft.com/oauth2/v2.0/authorize',
+        tokenUrl: 'https://login.microsoftonline.com/acme.onmicrosoft.com/oauth2/v2.0/token',
+        userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
       },
     }),
+    prisma.authProvider.create({
+      data: {
+        authConfigId: authConfigs[0].id,
+        provider: 'GOOGLE',
+        enabled: true,
+        clientId: '123456789-acme.apps.googleusercontent.com',
+        scopes: ['openid', 'profile', 'email'],
+        autoProvision: false,
+        authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+        tokenUrl: 'https://oauth2.googleapis.com/token',
+        userInfoUrl: 'https://www.googleapis.com/oauth2/v3/userinfo',
+      },
+    }),
+    // TechStart - Google only
     prisma.authProvider.create({
       data: {
         authConfigId: authConfigs[1].id,
         provider: 'GOOGLE',
         enabled: true,
-        clientId: '123456789-abcdef.apps.googleusercontent.com',
+        clientId: '987654321-techstart.apps.googleusercontent.com',
+        scopes: ['openid', 'profile', 'email'],
+        autoProvision: true,
+        authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+        tokenUrl: 'https://oauth2.googleapis.com/token',
+        userInfoUrl: 'https://www.googleapis.com/oauth2/v3/userinfo',
+      },
+    }),
+    // Global Media - Entra ID + GitHub (multiple providers)
+    prisma.authProvider.create({
+      data: {
+        authConfigId: authConfigs[2].id,
+        provider: 'ENTRA',
+        enabled: true,
+        clientId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+        tenantId: 'globalmedia.onmicrosoft.com',
+        scopes: ['openid', 'profile', 'email'],
+        autoProvision: true,
+        authorizeUrl: 'https://login.microsoftonline.com/globalmedia.onmicrosoft.com/oauth2/v2.0/authorize',
+        tokenUrl: 'https://login.microsoftonline.com/globalmedia.onmicrosoft.com/oauth2/v2.0/token',
+        userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
+      },
+    }),
+    prisma.authProvider.create({
+      data: {
+        authConfigId: authConfigs[2].id,
+        provider: 'GITHUB',
+        enabled: true,
+        clientId: 'Iv1.abc123def456',
+        scopes: ['read:user', 'user:email'],
+        autoProvision: false,
+        authorizeUrl: 'https://github.com/login/oauth/authorize',
+        tokenUrl: 'https://github.com/login/oauth/access_token',
+        userInfoUrl: 'https://api.github.com/user',
+      },
+    }),
+    // Startup Labs - Google only (simple setup)
+    prisma.authProvider.create({
+      data: {
+        authConfigId: authConfigs[3].id,
+        provider: 'GOOGLE',
+        enabled: true,
+        clientId: '555666777-startuplabs.apps.googleusercontent.com',
         scopes: ['openid', 'profile', 'email'],
         autoProvision: false,
+        authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+        tokenUrl: 'https://oauth2.googleapis.com/token',
+        userInfoUrl: 'https://www.googleapis.com/oauth2/v3/userinfo',
       },
     }),
   ]);

@@ -10,6 +10,7 @@ import Infrastructure from './pages/Infrastructure';
 import DataIsolation from './pages/DataIsolation';
 import Authentication from './pages/Authentication';
 import ApiManagement from './pages/ApiManagement';
+import Login from './pages/Login';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -40,8 +41,15 @@ export default function App() {
     <LayoutProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public routes (no layout) */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/:tenantSlug/login" element={<Login />} />
+          <Route path="/register" element={<PlaceholderPage title="Register" description="Create a new tenant account" />} />
+          
+          {/* Protected routes (with layout) */}
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/applications" element={<Applications />} />
             <Route path="/activity" element={<ActivityLog />} />

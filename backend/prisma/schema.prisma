@@ -17,6 +17,14 @@ model Tenant {
   slug            String    @unique
   plan            TenantPlan
   status          TenantStatus
+  
+  // Branding
+  logoUrl         String?
+  primaryColor    String?   @default("#3b82f6")
+  customDomain    String?   @unique
+  loginTitle      String?
+  loginSubtitle   String?
+  
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   
@@ -178,10 +186,17 @@ model AuthProvider {
   provider        AuthProviderType
   enabled         Boolean       @default(false)
   clientId        String?
+  clientSecret    String?       // Encrypted in production
   tenantId        String?       // For Entra ID
   domain          String?       // For Okta, Auth0, Custom OIDC
   scopes          String[]      // Array of OAuth scopes
   autoProvision   Boolean       @default(false)
+  
+  // OAuth configuration
+  authorizeUrl    String?       // Authorization endpoint
+  tokenUrl        String?       // Token endpoint
+  userInfoUrl     String?       // User info endpoint
+  
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   
@@ -266,4 +281,18 @@ enum ActivityType {
   ALERT
   AUTH
   API
+}
+
+// OAuth session state for secure OAuth flow
+model OAuthSession {
+  id            String    @id @default(uuid())
+  state         String    @unique  // CSRF protection state
+  providerId    String
+  tenantId      String
+  redirectUri   String
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  
+  @@index([state])
+  @@index([expiresAt])
 }
