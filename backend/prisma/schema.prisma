@@ -1,0 +1,269 @@
+// Prisma schema for multi-tenant application management
+// Supports three isolation strategies: Database per Tenant, Schema per Tenant, Shared Tables
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Tenant model - represents each customer/organization
+model Tenant {
+  id              String    @id @default(uuid())
+  name            String
+  slug            String    @unique
+  plan            TenantPlan
+  status          TenantStatus
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  users           User[]
+  applications    Application[]
+  databaseConfig  DatabaseConfig?
+  authConfig      AuthConfig?
+  apiConfig       ApiConfig?
+  activities      Activity[]
+  
+  @@index([slug])
+  @@index([status])
+}
+
+enum TenantPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+// User model - users belong to a tenant
+model User {
+  id              String    @id @default(uuid())
+  tenantId        String
+  email           String
+  name            String?
+  role            UserRole  @default(USER)
+  status          UserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+// Application model - applications belong to a tenant
+model Application {
+  id              String          @id @default(uuid())
+  tenantId        String
+  name            String
+  description     String?
+  status          ApplicationStatus
+  version         String
+  environment     Environment
+  url             String
+  cpu             Int             @default(0)
+  memory          Int             @default(0)
+  requests        Int             @default(0)
+  lastDeployedAt  DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  // Relations
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([environment])
+}
+
+enum ApplicationStatus {
+  RUNNING
+  STOPPED
+  DEPLOYING
+  ERROR
+}
+
+enum Environment {
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+}
+
+// Database configuration per tenant
+model DatabaseConfig {
+  id                String            @id @default(uuid())
+  tenantId          String            @unique
+  strategy          DatabaseStrategy
+  provider          DatabaseProvider
+  region            String
+  backupEnabled     Boolean           @default(false)
+  encryptionAtRest  Boolean           @default(false)
+  maxConnections    Int               @default(100)
+  storageLimit      String
+  connectionString  String?           // For database-per-tenant
+  schemaName        String?           // For schema-per-tenant
+  tenantColumn      String?           // For shared-tables
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  // Relations
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+enum DatabaseStrategy {
+  DATABASE_PER_TENANT
+  SCHEMA_PER_TENANT
+  SHARED_TABLES
+}
+
+enum DatabaseProvider {
+  POSTGRESQL
+  MYSQL
+  MONGODB
+  SQLSERVER
+}
+
+// Authentication configuration per tenant
+model AuthConfig {
+  id              String        @id @default(uuid())
+  tenantId        String        @unique
+  mfaEnabled      Boolean       @default(false)
+  sessionTimeout  Int           @default(60) // minutes
+  passwordPolicy  PasswordPolicy @default(STANDARD)
+  ssoOnly         Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  providers       AuthProvider[]
+}
+
+enum PasswordPolicy {
+  STANDARD
+  STRONG
+  VERY_STRONG
+}
+
+// Authentication providers per tenant
+model AuthProvider {
+  id              String        @id @default(uuid())
+  authConfigId    String
+  provider        AuthProviderType
+  enabled         Boolean       @default(false)
+  clientId        String?
+  tenantId        String?       // For Entra ID
+  domain          String?       // For Okta, Auth0, Custom OIDC
+  scopes          String[]      // Array of OAuth scopes
+  autoProvision   Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  authConfig      AuthConfig    @relation(fields: [authConfigId], references: [id], onDelete: Cascade)
+  
+  @@index([authConfigId])
+}
+
+enum AuthProviderType {
+  ENTRA
+  GOOGLE
+  GITHUB
+  OKTA
+  AUTH0
+  CUSTOM_OIDC
+}
+
+// API configuration per tenant
+model ApiConfig {
+  id              String        @id @default(uuid())
+  tenantId        String        @unique
+  bffEnabled      Boolean       @default(false)
+  bffUrl          String?
+  apiGateway      ApiGateway
+  rateLimit       Int           @default(5000) // requests per hour
+  corsEnabled     Boolean       @default(true)
+  allowedOrigins  String[]      // Array of allowed origins
+  authType        ApiAuthType   @default(JWT)
+  versioning      ApiVersioning @default(URL)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+enum ApiGateway {
+  KONG
+  APIGEE
+  AWS_APIGATEWAY
+  AZURE_APIM
+  CUSTOM
+}
+
+enum ApiAuthType {
+  JWT
+  OAUTH2
+  API_KEY
+}
+
+enum ApiVersioning {
+  URL
+  HEADER
+  QUERY
+}
+
+// Activity log for audit trail
+model Activity {
+  id          String        @id @default(uuid())
+  tenantId    String
+  userId      String?
+  action      String
+  target      String
+  type        ActivityType
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  
+  // Relations
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+enum ActivityType {
+  DEPLOY
+  CONFIG
+  USER
+  BILLING
+  ALERT
+  AUTH
+  API
+}
