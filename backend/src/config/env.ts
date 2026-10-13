@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { z } from 'zod';
 
 // Environment variable schema
@@ -7,7 +8,7 @@ const envSchema = z.object({
 
   // Server
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().transform(Number).default('3000'),
+  PORT: z.string().default('3000').transform(Number),
   HOST: z.string().default('0.0.0.0'),
 
   // JWT
@@ -18,8 +19,8 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
   // Rate Limiting
-  RATE_LIMIT_MAX: z.string().transform(Number).default('1000'),
-  RATE_LIMIT_TIME_WINDOW: z.string().transform(Number).default('60000'),
+  RATE_LIMIT_MAX: z.string().default('1000').transform(Number),
+  RATE_LIMIT_TIME_WINDOW: z.string().default('60000').transform(Number),
 
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),

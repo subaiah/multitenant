@@ -1,12 +1,8 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import 'dotenv/config';
 import { defineConfig, env } from 'prisma/config';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 export default defineConfig({
-  schema: path.join(__dirname, 'prisma', 'schema.prisma'),
+  schema: './prisma/schema.prisma',
   datasource: {
     url: env('DATABASE_URL'),
   },
