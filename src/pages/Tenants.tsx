@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   Search,
   Filter,
@@ -11,15 +12,35 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  X,
 } from 'lucide-react';
 import { tenants, type Tenant } from '../data/mockData';
 
 export default function Tenants() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [planFilter, setPlanFilter] = useState<string>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Read filter state from URL
+  const searchQuery = searchParams.get('search') || '';
+  const statusFilter = searchParams.get('status') || 'all';
+  const planFilter = searchParams.get('plan') || 'all';
+  const page = parseInt(searchParams.get('page') || '1', 10);
+
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
+
+  // Update URL params
+  const updateFilter = (key: string, value: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (value === 'all' || value === '') {
+      newParams.delete(key);
+    } else {
+      newParams.set(key, value);
+    }
+    // Reset page when filters change
+    if (key !== 'page') {
+      newParams.set('page', '1');
+    }
+    setSearchParams(newParams);
+  };
 
   const filteredTenants = tenants.filter((tenant) => {
     const matchesSearch =
@@ -35,6 +56,12 @@ export default function Tenants() {
     active: tenants.filter((t) => t.status === 'active').length,
     trial: tenants.filter((t) => t.status === 'trial').length,
     suspended: tenants.filter((t) => t.status === 'suspended').length,
+  };
+
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || planFilter !== 'all';
+
+  const clearAllFilters = () => {
+    setSearchParams({});
   };
 
   return (
@@ -58,7 +85,7 @@ export default function Tenants() {
         {Object.entries(statusCounts).map(([status, count]) => (
           <button
             key={status}
-            onClick={() => setStatusFilter(status)}
+            onClick={() => updateFilter('status', status)}
             className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
               statusFilter === status
                 ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400'
@@ -74,20 +101,20 @@ export default function Tenants() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             placeholder="Search tenants..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => updateFilter('search', e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 placeholder-slate-400"
           />
         </div>
         <select
           value={planFilter}
-          onChange={(e) => setPlanFilter(e.target.value)}
+          onChange={(e) => updateFilter('plan', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Plans</option>
@@ -100,6 +127,50 @@ export default function Tenants() {
           <Filter size={16} />
           More Filters
         </button>
+
+        {/* Active filters indicator */}
+        {hasActiveFilters && (
+          <button
+            onClick={clearAllFilters}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+          >
+            <X size={12} />
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Active filter chips */}
+      {(statusFilter !== 'all' || planFilter !== 'all') && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-500 dark:text-slate-400">Active filters:</span>
+          {statusFilter !== 'all' && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded-full">
+              Status: {statusFilter}
+              <button onClick={() => updateFilter('status', 'all')} className="hover:text-blue-900">
+                <X size={10} />
+              </button>
+            </span>
+          )}
+          {planFilter !== 'all' && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-400 rounded-full">
+              Plan: {planFilter}
+              <button onClick={() => updateFilter('plan', 'all')} className="hover:text-purple-900">
+                <X size={10} />
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* URL indicator */}
+      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+          <span className="text-slate-400">URL:</span>{' '}
+          <span className="text-blue-600 dark:text-blue-400">
+            /tenants{searchParams.toString() ? `?${searchParams.toString()}` : ''}
+          </span>
+        </p>
       </div>
 
       {/* Tenant Cards Grid */}
@@ -189,6 +260,19 @@ export default function Tenants() {
         ))}
       </div>
 
+      {filteredTenants.length === 0 && (
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
+          <Building2 size={40} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">No tenants match your filters</p>
+          <button
+            onClick={clearAllFilters}
+            className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            Clear all filters
+          </button>
+        </div>
+      )}
+
       {/* Pagination */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -197,21 +281,18 @@ export default function Tenants() {
         </p>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
+            onClick={() => updateFilter('page', String(Math.max(1, page - 1)))}
+            disabled={page === 1}
             className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronLeft size={16} />
           </button>
           <button className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg">
-            1
-          </button>
-          <button className="px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-            2
+            {page}
           </button>
           <button
-            onClick={() => setCurrentPage(currentPage + 1)}
-            disabled={currentPage >= 2}
+            onClick={() => updateFilter('page', String(page + 1))}
+            disabled={filteredTenants.length <= 10}
             className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronRight size={16} />
@@ -246,7 +327,6 @@ export default function Tenants() {
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-center">
                   <Users size={20} className="mx-auto text-blue-500 mb-2" />
@@ -270,7 +350,6 @@ export default function Tenants() {
                 </div>
               </div>
 
-              {/* Details */}
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-slate-800 dark:text-white">Details</h4>
                 <div className="grid grid-cols-2 gap-4">
@@ -293,14 +372,16 @@ export default function Tenants() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
                 <button className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
                   Manage Tenant
                 </button>
-                <button className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors">
+                <Link
+                  to={`/applications?tenant=${selectedTenant.id}`}
+                  className="flex-1 text-center px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                >
                   View Applications
-                </button>
+                </Link>
                 <button className="px-4 py-2.5 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors">
                   Suspend
                 </button>

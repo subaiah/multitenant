@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { LayoutProvider } from './context/LayoutContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Tenants from './pages/Tenants';
@@ -32,46 +33,25 @@ function PlaceholderPage({ title, description }: { title: string; description: s
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard');
-
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'tenants':
-      case 'tenants-list':
-      case 'tenants-active':
-      case 'tenants-suspended':
-        return <Tenants />;
-      case 'applications':
-      case 'apps-all':
-      case 'apps-running':
-      case 'apps-stopped':
-        return <Applications />;
-      case 'activity':
-        return <ActivityLog />;
-      case 'settings':
-        return <SettingsPage />;
-      case 'infrastructure':
-        return <Infrastructure />;
-      case 'users':
-      case 'users-all':
-      case 'users-roles':
-        return <PlaceholderPage title="User Management" description="Manage users, roles, and permissions across all tenants" />;
-      case 'security':
-        return <PlaceholderPage title="Security" description="Configure security policies, audit logs, and compliance settings" />;
-      case 'billing':
-        return <PlaceholderPage title="Billing" description="Manage subscriptions, invoices, and payment processing" />;
-      case 'analytics':
-        return <PlaceholderPage title="Analytics" description="View detailed analytics and reports across all tenants" />;
-      default:
-        return <Dashboard />;
-    }
-  };
-
   return (
-    <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
-      {renderPage()}
-    </Layout>
+    <LayoutProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/tenants" element={<Tenants />} />
+            <Route path="/applications" element={<Applications />} />
+            <Route path="/activity" element={<ActivityLog />} />
+            <Route path="/infrastructure" element={<Infrastructure />} />
+            <Route path="/users" element={<PlaceholderPage title="User Management" description="Manage users, roles, and permissions across all tenants" />} />
+            <Route path="/security" element={<PlaceholderPage title="Security" description="Configure security policies, audit logs, and compliance settings" />} />
+            <Route path="/billing" element={<PlaceholderPage title="Billing" description="Manage subscriptions, invoices, and payment processing" />} />
+            <Route path="/analytics" element={<PlaceholderPage title="Analytics" description="View detailed analytics and reports across all tenants" />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Dashboard />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </LayoutProvider>
   );
 }

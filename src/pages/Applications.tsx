@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -14,16 +15,30 @@ import {
   Clock,
   Globe,
   Server,
+  X,
 } from 'lucide-react';
 import { applications, tenants, type Application } from '../data/mockData';
 
 export default function Applications() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [envFilter, setEnvFilter] = useState<string>('all');
-  const [tenantFilter, setTenantFilter] = useState<string>('all');
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+
+  // Read filter state from URL
+  const searchQuery = searchParams.get('search') || '';
+  const statusFilter = searchParams.get('status') || 'all';
+  const envFilter = searchParams.get('env') || 'all';
+  const tenantFilter = searchParams.get('tenant') || 'all';
+
+  const updateFilter = (key: string, value: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (value === 'all' || value === '') {
+      newParams.delete(key);
+    } else {
+      newParams.set(key, value);
+    }
+    setSearchParams(newParams);
+  };
 
   const filteredApps = applications.filter((app) => {
     const matchesSearch =
@@ -52,6 +67,12 @@ export default function Applications() {
     development: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400',
   };
 
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || envFilter !== 'all' || tenantFilter !== 'all';
+
+  const clearAllFilters = () => {
+    setSearchParams({});
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -70,58 +91,43 @@ export default function Applications() {
 
       {/* Status Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-green-100 dark:bg-green-500/20">
-              <Play size={16} className="text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-slate-800 dark:text-white">
-                {applications.filter((a) => a.status === 'running').length}
-              </p>
-              <p className="text-xs text-slate-500">Running</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-500/20">
-              <RotateCw size={16} className="text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-slate-800 dark:text-white">
-                {applications.filter((a) => a.status === 'deploying').length}
-              </p>
-              <p className="text-xs text-slate-500">Deploying</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-600">
-              <Pause size={16} className="text-slate-600 dark:text-slate-300" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-slate-800 dark:text-white">
-                {applications.filter((a) => a.status === 'stopped').length}
-              </p>
-              <p className="text-xs text-slate-500">Stopped</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-red-100 dark:bg-red-500/20">
-              <Activity size={16} className="text-red-600 dark:text-red-400" />
-            </div>
-            <div>
-              <p className="text-xl font-bold text-slate-800 dark:text-white">
-                {applications.filter((a) => a.status === 'error').length}
-              </p>
-              <p className="text-xs text-slate-500">Errors</p>
-            </div>
-          </div>
-        </div>
+        {[
+          { status: 'running', label: 'Running', icon: Play, color: 'green' },
+          { status: 'deploying', label: 'Deploying', icon: RotateCw, color: 'blue' },
+          { status: 'stopped', label: 'Stopped', icon: Pause, color: 'slate' },
+          { status: 'error', label: 'Errors', icon: Activity, color: 'red' },
+        ].map((item) => {
+          const Icon = item.icon;
+          const count = applications.filter((a) => a.status === item.status).length;
+          const colorMap: Record<string, { bg: string; icon: string }> = {
+            green: { bg: 'bg-green-100 dark:bg-green-500/20', icon: 'text-green-600 dark:text-green-400' },
+            blue: { bg: 'bg-blue-100 dark:bg-blue-500/20', icon: 'text-blue-600 dark:text-blue-400' },
+            slate: { bg: 'bg-slate-100 dark:bg-slate-600', icon: 'text-slate-600 dark:text-slate-300' },
+            red: { bg: 'bg-red-100 dark:bg-red-500/20', icon: 'text-red-600 dark:text-red-400' },
+          };
+          const colors = colorMap[item.color];
+          return (
+            <button
+              key={item.status}
+              onClick={() => updateFilter('status', statusFilter === item.status ? 'all' : item.status)}
+              className={`bg-white dark:bg-slate-800 rounded-xl p-4 border transition-all text-left ${
+                statusFilter === item.status
+                  ? 'border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/20'
+                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${colors.bg}`}>
+                  <Icon size={16} className={colors.icon} />
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-slate-800 dark:text-white">{count}</p>
+                  <p className="text-xs text-slate-500">{item.label}</p>
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters */}
@@ -132,13 +138,13 @@ export default function Applications() {
             type="text"
             placeholder="Search applications..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => updateFilter('search', e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 placeholder-slate-400"
           />
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => updateFilter('status', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Status</option>
@@ -149,7 +155,7 @@ export default function Applications() {
         </select>
         <select
           value={envFilter}
-          onChange={(e) => setEnvFilter(e.target.value)}
+          onChange={(e) => updateFilter('env', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Environments</option>
@@ -159,7 +165,7 @@ export default function Applications() {
         </select>
         <select
           value={tenantFilter}
-          onChange={(e) => setTenantFilter(e.target.value)}
+          onChange={(e) => updateFilter('tenant', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Tenants</option>
@@ -169,6 +175,16 @@ export default function Applications() {
             </option>
           ))}
         </select>
+
+        {hasActiveFilters && (
+          <button
+            onClick={clearAllFilters}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+          >
+            <X size={12} />
+            Clear filters
+          </button>
+        )}
 
         {/* View toggle */}
         <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
@@ -193,6 +209,16 @@ export default function Applications() {
             Table
           </button>
         </div>
+      </div>
+
+      {/* URL indicator */}
+      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+          <span className="text-slate-400">URL:</span>{' '}
+          <span className="text-blue-600 dark:text-blue-400">
+            /applications{searchParams.toString() ? `?${searchParams.toString()}` : ''}
+          </span>
+        </p>
       </div>
 
       {/* Grid View */}
@@ -241,7 +267,6 @@ export default function Applications() {
                   <span className="truncate">{app.url}</span>
                 </div>
 
-                {/* Resource bars */}
                 <div className="mt-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Cpu size={12} className="text-slate-400" />
@@ -270,9 +295,7 @@ export default function Applications() {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">
-                    {getTenantName(app.tenantId)}
-                  </span>
+                  <span className="text-xs text-slate-400">{getTenantName(app.tenantId)}</span>
                   <span className="text-xs text-slate-400 flex items-center gap-1">
                     <Clock size={10} />
                     {app.lastDeployed}
@@ -291,30 +314,14 @@ export default function Applications() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Application
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Tenant
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Environment
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    CPU
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Memory
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Requests
-                  </th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Application</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tenant</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Environment</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">CPU</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Memory</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Requests</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -332,9 +339,7 @@ export default function Applications() {
                           <p className="text-xs text-slate-400">v{app.version}</p>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">
-                        {getTenantName(app.tenantId)}
-                      </td>
+                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{getTenantName(app.tenantId)}</td>
                       <td className="px-5 py-3.5">
                         <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${status.bg} ${status.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
@@ -349,12 +354,7 @@ export default function Applications() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
                           <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                app.cpu > 80 ? 'bg-red-500' : app.cpu > 50 ? 'bg-amber-500' : 'bg-green-500'
-                              }`}
-                              style={{ width: `${app.cpu}%` }}
-                            ></div>
+                            <div className={`h-full rounded-full ${app.cpu > 80 ? 'bg-red-500' : app.cpu > 50 ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${app.cpu}%` }}></div>
                           </div>
                           <span className="text-xs text-slate-500">{app.cpu}%</span>
                         </div>
@@ -362,39 +362,17 @@ export default function Applications() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
                           <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                app.memory > 80 ? 'bg-red-500' : app.memory > 50 ? 'bg-amber-500' : 'bg-green-500'
-                              }`}
-                              style={{ width: `${app.memory}%` }}
-                            ></div>
+                            <div className={`h-full rounded-full ${app.memory > 80 ? 'bg-red-500' : app.memory > 50 ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${app.memory}%` }}></div>
                           </div>
                           <span className="text-xs text-slate-500">{app.memory}%</span>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">
-                        {app.requests.toLocaleString()}
-                      </td>
+                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{app.requests.toLocaleString()}</td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-green-500"
-                          >
-                            <Play size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-amber-500"
-                          >
-                            <RotateCw size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-red-500"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-green-500"><Play size={14} /></button>
+                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-amber-500"><RotateCw size={14} /></button>
+                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-red-500"><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
@@ -403,6 +381,16 @@ export default function Applications() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {filteredApps.length === 0 && (
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
+          <Server size={40} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">No applications match your filters</p>
+          <button onClick={clearAllFilters} className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+            Clear all filters
+          </button>
         </div>
       )}
 
@@ -418,9 +406,7 @@ export default function Applications() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-bold text-slate-800 dark:text-white">
-                        {selectedApp.name}
-                      </h3>
+                      <h3 className="text-xl font-bold text-slate-800 dark:text-white">{selectedApp.name}</h3>
                       <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[selectedApp.status].bg} ${statusColors[selectedApp.status].text}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${statusColors[selectedApp.status].dot}`}></span>
                         {selectedApp.status}
@@ -429,17 +415,10 @@ export default function Applications() {
                     <p className="text-sm text-slate-400">{selectedApp.description}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedApp(null)}
-                  className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setSelectedApp(null)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">✕</button>
               </div>
             </div>
-
             <div className="p-6 space-y-6">
-              {/* Resource Usage */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-center">
                   <Cpu size={20} className="mx-auto text-blue-500 mb-2" />
@@ -457,58 +436,22 @@ export default function Applications() {
                   <p className="text-xs text-slate-500">Requests</p>
                 </div>
               </div>
-
-              {/* Details */}
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-slate-800 dark:text-white">Application Details</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-slate-400">Version</p>
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">v{selectedApp.version}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Environment</p>
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200 capitalize">{selectedApp.environment}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">URL</p>
-                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                      {selectedApp.url}
-                      <ExternalLink size={12} />
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Tenant</p>
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{getTenantName(selectedApp.tenantId)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Last Deployed</p>
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.lastDeployed}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Created</p>
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.createdAt}</p>
-                  </div>
+                  <div><p className="text-xs text-slate-400">Version</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">v{selectedApp.version}</p></div>
+                  <div><p className="text-xs text-slate-400">Environment</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200 capitalize">{selectedApp.environment}</p></div>
+                  <div><p className="text-xs text-slate-400">URL</p><p className="text-sm font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">{selectedApp.url}<ExternalLink size={12} /></p></div>
+                  <div><p className="text-xs text-slate-400">Tenant</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{getTenantName(selectedApp.tenantId)}</p></div>
+                  <div><p className="text-xs text-slate-400">Last Deployed</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.lastDeployed}</p></div>
+                  <div><p className="text-xs text-slate-400">Created</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.createdAt}</p></div>
                 </div>
               </div>
-
-              {/* Actions */}
               <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
-                  <Play size={14} />
-                  Restart
-                </button>
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-                  <RotateCw size={14} />
-                  Redeploy
-                </button>
-                <button className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors">
-                  <ExternalLink size={14} />
-                  Open
-                </button>
-                <button className="px-4 py-2.5 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors">
-                  <Trash2 size={14} />
-                </button>
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"><Play size={14} />Restart</button>
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"><RotateCw size={14} />Redeploy</button>
+                <button className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"><ExternalLink size={14} />Open</button>
+                <button className="px-4 py-2.5 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"><Trash2 size={14} /></button>
               </div>
             </div>
           </div>

@@ -8,6 +8,7 @@ import {
   Activity,
   DollarSign,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   LineChart,
   Line,
@@ -327,9 +328,9 @@ export default function Dashboard() {
               <h3 className="text-base font-semibold text-slate-800 dark:text-white">Top Tenants</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">Tenants ranked by usage</p>
             </div>
-            <button className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors">
+            <Link to="/tenants" className="px-4 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors">
               View all tenants
-            </button>
+            </Link>
           </div>
         </div>
         <div className="overflow-x-auto">

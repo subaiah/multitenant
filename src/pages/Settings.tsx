@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Settings,
   Globe,
@@ -13,8 +14,19 @@ import {
 } from 'lucide-react';
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('general');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'general';
   const [saved, setSaved] = useState(false);
+
+  const setActiveTab = (tab: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (tab === 'general') {
+      newParams.delete('tab');
+    } else {
+      newParams.set('tab', tab);
+    }
+    setSearchParams(newParams);
+  };
 
   const handleSave = () => {
     setSaved(true);

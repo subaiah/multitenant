@@ -1,11 +1,23 @@
-import { useState } from 'react';
-import { Search, Filter, Activity, Rocket, Settings, Users, DollarSign, AlertTriangle, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Search, Activity, Rocket, Settings, Users, DollarSign, AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { activities, tenants } from '../data/mockData';
 
 export default function ActivityLog() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [tenantFilter, setTenantFilter] = useState<string>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const searchQuery = searchParams.get('search') || '';
+  const typeFilter = searchParams.get('type') || 'all';
+  const tenantFilter = searchParams.get('tenant') || 'all';
+
+  const updateFilter = (key: string, value: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (value === 'all' || value === '') {
+      newParams.delete(key);
+    } else {
+      newParams.set(key, value);
+    }
+    setSearchParams(newParams);
+  };
 
   const filteredActivities = activities.filter((activity) => {
     const matchesSearch =
@@ -28,6 +40,8 @@ export default function ActivityLog() {
     billing: { icon: DollarSign, color: 'bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400', label: 'Billing' },
     alert: { icon: AlertTriangle, color: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400', label: 'Alert' },
   };
+
+  const hasActiveFilters = searchQuery || typeFilter !== 'all' || tenantFilter !== 'all';
 
   return (
     <div className="space-y-6">
@@ -53,13 +67,13 @@ export default function ActivityLog() {
             type="text"
             placeholder="Search activities..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => updateFilter('search', e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 placeholder-slate-400"
           />
         </div>
         <select
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+          onChange={(e) => updateFilter('type', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Types</option>
@@ -71,7 +85,7 @@ export default function ActivityLog() {
         </select>
         <select
           value={tenantFilter}
-          onChange={(e) => setTenantFilter(e.target.value)}
+          onChange={(e) => updateFilter('tenant', e.target.value)}
           className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
         >
           <option value="all">All Tenants</option>
@@ -81,6 +95,26 @@ export default function ActivityLog() {
             </option>
           ))}
         </select>
+
+        {hasActiveFilters && (
+          <button
+            onClick={() => setSearchParams({})}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+          >
+            <X size={12} />
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* URL indicator */}
+      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+          <span className="text-slate-400">URL:</span>{' '}
+          <span className="text-blue-600 dark:text-blue-400">
+            /activity{searchParams.toString() ? `?${searchParams.toString()}` : ''}
+          </span>
+        </p>
       </div>
 
       {/* Activity Timeline */}
@@ -94,7 +128,6 @@ export default function ActivityLog() {
                 key={activity.id}
                 className="flex items-start gap-4 p-5 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
               >
-                {/* Timeline dot */}
                 <div className="flex flex-col items-center">
                   <div className={`p-2 rounded-lg ${config.color}`}>
                     <Icon size={16} />
@@ -103,8 +136,6 @@ export default function ActivityLog() {
                     <div className="w-px h-full min-h-[20px] bg-slate-200 dark:bg-slate-700 mt-2"></div>
                   )}
                 </div>
-
-                {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-4">
                     <div>
