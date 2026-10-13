@@ -12,7 +12,7 @@ config({ path: path.resolve(__dirname, '.env') });
 export default defineConfig({
   earlyAccess: false,
   schema: path.join(__dirname, 'prisma', 'schema.prisma'),
-  migrate: {
+  datasource: {
     url: process.env.DATABASE_URL || '',
   },
 });
