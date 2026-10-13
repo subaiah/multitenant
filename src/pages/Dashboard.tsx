@@ -179,7 +179,7 @@ export default function Dashboard() {
                   color: '#fff',
                   fontSize: '12px',
                 }}
-                formatter={(value: number) => [`$${value.toLocaleString()}`, 'Revenue']}
+                formatter={(value) => [`$${Number(value).toLocaleString()}`, 'Revenue']}
               />
               <Area
                 type="monotone"

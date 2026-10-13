@@ -6,7 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
-import { prisma } from './lib/prisma.js';
+import { prisma, pool } from './lib/prisma.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
 import { authRoutes } from './routes/auth.js';
@@ -177,6 +177,7 @@ async function start() {
 const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
   await prisma.$disconnect();
+  await pool.end();
   await fastify.close();
   process.exit(0);
 };
