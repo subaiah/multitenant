@@ -185,7 +185,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Create role
     const role = await prisma.role.create({
-       {
+      data: {
         tenantId,
         name: data.name,
         description: data.description,
@@ -204,16 +204,16 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       await prisma.rolePermission.createMany({
-         {
+        data: permissions.map(p => ({
           roleId: role.id,
-          permissionIds: permissions.map(p => p.id),
-        },
+          permissionId: p.id,
+        })),
       });
     }
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'created role',
@@ -276,7 +276,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Update role
     const updatedRole = await prisma.role.update({
       where: { id },
-       {
+      data: {
         name: data.name,
         description: data.description,
       },
@@ -300,10 +300,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         await prisma.rolePermission.createMany({
-           {
+          data: permissions.map(p => ({
             roleId: id,
-            permissionIds: permissions.map(p => p.id),
-          },
+            permissionId: p.id,
+          })),
         });
       }
     }
@@ -311,7 +311,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     if (role.tenantId) {
       await prisma.activity.create({
-         {
+        data: {
           tenantId: role.tenantId,
           userId,
           action: 'updated role',
@@ -380,7 +380,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     if (role.tenantId) {
       await prisma.activity.create({
-         {
+        data: {
           tenantId: role.tenantId,
           userId,
           action: 'deleted role',
@@ -457,7 +457,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Assign role
     await prisma.userRole.create({
-       {
+      data: {
         userId: data.userId,
         roleId: data.roleId,
       },
@@ -466,7 +466,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     if (role.tenantId) {
       await prisma.activity.create({
-         {
+        data: {
           tenantId: role.tenantId,
           userId,
           action: 'assigned role',
@@ -526,7 +526,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     if (role.tenantId) {
       await prisma.activity.create({
-         {
+        data: {
           tenantId: role.tenantId,
           userId,
           action: 'removed role',
@@ -677,7 +677,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'initialized default roles',

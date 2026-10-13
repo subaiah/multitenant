@@ -235,7 +235,7 @@ export async function createDefaultTenantRoles(tenantId: string): Promise<void> 
 
   for (const roleData of defaultRoles) {
     await prisma.role.create({
-       {
+      data: {
         tenantId,
         ...roleData,
       },

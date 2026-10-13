@@ -537,7 +537,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Store OTP
     await prisma.otpCode.create({
-       {
+      data: {
         tenantId: tenant.id,
         email,
         code,
@@ -618,7 +618,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Mark OTP as verified
     await prisma.otpCode.update({
       where: { id: otpRecord.id },
-       { verified: true },
+      data: { verified: true },
     });
 
     // Find user
@@ -653,7 +653,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Generate JWT token
@@ -666,7 +666,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: user.tenantId,
         userId: user.id,
         action: 'logged in via OTP',
@@ -775,7 +775,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-       { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date() },
     });
 
     // Generate JWT token
@@ -788,7 +788,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: user.tenantId,
         userId: user.id,
         action: 'logged in with password',
@@ -838,7 +838,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Update user
     await prisma.user.update({
       where: { id: userId },
-       { passwordHash },
+      data: { passwordHash },
     });
 
     return { message: 'Password set successfully' };
@@ -900,7 +900,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Create default roles for tenant
       const tenantAdminRole = await tx.role.create({
-         {
+        data: {
           tenantId: tenant.id,
           name: 'Tenant Admin',
           description: 'Full access to tenant resources',
@@ -909,7 +909,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       await tx.role.create({
-         {
+        data: {
           tenantId: tenant.id,
           name: 'Tenant Manager',
           description: 'Can manage applications and users',
@@ -918,7 +918,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       await tx.role.create({
-         {
+        data: {
           tenantId: tenant.id,
           name: 'Developer',
           description: 'Can manage applications',
@@ -927,7 +927,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       await tx.role.create({
-         {
+        data: {
           tenantId: tenant.id,
           name: 'User',
           description: 'Can view and use applications',
@@ -936,7 +936,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       await tx.role.create({
-         {
+        data: {
           tenantId: tenant.id,
           name: 'Viewer',
           description: 'Read-only access',
@@ -946,7 +946,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Assign Tenant Admin role to the admin user
       await tx.userRole.create({
-         {
+        data: {
           userId: user.id,
           roleId: tenantAdminRole.id,
         },
