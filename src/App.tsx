@@ -7,6 +7,9 @@ import Applications from './pages/Applications';
 import ActivityLog from './pages/ActivityLog';
 import SettingsPage from './pages/Settings';
 import Infrastructure from './pages/Infrastructure';
+import DataIsolation from './pages/DataIsolation';
+import Authentication from './pages/Authentication';
+import ApiManagement from './pages/ApiManagement';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -43,6 +46,9 @@ export default function App() {
             <Route path="/applications" element={<Applications />} />
             <Route path="/activity" element={<ActivityLog />} />
             <Route path="/infrastructure" element={<Infrastructure />} />
+            <Route path="/data-isolation" element={<DataIsolation />} />
+            <Route path="/authentication" element={<Authentication />} />
+            <Route path="/api" element={<ApiManagement />} />
             <Route path="/users" element={<PlaceholderPage title="User Management" description="Manage users, roles, and permissions across all tenants" />} />
             <Route path="/security" element={<PlaceholderPage title="Security" description="Configure security policies, audit logs, and compliance settings" />} />
             <Route path="/billing" element={<PlaceholderPage title="Billing" description="Manage subscriptions, invoices, and payment processing" />} />

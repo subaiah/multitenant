@@ -14,6 +14,9 @@ import {
   ChevronDown,
   Menu,
   X,
+  Database,
+  Key,
+  Code,
 } from 'lucide-react';
 
 interface NavItem {
@@ -50,6 +53,9 @@ const navItems: NavItem[] = [
   },
   { id: 'activity', label: 'Activity', icon: Activity, path: '/activity' },
   { id: 'infrastructure', label: 'Infrastructure', icon: Server, path: '/infrastructure' },
+  { id: 'data-isolation', label: 'Data Isolation', icon: Database, path: '/data-isolation' },
+  { id: 'authentication', label: 'Authentication', icon: Key, path: '/authentication' },
+  { id: 'api', label: 'API & BFF', icon: Code, path: '/api' },
   { id: 'users', label: 'Users', icon: Users, path: '/users' },
   { id: 'security', label: 'Security', icon: Shield, path: '/security' },
   { id: 'billing', label: 'Billing', icon: CreditCard, path: '/billing' },

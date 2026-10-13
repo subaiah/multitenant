@@ -15,6 +15,9 @@ import {
   Server,
   Bell,
   HelpCircle,
+  Database,
+  Key,
+  Code,
 } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 
@@ -56,6 +59,9 @@ const navItems: NavItem[] = [
   },
   { id: 'activity', label: 'Activity Log', icon: Activity, path: '/activity' },
   { id: 'infrastructure', label: 'Infrastructure', icon: Server, path: '/infrastructure' },
+  { id: 'data-isolation', label: 'Data Isolation', icon: Database, path: '/data-isolation' },
+  { id: 'authentication', label: 'Authentication', icon: Key, path: '/authentication' },
+  { id: 'api', label: 'API & BFF', icon: Code, path: '/api' },
   {
     id: 'users',
     label: 'Users',
