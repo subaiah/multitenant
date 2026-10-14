@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LayoutProvider } from './context/LayoutContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { PermissionGuard } from './components/PermissionGuard';
 import Layout from './components/Layout';
 import PlatformLayout from './layouts/PlatformLayout';
 import TenantLayout from './layouts/TenantLayout';
@@ -21,6 +22,7 @@ import RoleAssignments from './pages/RoleAssignments';
 import Organizations from './pages/Organizations';
 import ApplicationsManagement from './pages/ApplicationsManagement';
 import TenantEntitlements from './pages/TenantEntitlements';
+import Unauthorized from './pages/Unauthorized';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -56,32 +58,109 @@ export default function App() {
             <Route path="/" element={<SmartLogin />} />
             <Route path="/login" element={<SmartLogin />} />
             <Route path="/:tenantSlug/login" element={<Login />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
             
-            {/* Platform Portal */}
+            {/* Platform Portal - Protected by PLATFORM_* user types */}
             <Route element={<PlatformLayout />}>
-              <Route path="/platform/dashboard" element={<PlaceholderPage title="Platform Dashboard" description="Overview of all tenants and platform metrics" />} />
-              <Route path="/platform/tenants" element={<Tenants />} />
-              <Route path="/platform/applications" element={<ApplicationsManagement />} />
-              <Route path="/platform/users" element={<PlaceholderPage title="Platform Users" description="Manage platform-level users" />} />
-              <Route path="/platform/policies" element={<PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />} />
-              <Route path="/platform/settings" element={<PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />} />
+              <Route path="/platform/dashboard" element={
+                <PermissionGuard anyOf={['PLATFORM_ADMIN', 'PLATFORM_USER']} redirectTo="/unauthorized">
+                  <PlaceholderPage title="Platform Dashboard" description="Overview of all tenants and platform metrics" />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/tenants" element={
+                <PermissionGuard permission="tenants:read" redirectTo="/unauthorized">
+                  <Tenants />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/applications" element={
+                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                  <ApplicationsManagement />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/users" element={
+                <PermissionGuard permission="platform:users:read" redirectTo="/unauthorized">
+                  <PlaceholderPage title="Platform Users" description="Manage platform-level users" />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/policies" element={
+                <PermissionGuard permission="policies:read" redirectTo="/unauthorized">
+                  <PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/settings" element={
+                <PermissionGuard permission="platform:settings:manage" redirectTo="/unauthorized">
+                  <PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />
+                </PermissionGuard>
+              } />
             </Route>
             
-            {/* Tenant Portal */}
+            {/* Tenant Portal - Protected by TENANT_* user types */}
             <Route element={<TenantLayout />}>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/applications" element={<Applications />} />
-              <Route path="/activity" element={<ActivityLog />} />
-              <Route path="/infrastructure" element={<Infrastructure />} />
-              <Route path="/data-isolation" element={<DataIsolation />} />
-              <Route path="/authentication" element={<Authentication />} />
-              <Route path="/api" element={<ApiManagement />} />
-              <Route path="/groups" element={<Groups />} />
-              <Route path="/role-assignments" element={<RoleAssignments />} />
-              <Route path="/organizations" element={<Organizations />} />
-              <Route path="/tenant-entitlements" element={<TenantEntitlements />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/dashboard" element={
+                <PermissionGuard anyOf={['tenant:read', 'dashboard:view']} redirectTo="/unauthorized">
+                  <Dashboard />
+                </PermissionGuard>
+              } />
+              <Route path="/profile" element={
+                <PermissionGuard permission="profile:read" redirectTo="/unauthorized">
+                  <Profile />
+                </PermissionGuard>
+              } />
+              <Route path="/applications" element={
+                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                  <Applications />
+                </PermissionGuard>
+              } />
+              <Route path="/activity" element={
+                <PermissionGuard permission="activity:read" redirectTo="/unauthorized">
+                  <ActivityLog />
+                </PermissionGuard>
+              } />
+              <Route path="/infrastructure" element={
+                <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
+                  <Infrastructure />
+                </PermissionGuard>
+              } />
+              <Route path="/data-isolation" element={
+                <PermissionGuard permission="database:manage" redirectTo="/unauthorized">
+                  <DataIsolation />
+                </PermissionGuard>
+              } />
+              <Route path="/authentication" element={
+                <PermissionGuard permission="auth:manage" redirectTo="/unauthorized">
+                  <Authentication />
+                </PermissionGuard>
+              } />
+              <Route path="/api" element={
+                <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
+                  <ApiManagement />
+                </PermissionGuard>
+              } />
+              <Route path="/groups" element={
+                <PermissionGuard permission="groups:read" redirectTo="/unauthorized">
+                  <Groups />
+                </PermissionGuard>
+              } />
+              <Route path="/role-assignments" element={
+                <PermissionGuard permission="roles:read" redirectTo="/unauthorized">
+                  <RoleAssignments />
+                </PermissionGuard>
+              } />
+              <Route path="/organizations" element={
+                <PermissionGuard permission="organizations:read" redirectTo="/unauthorized">
+                  <Organizations />
+                </PermissionGuard>
+              } />
+              <Route path="/tenant-entitlements" element={
+                <PermissionGuard permission="applications:manage" redirectTo="/unauthorized">
+                  <TenantEntitlements />
+                </PermissionGuard>
+              } />
+              <Route path="/settings" element={
+                <PermissionGuard permission="settings:manage" redirectTo="/unauthorized">
+                  <SettingsPage />
+                </PermissionGuard>
+              } />
             </Route>
             
             {/* Catch-all redirect */}

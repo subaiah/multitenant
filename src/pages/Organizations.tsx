@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Building2, Plus, Edit2, Trash2, Users, ChevronRight } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { PermissionButton } from '../components/PermissionGuard';
 
 interface Organization {
   id: string;
@@ -168,12 +169,13 @@ export default function Organizations() {
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Organizations</h2>
-              <button
+              <PermissionButton
+                permission="organizations:create"
                 onClick={() => setShowCreateModal(true)}
                 className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
               >
                 <Plus size={20} />
-              </button>
+              </PermissionButton>
             </div>
             <div className="divide-y divide-slate-200 dark:divide-slate-700">
               {organizations.map((org) => (
@@ -204,7 +206,8 @@ export default function Organizations() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <button
+                      <PermissionButton
+                        permission="organizations:update"
                         onClick={(e) => {
                           e.stopPropagation();
                           openEditModal(org);
@@ -212,8 +215,9 @@ export default function Organizations() {
                         className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
                       >
                         <Edit2 size={16} />
-                      </button>
-                      <button
+                      </PermissionButton>
+                      <PermissionButton
+                        permission="organizations:delete"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteOrg(org.id);
@@ -221,7 +225,7 @@ export default function Organizations() {
                         className="p-1 text-slate-400 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={16} />
-                      </button>
+                      </PermissionButton>
                     </div>
                   </div>
                 </div>
@@ -292,12 +296,13 @@ export default function Organizations() {
                               </span>
                             </div>
                           </div>
-                          <button
+                          <PermissionButton
+                            permission="organizations:delete"
                             onClick={() => handleDeleteUnit(unit.id)}
                             className="p-1 text-slate-400 hover:text-red-500 transition-colors"
                           >
                             <Trash2 size={16} />
-                          </button>
+                          </PermissionButton>
                         </div>
                       </div>
                     ))}

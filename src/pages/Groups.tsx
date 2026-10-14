@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Users, Plus, Edit2, Trash2, UserPlus, UserMinus, Search, X } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { PermissionButton } from '../components/PermissionGuard';
 
 interface Group {
   id: string;
@@ -196,13 +197,14 @@ export default function Groups() {
             className="w-full pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           />
         </div>
-        <button
+        <PermissionButton
+          permission="groups:create"
           onClick={() => setShowCreateModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
         >
           <Plus size={20} />
           Create Group
-        </button>
+        </PermissionButton>
       </div>
 
       {/* Groups Grid */}
@@ -253,20 +255,22 @@ export default function Groups() {
                 >
                   <UserPlus size={18} />
                 </button>
-                <button
+                <PermissionButton
+                  permission="groups:update"
                   onClick={() => openEditModal(group)}
                   className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                   title="Edit Group"
                 >
                   <Edit2 size={18} />
-                </button>
-                <button
+                </PermissionButton>
+                <PermissionButton
+                  permission="groups:delete"
                   onClick={() => handleDeleteGroup(group.id)}
                   className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded-lg transition-colors"
                   title="Delete Group"
                 >
                   <Trash2 size={18} />
-                </button>
+                </PermissionButton>
               </div>
             </div>
           </div>
