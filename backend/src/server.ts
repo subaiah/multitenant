@@ -24,6 +24,11 @@ import { groupRoutes } from './routes/groups.js';
 import { organizationRoutes } from './routes/organizations.js';
 import { orgUnitRoutes } from './routes/org-units.js';
 import { tenantApplicationRoutes } from './routes/tenant-applications.js';
+import { delegationRoutes } from './routes/delegations.js';
+import { policyRoutes } from './routes/policies.js';
+import { supportSessionRoutes } from './routes/support-sessions.js';
+import { accessRequestRoutes } from './routes/access-requests.js';
+import { certificationRoutes } from './routes/certifications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
 
@@ -176,6 +181,13 @@ async function registerRoutes() {
 
     // Tenant application entitlements (Phase 2)
     await protectedRoutes.register(tenantApplicationRoutes, { prefix: '/tenant-applications' });
+
+    // Phase 3: Advanced Governance routes
+    await protectedRoutes.register(delegationRoutes, { prefix: '/delegations' });
+    await protectedRoutes.register(policyRoutes, { prefix: '/policies' });
+    await protectedRoutes.register(supportSessionRoutes, { prefix: '/support-sessions' });
+    await protectedRoutes.register(accessRequestRoutes, { prefix: '/access-requests' });
+    await protectedRoutes.register(certificationRoutes, { prefix: '/certifications' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });

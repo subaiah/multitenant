@@ -43,6 +43,13 @@ model Tenant {
   orgMemberships  OrgMembership[]
   tenantApplications TenantApplication[]
   
+  // Phase 3 relations
+  delegations     Delegation[]
+  accessPolicies  AccessPolicy[]
+  supportSessions SupportSession[]
+  accessRequests  AccessRequest[]
+  certifications  AccessCertification[]
+  
   @@map("tenants")
   @@index([slug])
   @@index([status])
@@ -80,6 +87,15 @@ model User {
   groupMemberships GroupMembership[]
   roleAssignments RoleAssignment[]
   orgMemberships  OrgMembership[]
+  
+  // Phase 3 relations
+  delegationsAsDelegator Delegation[] @relation("Delegator")
+  delegationsAsDelegate  Delegation[] @relation("Delegate")
+  supportSessionsAsPlatformUser SupportSession[] @relation("SupportPlatformUser")
+  supportSessionsAsApprover     SupportSession[] @relation("SupportApprover")
+  accessRequestsAsRequester     AccessRequest[] @relation("AccessRequester")
+  accessRequestsAsApprover      AccessRequest[] @relation("AccessApprover")
+  certificationsAsReviewer      AccessCertification[] @relation("CertificationReviewer")
   
   @@map("users")
   @@unique([tenantId, email])
@@ -445,6 +461,9 @@ model Role {
   users       UserRole[]
   roleAssignments RoleAssignment[]
   
+  // Phase 3 relations
+  accessRequests AccessRequest[]
+  
   @@unique([tenantId, name])
   @@map("roles")
   @@index([tenantId])
@@ -595,6 +614,10 @@ model RoleAssignment {
   user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   group         Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   
+  // Phase 3 relations
+  delegations   Delegation[]
+  certificationDecisions CertificationDecision[]
+  
   // Indexes for efficient queries
   @@index([tenantId, userId, status])
   @@index([tenantId, groupId, status])
@@ -616,4 +639,175 @@ model UserRole {
   
   @@unique([userId, roleId])
   @@map("user_roles")
+}
+
+// ============================================
+// Phase 3: Advanced Governance Models
+// ============================================
+
+// Delegation - temporary access delegation
+model Delegation {
+  id                   String    @id @default(uuid())
+  tenantId             String    @map("tenant_id")
+  delegatorId          String    @map("delegator_id")
+  delegateId           String    @map("delegate_id")
+  roleAssignmentId     String    @map("role_assignment_id")
+  reason               String?
+  validFrom            DateTime  @default(now()) @map("valid_from")
+  validTo              DateTime  @map("valid_to")
+  status               String    @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  revokedAt            DateTime? @map("revoked_at")
+  revokedBy            String?   @map("revoked_by")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  delegator            User      @relation("Delegator", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegate             User      @relation("Delegate", fields: [delegateId], references: [id], onDelete: Cascade)
+  roleAssignment       RoleAssignment @relation(fields: [roleAssignmentId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId, delegateId, status])
+  @@index([delegatorId])
+  @@index([validFrom, validTo])
+  @@map("delegations")
+}
+
+// Access Policy - ABAC conditions
+model AccessPolicy {
+  id          String   @id @default(uuid())
+  tenantId    String?  @map("tenant_id") // NULL for platform policies
+  name        String
+  description String?
+  effect      String   // ALLOW, DENY
+  conditions  Json     // ABAC conditions in JSON format
+  priority    Int      @default(0) // Higher priority = evaluated first
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bindings    PolicyBinding[]
+  
+  @@index([tenantId, enabled, priority])
+  @@map("access_policies")
+}
+
+// Policy Binding - where policies apply
+model PolicyBinding {
+  id          String   @id @default(uuid())
+  policyId    String   @map("policy_id")
+  scopeType   String   @map("scope_type") // TENANT, ORGANIZATION, ORG_UNIT, RESOURCE
+  scopeId     String   @map("scope_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  policy      AccessPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  
+  @@unique([policyId, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+  @@map("policy_bindings")
+}
+
+// Support Session - platform-to-tenant access
+model SupportSession {
+  id              String    @id @default(uuid())
+  platformUserId  String    @map("platform_user_id")
+  tenantId        String    @map("tenant_id")
+  approvedBy      String    @map("approved_by")
+  reason          String
+  permissions     Json      // Specific permissions granted
+  validFrom       DateTime  @default(now()) @map("valid_from")
+  validTo         DateTime  @map("valid_to")
+  status          String    @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  revokedAt       DateTime? @map("revoked_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  platformUser    User      @relation("SupportPlatformUser", fields: [platformUserId], references: [id], onDelete: Cascade)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  approver        User      @relation("SupportApprover", fields: [approvedBy], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId, status])
+  @@index([platformUserId])
+  @@index([validFrom, validTo])
+  @@map("support_sessions")
+}
+
+// Access Request - Just-in-Time access requests
+model AccessRequest {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  requesterId     String    @map("requester_id")
+  approverId      String?   @map("approver_id")
+  roleId          String    @map("role_id")
+  scopeType       String    @map("scope_type")
+  scopeId         String    @map("scope_id")
+  reason          String
+  duration        Int       // Duration in hours
+  status          String    @default("PENDING") // PENDING, APPROVED, DENIED, EXPIRED
+  approvedAt      DateTime? @map("approved_at")
+  deniedAt        DateTime? @map("denied_at")
+  denialReason    String?   @map("denial_reason")
+  validFrom       DateTime? @map("valid_from")
+  validTo         DateTime? @map("valid_to")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester       User      @relation("AccessRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  approver        User?     @relation("AccessApprover", fields: [approverId], references: [id], onDelete: Cascade)
+  role            Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId, status])
+  @@index([requesterId])
+  @@index([approverId])
+  @@map("access_requests")
+}
+
+// Access Certification - periodic access reviews
+model AccessCertification {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  name            String
+  description     String?
+  reviewType      String    @map("review_type") // ROLE, PERMISSION, ORGANIZATION
+  scopeType       String    @map("scope_type")
+  scopeId         String    @map("scope_id")
+  reviewerId      String    @map("reviewer_id")
+  dueDate         DateTime  @map("due_date")
+  status          String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, OVERDUE
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  reviewer        User      @relation("CertificationReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  decisions       CertificationDecision[]
+  
+  @@index([tenantId, status, dueDate])
+  @@index([reviewerId])
+  @@map("access_certifications")
+}
+
+// Certification Decision - individual decisions in a certification
+model CertificationDecision {
+  id                  String    @id @default(uuid())
+  certificationId     String    @map("certification_id")
+  roleAssignmentId    String    @map("role_assignment_id")
+  decision            String    // APPROVE, REVOKE
+  reason              String?
+  decidedAt           DateTime  @default(now()) @map("decided_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  
+  // Relations
+  certification       AccessCertification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  roleAssignment      RoleAssignment @relation(fields: [roleAssignmentId], references: [id], onDelete: Cascade)
+  
+  @@unique([certificationId, roleAssignmentId])
+  @@map("certification_decisions")
 }
