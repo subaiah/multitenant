@@ -184,6 +184,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       maxAge: refreshExpiryMs / 1000,
     });
 
+    // Determine portal based on user type
+    const portal = user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+
     return {
       message: 'Login successful',
       user: {
@@ -191,12 +194,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
         email: user.email,
         name: user.name,
         userType: user.userType,
+        portal,
       },
-      tenant: {
+      tenant: portal === 'TENANT' ? {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
-      },
+      } : null,
     };
   });
 
@@ -438,6 +442,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       maxAge: refreshExpiryMs / 1000,
     });
 
+    // Determine portal based on user type
+    const portal = user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+
     return {
       message: 'Login successful',
       user: {
@@ -445,12 +452,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
         email: user.email,
         name: user.name,
         userType: user.userType,
+        portal,
       },
-      tenant: {
+      tenant: portal === 'TENANT' ? {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
-      },
+      } : null,
     };
   });
 

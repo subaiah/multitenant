@@ -61,7 +61,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [applications, total] = await Promise.all([
-      prisma.application.findMany({
+      prisma.applicationRegistry.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -72,7 +72,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.application.count({ where }),
+      prisma.applicationRegistry.count({ where }),
     ]);
     
     return {
@@ -102,7 +102,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const application = await prisma.application.findUnique({
+    const application = await prisma.applicationRegistry.findUnique({
       where: { id },
       include: {
         permissions: true,
@@ -154,7 +154,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createApplicationSchema.parse(request.body);
     
     // Check if key already exists
-    const existing = await prisma.application.findUnique({
+    const existing = await prisma.applicationRegistry.findUnique({
       where: { key: data.key },
     });
     
@@ -162,7 +162,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Application key already exists', 409);
     }
     
-    const application = await prisma.application.create({
+    const application = await prisma.applicationRegistry.create({
        {
         ...data,
       },
@@ -214,7 +214,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateApplicationSchema.parse(request.body);
     
-    const application = await prisma.application.update({
+    const application = await prisma.applicationRegistry.update({
       where: { id },
       data,
     });
@@ -272,7 +272,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete application with tenant entitlements. Remove all entitlements first.', 400);
     }
     
-    const application = await prisma.application.delete({
+    const application = await prisma.applicationRegistry.delete({
       where: { id },
     });
     
@@ -305,7 +305,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const application = await prisma.application.findUnique({
+    const application = await prisma.applicationRegistry.findUnique({
       where: { id },
     });
     
@@ -356,7 +356,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createPermissionSchema.parse(request.body);
     
     // Verify application exists
-    const application = await prisma.application.findUnique({
+    const application = await prisma.applicationRegistry.findUnique({
       where: { id },
     });
     

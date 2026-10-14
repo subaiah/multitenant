@@ -78,6 +78,60 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     return tenant;
   });
 
+  // Verify organization exists and return portal info
+  fastify.get('/verify-organization/:slug', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Verify organization exists and get portal info',
+      params: {
+        type: 'object',
+        required: ['slug'],
+        properties: {
+          slug: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+
+    // Check if it's a special platform slug
+    if (slug === 'platform' || slug === 'admin') {
+      return {
+        exists: true,
+        portal: 'PLATFORM',
+        slug,
+      };
+    }
+
+    // Check if tenant exists
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+      },
+    });
+
+    if (!tenant) {
+      return {
+        exists: false,
+        portal: null,
+        slug,
+      };
+    }
+
+    if (tenant.status === 'SUSPENDED') {
+      throw new AppError('Organization is suspended', 403);
+    }
+
+    return {
+      exists: true,
+      portal: 'TENANT',
+      slug: tenant.slug,
+    };
+  });
+
   // Get available providers for a tenant (for login page)
   fastify.get('/tenant/:slug/providers', {
     schema: {

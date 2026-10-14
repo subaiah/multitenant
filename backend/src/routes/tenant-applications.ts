@@ -142,7 +142,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createTenantApplicationSchema.parse(request.body);
     
     // Verify application exists and is active
-    const application = await prisma.application.findUnique({
+    const application = await prisma.applicationRegistry.findUnique({
       where: { id: data.applicationId },
     });
     

@@ -428,7 +428,7 @@ model RefreshToken {
 // Permission model - defines granular permissions
 model Permission {
   id            String    @id @default(uuid())
-  applicationId String?   @map("application_id") // Link to application if app-specific
+  applicationId String?   @map("application_id") // Link to application registry if app-specific
   name          String    @unique
   description   String?
   resource      String    // e.g., "tenants", "applications", "users"
@@ -437,7 +437,7 @@ model Permission {
   updatedAt     DateTime  @updatedAt @map("updated_at")
   
   // Relations
-  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application   ApplicationRegistry? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   roles         RolePermission[]
   
   @@map("permissions")
@@ -551,8 +551,8 @@ model OrgMembership {
   @@map("org_memberships")
 }
 
-// Application - registered application/module
-model Application {
+// ApplicationRegistry - platform-wide catalog of available applications
+model ApplicationRegistry {
   id          String   @id @default(uuid())
   key         String   @unique
   name        String
@@ -568,7 +568,7 @@ model Application {
   
   @@index([key])
   @@index([status])
-  @@map("applications")
+  @@map("application_registries")
 }
 
 // TenantApplication - tenant's entitlement to use an application
@@ -583,7 +583,7 @@ model TenantApplication {
   
   // Relations
   tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   
   @@unique([tenantId, applicationId])
   @@index([tenantId])
@@ -810,4 +810,27 @@ model CertificationDecision {
   
   @@unique([certificationId, roleAssignmentId])
   @@map("certification_decisions")
+}
+
+// MenuItem - database-driven navigation menu items
+model MenuItem {
+  id              String    @id @default(uuid())
+  portal          String    // PLATFORM, TENANT
+  parentId        String?   @map("parent_id")
+  label           String
+  path            String
+  icon            String?   // Icon name (e.g., "dashboard", "users")
+  permission      String?   // Required permission to show this item
+  order           Int       @default(0)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  parent          MenuItem? @relation("MenuHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children        MenuItem[] @relation("MenuHierarchy")
+  
+  @@index([portal, isActive, order])
+  @@index([parentId])
+  @@map("menu_items")
 }
