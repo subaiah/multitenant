@@ -164,7 +164,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const tenantApplication = await prisma.tenantApplication.create({
-       {
+      data: {
         tenantId,
         applicationId: data.applicationId,
         state: data.state,
@@ -175,7 +175,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'enabled application',
@@ -234,7 +234,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'updated application entitlement',
@@ -278,7 +278,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'disabled application',

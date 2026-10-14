@@ -207,7 +207,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const delegation = await prisma.delegation.create({
-       {
+      data: {
         tenantId,
         delegatorId: userId,
         delegateId: data.delegateId,
@@ -220,7 +220,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'created delegation',
@@ -277,7 +277,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const revoked = await prisma.delegation.update({
       where: { id },
-       {
+      data: {
         status: 'REVOKED',
         revokedAt: new Date(),
         revokedBy: userId,
@@ -286,7 +286,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'revoked delegation',

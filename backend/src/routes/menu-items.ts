@@ -204,12 +204,13 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const menuItem = await prisma.menuItem.create({
-       data,
+      data,
     });
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'created menu item',
         target: menuItem.label,
@@ -279,7 +280,8 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'updated menu item',
         target: menuItem.label,
@@ -318,7 +320,8 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'deleted menu item',
         target: menuItem.label,
@@ -366,14 +369,15 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
       items.map(item =>
         prisma.menuItem.update({
           where: { id: item.id },
-           { order: item.order },
+          data: { order: item.order },
         })
       )
     );
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'reordered menu items',
         target: `${items.length} items`,

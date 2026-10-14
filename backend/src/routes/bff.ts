@@ -1,5 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../lib/prisma.js';
+import { withActivityUsers } from '../lib/activity-users.js';
+import { hasMinimumUserType, isPlatformUser } from '../utils/authorization.js';
 
 /**
  * BFF (Backend for Frontend) Routes
@@ -45,15 +47,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
         where: { tenantId },
         take: 5,
         orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-        },
-      }),
+      }).then(withActivityUsers),
       // Get user count
       prisma.user.count({
         where: { tenantId },
@@ -117,8 +111,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       tenantId: request.tenant.id,
       service,
       scope: `${service}:read ${service}:write`,
-      expiresIn: '1h',
-    });
+    }, { expiresIn: '1h' });
 
     return {
       token: serviceToken,
@@ -143,12 +136,16 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    // Only admins can access this
-    if (request.user.role !== 'ADMIN') {
+    const { tenantId } = request.params as { tenantId: string };
+
+    // Platform users can view any tenant; tenant admins only their own
+    const { userType } = request.user;
+    const allowed =
+      isPlatformUser(userType) ||
+      (hasMinimumUserType(userType, 'TENANT_ADMIN') && tenantId === request.tenant.id);
+    if (!allowed) {
       return reply.status(403).send({ error: 'Admin access required' });
     }
-
-    const { tenantId } = request.params;
 
     // Aggregate data from multiple sources
     const [tenant, applications, users, activities, dbConfig, authConfig, apiConfig] = await Promise.all([
@@ -211,7 +208,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       },
       user: {
         id: request.user.userId,
-        role: request.user.role,
+        userType: request.user.userType,
       },
       timestamp: new Date().toISOString(),
     };
@@ -232,7 +229,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { appId } = request.params;
+    const { appId } = request.params as { appId: string };
     const tenantId = request.tenant.id;
 
     // Get application details

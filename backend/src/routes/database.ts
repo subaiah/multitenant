@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { hasMinimumUserType } from '../utils/authorization.js';
 
 const updateDatabaseConfigSchema = z.object({
   strategy: z.enum(['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES']).optional(),
@@ -58,7 +59,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     // Only admins can update database config
-    if (request.user.role !== 'ADMIN') {
+    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
       throw new AppError('Admin access required', 403);
     }
 

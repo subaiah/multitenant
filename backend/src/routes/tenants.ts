@@ -10,8 +10,8 @@ const updateTenantSchema = z.object({
 });
 
 const querySchema = z.object({
-  page: z.string().transform(Number).default('1'),
-  limit: z.string().transform(Number).default('10'),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).default(10),
   status: z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']).optional(),
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).optional(),
   search: z.string().optional(),
@@ -50,8 +50,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         search
           ? {
               OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { slug: { contains: search, mode: 'insensitive' } },
+                { name: { contains: search, mode: 'insensitive' as const } },
+                { slug: { contains: search, mode: 'insensitive' as const } },
               ],
             }
           : {},
@@ -123,7 +123,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
 
     // Only admins can view other tenants
     if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType) && request.tenant.id !== id) {
@@ -171,7 +171,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
     const data = updateTenantSchema.parse(request.body);
 
     // Only admins can update tenants
@@ -213,7 +213,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
 
     // Only admins can delete tenants
     if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {

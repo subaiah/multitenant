@@ -308,17 +308,6 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Validate OAuth session
     const oauthSession = await prisma.oAuthSession.findUnique({
       where: { state },
-      include: {
-        provider: {
-          include: {
-            authConfig: {
-              include: {
-                tenant: true,
-              },
-            },
-          },
-        },
-      },
     });
 
     if (!oauthSession) {
@@ -330,7 +319,21 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('OAuth session expired', 400);
     }
 
-    const authProvider = oauthSession.provider;
+    // OAuthSession has no Prisma relation to AuthProvider, so load it explicitly
+    const authProvider = await prisma.authProvider.findUnique({
+      where: { id: oauthSession.providerId },
+      include: {
+        authConfig: {
+          include: {
+            tenant: true,
+          },
+        },
+      },
+    });
+
+    if (!authProvider || authProvider.authConfig.tenantId !== oauthSession.tenantId) {
+      throw new AppError('Invalid or expired OAuth session', 400);
+    }
     const tenant = authProvider.authConfig.tenant;
 
     // Exchange code for tokens (provider-specific)
@@ -474,6 +477,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User account is not active', 403);
     }
 
+    if (!user.tenant) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
     if (user.tenant.status === 'SUSPENDED') {
       throw new AppError('Tenant is suspended', 403);
     }
@@ -490,7 +497,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate JWT token
     const token = fastify.jwt.sign({
       userId: user.id,
-      tenantId: user.tenantId,
+      tenantId: user.tenant.id,
       userType: user.userType,
       provider: 'PASSWORD',
     });
@@ -498,7 +505,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: user.tenantId,
+        tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in',
         target: 'system',
@@ -700,6 +707,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User account is not active', 403);
     }
 
+    if (!user.tenant) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
     if (user.tenant.status === 'SUSPENDED') {
       throw new AppError('Tenant is suspended', 403);
     }
@@ -713,7 +724,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate JWT token
     const token = fastify.jwt.sign({
       userId: user.id,
-      tenantId: user.tenantId,
+      tenantId: user.tenant.id,
       userType: user.userType,
       provider: 'OTP',
     });
@@ -721,7 +732,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: user.tenantId,
+        tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in via OTP',
         target: 'system',
@@ -822,6 +833,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User account is not active', 403);
     }
 
+    if (!user.tenant) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
     if (user.tenant.status === 'SUSPENDED') {
       throw new AppError('Tenant is suspended', 403);
     }
@@ -835,7 +850,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate JWT token
     const token = fastify.jwt.sign({
       userId: user.id,
-      tenantId: user.tenantId,
+      tenantId: user.tenant.id,
       userType: user.userType,
       provider: 'PASSWORD',
     });
@@ -843,7 +858,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: user.tenantId,
+        tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in with password',
         target: 'system',
@@ -933,8 +948,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         data: {
           name: tenantName,
           slug: tenantSlug,
-          plan: 'TRIAL',
-          status: 'ACTIVE',
+          plan: 'FREE',
+          status: 'TRIAL',
           primaryColor: '#3b82f6',
           loginTitle: `Welcome to ${tenantName}`,
           loginSubtitle: 'Sign in to your account',

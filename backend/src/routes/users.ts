@@ -16,8 +16,8 @@ const updateUserSchema = z.object({
 });
 
 const querySchema = z.object({
-  page: z.string().transform(Number).default('1'),
-  limit: z.string().transform(Number).default('10'),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).default(10),
   userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   search: z.string().optional(),
@@ -52,8 +52,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         search
           ? {
               OR: [
-                { email: { contains: search, mode: 'insensitive' } },
-                { name: { contains: search, mode: 'insensitive' } },
+                { email: { contains: search, mode: 'insensitive' as const } },
+                { name: { contains: search, mode: 'insensitive' as const } },
               ],
             }
           : {},
@@ -127,7 +127,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
 
     const user = await prisma.user.findFirst({
       where: {
@@ -241,7 +241,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
     const data = updateUserSchema.parse(request.body);
 
     // Only admins can update users
@@ -294,7 +294,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
 
     // Only admins can delete users
     if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {

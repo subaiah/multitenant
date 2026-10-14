@@ -348,7 +348,7 @@ async function isScopeCompatible(
         }
         
         // Get parent unit
-        const unit = await prisma.orgUnit.findUnique({
+        const unit: { parentUnitId: string | null } | null = await prisma.orgUnit.findUnique({
           where: { id: currentUnitId },
           select: { parentUnitId: true },
         });
@@ -364,8 +364,15 @@ async function isScopeCompatible(
 /**
  * Require a specific permission or throw error
  */
-export async function requirePermission(userId: string, resource: string, action: string): Promise<void> {
-  const hasPerm = await hasPermission(userId, resource, action);
+export async function requirePermission(
+  userId: string,
+  tenantId: string,
+  resource: string,
+  action: string,
+  scopeType?: string,
+  scopeId?: string
+): Promise<void> {
+  const hasPerm = await hasPermission(userId, tenantId, resource, action, scopeType, scopeId);
   if (!hasPerm) {
     throw new AppError(`Missing permission: ${resource}:${action}`, 403);
   }
