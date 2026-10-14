@@ -1,6 +1,11 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LayoutProvider } from './context/LayoutContext';
+import { AuthProvider } from './contexts/AuthContext';
 import Layout from './components/Layout';
+import PlatformLayout from './layouts/PlatformLayout';
+import TenantLayout from './layouts/TenantLayout';
+import SmartLogin from './pages/SmartLogin';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Tenants from './pages/Tenants';
 import Applications from './pages/Applications';
@@ -10,7 +15,6 @@ import Infrastructure from './pages/Infrastructure';
 import DataIsolation from './pages/DataIsolation';
 import Authentication from './pages/Authentication';
 import ApiManagement from './pages/ApiManagement';
-import Login from './pages/Login';
 import Profile from './pages/Profile';
 import Groups from './pages/Groups';
 import RoleAssignments from './pages/RoleAssignments';
@@ -44,40 +48,47 @@ function PlaceholderPage({ title, description }: { title: string; description: s
 
 export default function App() {
   return (
-    <LayoutProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Public routes (no layout) */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/:tenantSlug/login" element={<Login />} />
-          <Route path="/register" element={<PlaceholderPage title="Register" description="Create a new tenant account" />} />
-          
-          {/* Protected routes (with layout) */}
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/tenants" element={<Tenants />} />
-            <Route path="/applications" element={<Applications />} />
-            <Route path="/activity" element={<ActivityLog />} />
-            <Route path="/infrastructure" element={<Infrastructure />} />
-            <Route path="/data-isolation" element={<DataIsolation />} />
-            <Route path="/authentication" element={<Authentication />} />
-            <Route path="/api" element={<ApiManagement />} />
-            <Route path="/users" element={<PlaceholderPage title="User Management" description="Manage users, roles, and permissions across all tenants" />} />
-            <Route path="/groups" element={<Groups />} />
-            <Route path="/role-assignments" element={<RoleAssignments />} />
-            <Route path="/organizations" element={<Organizations />} />
-            <Route path="/applications-management" element={<ApplicationsManagement />} />
-            <Route path="/tenant-entitlements" element={<TenantEntitlements />} />
-            <Route path="/security" element={<PlaceholderPage title="Security" description="Configure security policies, audit logs, and compliance settings" />} />
-            <Route path="/billing" element={<PlaceholderPage title="Billing" description="Manage subscriptions, invoices, and payment processing" />} />
-            <Route path="/analytics" element={<PlaceholderPage title="Analytics" description="View detailed analytics and reports across all tenants" />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Dashboard />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </LayoutProvider>
+    <AuthProvider>
+      <LayoutProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/" element={<SmartLogin />} />
+            <Route path="/login" element={<SmartLogin />} />
+            <Route path="/:tenantSlug/login" element={<Login />} />
+            
+            {/* Platform Portal */}
+            <Route element={<PlatformLayout />}>
+              <Route path="/platform/dashboard" element={<PlaceholderPage title="Platform Dashboard" description="Overview of all tenants and platform metrics" />} />
+              <Route path="/platform/tenants" element={<Tenants />} />
+              <Route path="/platform/applications" element={<ApplicationsManagement />} />
+              <Route path="/platform/users" element={<PlaceholderPage title="Platform Users" description="Manage platform-level users" />} />
+              <Route path="/platform/policies" element={<PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />} />
+              <Route path="/platform/settings" element={<PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />} />
+            </Route>
+            
+            {/* Tenant Portal */}
+            <Route element={<TenantLayout />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/applications" element={<Applications />} />
+              <Route path="/activity" element={<ActivityLog />} />
+              <Route path="/infrastructure" element={<Infrastructure />} />
+              <Route path="/data-isolation" element={<DataIsolation />} />
+              <Route path="/authentication" element={<Authentication />} />
+              <Route path="/api" element={<ApiManagement />} />
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/role-assignments" element={<RoleAssignments />} />
+              <Route path="/organizations" element={<Organizations />} />
+              <Route path="/tenant-entitlements" element={<TenantEntitlements />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+            
+            {/* Catch-all redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </LayoutProvider>
+    </AuthProvider>
   );
 }

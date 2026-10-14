@@ -50,6 +50,13 @@ export function isTenantUser(userType: UserType): boolean {
 }
 
 /**
+ * Get portal type for a user type
+ */
+export function getPortalForUser(userType: UserType): 'PLATFORM' | 'TENANT' {
+  return userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+}
+
+/**
  * Get user permissions from their roles (both direct and group-based)
  */
 export async function getUserPermissions(userId: string, tenantId?: string): Promise<string[]> {
