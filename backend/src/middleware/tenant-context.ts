@@ -6,7 +6,7 @@ import { AppError } from './error-handler.js';
 // Extend FastifyRequest to include tenant
 declare module 'fastify' {
   interface FastifyRequest {
-    tenant?: {
+    tenant: {
       id: string;
       name: string;
       slug: string;
