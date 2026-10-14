@@ -33,6 +33,7 @@ import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
+import { authenticate } from './middleware/authenticate.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -79,11 +80,9 @@ async function registerPlugins() {
   await fastify.register(rateLimit, {
     max: config.rateLimitMax,
     timeWindow: config.rateLimitTimeWindow,
-    keyGenerator: (request) => {
-      // Rate limit by tenant + IP for multi-tenant
-      const tenantId = request.headers[config.tenantHeader] as string;
-      return tenantId ? `${tenantId}:${request.ip}` : request.ip;
-    },
+    // Key on IP only: the tenant header is client-controlled, so including it
+    // let clients get a fresh budget per header value.
+    keyGenerator: (request) => request.ip,
   });
 
   // Swagger documentation
@@ -140,13 +139,8 @@ async function registerRoutes() {
   // Protected routes (require authentication)
   await fastify.register(async (protectedRoutes) => {
     // Add authentication hook
-    protectedRoutes.addHook('onRequest', async (request, reply) => {
-      try {
-        await request.jwtVerify();
-      } catch (err) {
-        return reply.status(401).send({ error: 'Unauthorized' });
-      }
-    });
+    // Verify JWT and bind request.tenant to the token's tenant
+    protectedRoutes.addHook('onRequest', authenticate);
 
     // Tenant management
     await protectedRoutes.register(tenantRoutes, { prefix: '/tenants' });

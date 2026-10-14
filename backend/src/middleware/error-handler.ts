@@ -69,6 +69,16 @@ export const errorHandler = (
     }
   }
 
+  // Other Fastify/plugin errors that carry a client-error status
+  // (rate limiting 429, payload too large 413, bad content type 415, ...)
+  const statusCode = (error as FastifyError).statusCode;
+  if (statusCode && statusCode >= 400 && statusCode < 500) {
+    return reply.status(statusCode).send({
+      error: error.name,
+      message: error.message,
+    });
+  }
+
   // Default error
   request.log.error(error);
 

@@ -2,16 +2,20 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { requireCanManageUserType } from '../utils/authorization.js';
+
+const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(2),
-  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).default('TENANT_USER'),
+  // This API manages users inside a tenant, so only tenant user types can be assigned.
+  userType: z.enum(TENANT_USER_TYPES).default('TENANT_USER'),
 });
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
-  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
+  userType: z.enum(TENANT_USER_TYPES).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
 });
 
@@ -163,7 +167,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         properties: {
           email: { type: 'string', format: 'email' },
           name: { type: 'string', minLength: 2 },
-          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'], default: 'TENANT_USER' },
+          userType: { type: 'string', enum: ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'], default: 'TENANT_USER' },
         },
       },
     },
@@ -174,6 +178,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const data = createUserSchema.parse(request.body);
+    requireCanManageUserType(request.user.userType, data.userType);
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -235,7 +240,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 2 },
-          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
+          userType: { type: 'string', enum: ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
           status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
         },
       },
@@ -243,10 +248,31 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const data = updateUserSchema.parse(request.body);
+    const actorType = request.user.userType;
+    const isSelf = id === request.user.userId;
 
-    // Only admins can update users
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
-      throw new AppError('Admin access required', 403);
+    const target = await prisma.user.findFirst({
+      where: { id, tenantId: request.tenant.id },
+      select: { userType: true },
+    });
+    if (!target) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (isSelf) {
+      // Users may edit their own profile, but not their own type or status
+      if (data.userType !== undefined || data.status !== undefined) {
+        throw new AppError('You cannot change your own user type or status', 403);
+      }
+    } else {
+      // Only admins can update other users, and only users ranked at or below them
+      if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(actorType)) {
+        throw new AppError('Admin access required', 403);
+      }
+      requireCanManageUserType(actorType, target.userType);
+      if (data.userType) {
+        requireCanManageUserType(actorType, data.userType);
+      }
     }
 
     const user = await prisma.user.update({
@@ -305,6 +331,15 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     if (id === request.user.userId) {
       throw new AppError('Cannot delete your own account', 400);
     }
+
+    const target = await prisma.user.findFirst({
+      where: { id, tenantId: request.tenant.id },
+      select: { userType: true },
+    });
+    if (!target) {
+      throw new AppError('User not found', 404);
+    }
+    requireCanManageUserType(request.user.userType, target.userType);
 
     await prisma.user.delete({
       where: {

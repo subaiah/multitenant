@@ -22,8 +22,10 @@ export async function hashPassword(password: string): Promise<string> {
  */
 export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
   const [salt, hash] = hashedPassword.split(':');
-  const verifyHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-  return hash === verifyHash;
+  if (!salt || !hash) return false;
+  const expected = Buffer.from(hash, 'hex');
+  const actual = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512');
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
 /**

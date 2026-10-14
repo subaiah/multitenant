@@ -7,7 +7,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
 
   // Server
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  // Defaults to production so a deployment that forgets NODE_ENV gets secure behaviour.
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
   PORT: z.string().default('4000').transform(Number),
   HOST: z.string().default('0.0.0.0'),
 
@@ -32,9 +33,17 @@ const envSchema = z.object({
   // BFF Configuration
   BFF_URL: z.string().default('http://localhost:4000'),
   FRONTEND_URL: z.string().default('http://localhost:5173'),
-  COOKIE_SECRET: z.string().default('cookie-secret-change-in-production-min-32-chars'),
+  COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
+
+  // Development only: return OTP codes in API responses instead of sending them.
+  // Ignored unless NODE_ENV=development.
+  DEV_EXPOSE_OTP: z.enum(['true', 'false']).default('false'),
+}).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production' && !env.COOKIE_SECRET) {
+    ctx.addIssue({ code: 'custom', path: ['COOKIE_SECRET'], message: 'COOKIE_SECRET is required in production' });
+  }
 });
 
 // Parse and validate environment variables
@@ -70,7 +79,10 @@ export const config = {
   // BFF Configuration
   bffUrl: env.BFF_URL,
   frontendUrl: env.FRONTEND_URL,
-  cookieSecret: env.COOKIE_SECRET,
+  cookieSecret: env.COOKIE_SECRET ?? 'dev-only-cookie-secret-not-for-production-use',
+
+  // Dev convenience: expose OTPs / user-not-found details. Never true outside development.
+  devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
 } as const;

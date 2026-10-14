@@ -17,12 +17,12 @@ declare module 'fastify' {
 }
 
 export const tenantContext = async (request: FastifyRequest, reply: FastifyReply) => {
-  // Skip tenant context for health check, auth routes, and BFF auth routes
-  if (
-    request.url.startsWith('/health') ||
-    request.url.startsWith('/auth') ||
-    request.url.startsWith('/bff/auth')
-  ) {
+  // Skip tenant context for health check, auth routes, and BFF auth routes.
+  // Match whole path segments: a bare startsWith('/auth') also matched
+  // '/auth-config', which then ran with no tenant and crashed.
+  const path = request.url.split('?')[0];
+  const isUnder = (prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
+  if (isUnder('/health') || isUnder('/auth') || isUnder('/bff/auth') || path.startsWith('/docs')) {
     return;
   }
 
