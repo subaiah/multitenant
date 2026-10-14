@@ -1,13 +1,30 @@
-import { UserType } from '../utils/authorization.js';
+// Single source of truth for Fastify / @fastify/jwt type augmentations.
+import '@fastify/jwt';
+import type { UserType } from '../utils/authorization.js';
 
-// Extend Fastify types
+/** Claims carried by every user access token. */
+export interface AuthUser {
+  userId: string;
+  tenantId?: string;
+  userType: UserType;
+}
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    // What we sign. Extra claims are optional so every sign() call site type-checks.
+    payload: Partial<AuthUser> & {
+      provider?: string;
+      type?: 'access';
+      service?: string;
+      scope?: string;
+    };
+    // What request.user is after jwtVerify().
+    user: AuthUser;
+  }
+}
+
 declare module 'fastify' {
   interface FastifyRequest {
-    user: {
-      userId: string;
-      tenantId?: string;
-      userType: UserType;
-    };
     tenant: {
       id: string;
       name: string;
@@ -17,5 +34,3 @@ declare module 'fastify' {
     };
   }
 }
-
-export {};

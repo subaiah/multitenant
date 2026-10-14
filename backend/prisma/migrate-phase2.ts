@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/lib/prisma.js';
 
 async function migrateToPhase2() {
   console.log('🚀 Starting Phase 2 migration...\n');
@@ -8,7 +6,7 @@ async function migrateToPhase2() {
   try {
     // 1. Create default applications if none exist
     console.log('📦 Checking for default applications...');
-    const appCount = await prisma.application.count();
+    const appCount = await prisma.applicationRegistry.count();
     
     if (appCount === 0) {
       console.log('   Creating default applications...');
@@ -38,8 +36,8 @@ async function migrateToPhase2() {
       ];
 
       for (const app of defaultApps) {
-        await prisma.application.create({
-           app,
+        await prisma.applicationRegistry.create({
+          data: app,
         });
       }
       
@@ -53,7 +51,7 @@ async function migrateToPhase2() {
     const permissionCount = await prisma.permission.count();
     
     if (permissionCount === 0) {
-      const applications = await prisma.application.findMany();
+      const applications = await prisma.applicationRegistry.findMany();
       
       for (const app of applications) {
         const defaultPermissions = [
@@ -64,7 +62,7 @@ async function migrateToPhase2() {
 
         for (const perm of defaultPermissions) {
           await prisma.permission.create({
-             {
+            data: {
               applicationId: app.id,
               ...perm,
             },
@@ -91,7 +89,7 @@ async function migrateToPhase2() {
       if (orgCount === 0) {
         // Create main organization for tenant
         const org = await prisma.organization.create({
-           {
+          data: {
             tenantId: tenant.id,
             name: `${tenant.name} Organization`,
             description: `Main organization for ${tenant.name}`,
@@ -109,7 +107,7 @@ async function migrateToPhase2() {
 
         for (const unit of defaultUnits) {
           await prisma.orgUnit.create({
-             {
+            data: {
               tenantId: tenant.id,
               organizationId: org.id,
               ...unit,
@@ -129,7 +127,7 @@ async function migrateToPhase2() {
 
     // 4. Enable default applications for all tenants
     console.log('📱 Enabling default applications for tenants...');
-    const applications = await prisma.application.findMany();
+    const applications = await prisma.applicationRegistry.findMany();
     let entitlementsCreated = 0;
 
     for (const tenant of tenants) {
@@ -143,7 +141,7 @@ async function migrateToPhase2() {
 
         if (!existing) {
           await prisma.tenantApplication.create({
-             {
+            data: {
               tenantId: tenant.id,
               applicationId: app.id,
               state: 'ENABLED',
@@ -163,7 +161,7 @@ async function migrateToPhase2() {
 
     // 5. Summary
     console.log('📊 Migration Summary:');
-    console.log(`   • Applications: ${await prisma.application.count()}`);
+    console.log(`   • Applications: ${await prisma.applicationRegistry.count()}`);
     console.log(`   • Permissions: ${await prisma.permission.count()}`);
     console.log(`   • Organizations: ${await prisma.organization.count()}`);
     console.log(`   • Org Units: ${await prisma.orgUnit.count()}`);

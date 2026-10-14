@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/lib/prisma.js';
 
 async function seedMenuItems() {
   console.log('🌱 Seeding menu items...\n');
@@ -19,7 +17,7 @@ async function seedMenuItems() {
     console.log('📋 Creating Platform Portal menu items...');
     
     const platformDashboard = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Dashboard',
         path: '/platform/dashboard',
@@ -30,7 +28,7 @@ async function seedMenuItems() {
     });
 
     const platformTenants = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Tenants',
         path: '/platform/tenants',
@@ -42,7 +40,7 @@ async function seedMenuItems() {
     });
 
     const platformApplications = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Applications',
         path: '/platform/applications',
@@ -54,7 +52,7 @@ async function seedMenuItems() {
     });
 
     const platformUsers = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Platform Users',
         path: '/platform/users',
@@ -66,7 +64,7 @@ async function seedMenuItems() {
     });
 
     const platformPolicies = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Global Policies',
         path: '/platform/policies',
@@ -78,7 +76,7 @@ async function seedMenuItems() {
     });
 
     const platformSettings = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'PLATFORM',
         label: 'Settings',
         path: '/platform/settings',
@@ -95,7 +93,7 @@ async function seedMenuItems() {
     console.log('📋 Creating Tenant Portal menu items...');
     
     const tenantDashboard = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Dashboard',
         path: '/dashboard',
@@ -107,7 +105,7 @@ async function seedMenuItems() {
     });
 
     const tenantApplications = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Applications',
         path: '/applications',
@@ -120,7 +118,7 @@ async function seedMenuItems() {
 
     // Users submenu
     const tenantUsers = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Users',
         path: '/users',
@@ -132,7 +130,7 @@ async function seedMenuItems() {
     });
 
     const tenantUsersAll = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         parentId: tenantUsers.id,
         label: 'All Users',
@@ -145,7 +143,7 @@ async function seedMenuItems() {
     });
 
     const tenantGroups = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         parentId: tenantUsers.id,
         label: 'Groups',
@@ -158,7 +156,7 @@ async function seedMenuItems() {
     });
 
     const tenantRoles = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         parentId: tenantUsers.id,
         label: 'Role Assignments',
@@ -171,7 +169,7 @@ async function seedMenuItems() {
     });
 
     const tenantOrganizations = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Organizations',
         path: '/organizations',
@@ -183,7 +181,7 @@ async function seedMenuItems() {
     });
 
     const tenantActivity = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Activity Log',
         path: '/activity',
@@ -195,7 +193,7 @@ async function seedMenuItems() {
     });
 
     const tenantSettings = await prisma.menuItem.create({
-       {
+      data: {
         portal: 'TENANT',
         label: 'Settings',
         path: '/settings',

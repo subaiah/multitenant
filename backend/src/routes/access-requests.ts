@@ -130,7 +130,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const accessRequest = await prisma.accessRequest.create({
-       {
+      data: {
         tenantId,
         requesterId: userId,
         roleId: data.roleId,
@@ -143,7 +143,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'requested access',
@@ -202,7 +202,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     
     const updated = await prisma.accessRequest.update({
       where: { id },
-       {
+      data: {
         status: approved ? 'APPROVED' : 'DENIED',
         approverId: userId,
         approvedAt: approved ? now : null,
@@ -216,7 +216,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     // If approved, create temporary role assignment
     if (approved) {
       await prisma.roleAssignment.create({
-         {
+        data: {
           tenantId,
           roleId: accessRequest.roleId,
           principalType: 'USER',
@@ -232,7 +232,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: approved ? 'approved access request' : 'denied access request',

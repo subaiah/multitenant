@@ -52,9 +52,9 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         status ? { status } : {},
         search ? {
           OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { key: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { key: { contains: search, mode: 'insensitive' as const } },
+            { description: { contains: search, mode: 'insensitive' as const } },
           ],
         } : {},
       ],
@@ -163,14 +163,15 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const application = await prisma.applicationRegistry.create({
-       {
+      data: {
         ...data,
       },
     });
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'created application',
         target: application.name,
@@ -221,7 +222,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'updated application',
         target: application.name,
@@ -278,7 +280,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'deleted application',
         target: application.name,
@@ -374,7 +377,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const permission = await prisma.permission.create({
-       {
+      data: {
         applicationId: id,
         ...data,
       },
@@ -382,7 +385,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'created permission',
         target: `${permission.name} for ${application.name}`,
@@ -430,7 +434,8 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
+        tenantId: request.tenant.id,
         userId,
         action: 'deleted permission',
         target: permission.name,

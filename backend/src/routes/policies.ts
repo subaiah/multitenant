@@ -148,7 +148,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createPolicySchema.parse(request.body);
     
     const policy = await prisma.accessPolicy.create({
-       {
+      data: {
         tenantId,
         ...data,
       },
@@ -156,7 +156,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'created policy',
@@ -209,7 +209,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'updated policy',
@@ -248,7 +248,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'deleted policy',
@@ -314,7 +314,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const binding = await prisma.policyBinding.create({
-       {
+      data: {
         policyId: id,
         ...data,
       },

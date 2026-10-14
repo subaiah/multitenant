@@ -124,7 +124,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Create pending session (requires approval)
     const session = await prisma.supportSession.create({
-       {
+      data: {
         platformUserId: userId,
         tenantId: data.tenantId,
         approvedBy: userId, // Self-approved for now, in production requires separate approval
@@ -138,7 +138,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: data.tenantId,
         userId,
         action: 'created support session',
@@ -186,7 +186,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     
     const revoked = await prisma.supportSession.update({
       where: { id },
-       {
+      data: {
         status: 'REVOKED',
         revokedAt: new Date(),
       },
@@ -194,7 +194,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId: session.tenantId,
         userId,
         action: 'revoked support session',

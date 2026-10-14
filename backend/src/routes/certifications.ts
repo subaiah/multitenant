@@ -174,7 +174,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const certification = await prisma.accessCertification.create({
-       {
+      data: {
         tenantId,
         ...data,
         dueDate,
@@ -183,7 +183,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'created certification',
@@ -259,7 +259,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Create decision
     const decision = await prisma.certificationDecision.create({
-       {
+      data: {
         certificationId: id,
         roleAssignmentId: data.roleAssignmentId,
         decision: data.decision,
@@ -271,14 +271,14 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     if (data.decision === 'REVOKE') {
       await prisma.roleAssignment.update({
         where: { id: data.roleAssignmentId },
-         { status: 'REVOKED' },
+        data: { status: 'REVOKED' },
       });
     }
     
     // Update certification status
     await prisma.accessCertification.update({
       where: { id },
-       { status: 'IN_PROGRESS' },
+      data: { status: 'IN_PROGRESS' },
     });
     
     return reply.status(201).send(decision);
@@ -320,7 +320,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const completed = await prisma.accessCertification.update({
       where: { id },
-       {
+      data: {
         status: 'COMPLETED',
         completedAt: new Date(),
       },
@@ -328,7 +328,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'completed certification',

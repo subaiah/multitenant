@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { hasMinimumUserType } from '../utils/authorization.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
@@ -67,7 +68,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (request.user.role !== 'ADMIN') {
+    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
       throw new AppError('Admin access required', 403);
     }
 
@@ -129,7 +130,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (request.user.role !== 'ADMIN') {
+    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
       throw new AppError('Admin access required', 403);
     }
 
@@ -200,11 +201,11 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (request.user.role !== 'ADMIN') {
+    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
       throw new AppError('Admin access required', 403);
     }
 
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
     const data = updateAuthProviderSchema.parse(request.body);
 
     const provider = await prisma.authProvider.update({
@@ -240,11 +241,11 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (request.user.role !== 'ADMIN') {
+    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
       throw new AppError('Admin access required', 403);
     }
 
-    const { id } = request.params;
+    const { id } = request.params as { id: string };
 
     await prisma.authProvider.delete({
       where: { id },

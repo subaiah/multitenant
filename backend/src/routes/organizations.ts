@@ -44,8 +44,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         status ? { status } : {},
         search ? {
           OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { description: { contains: search, mode: 'insensitive' as const } },
           ],
         } : {},
       ],
@@ -163,7 +163,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const organization = await prisma.organization.create({
-       {
+      data: {
         tenantId,
         ...data,
       },
@@ -171,7 +171,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'created organization',
@@ -221,7 +221,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'updated organization',
@@ -278,7 +278,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'deleted organization',
@@ -347,7 +347,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const membership = await prisma.orgMembership.create({
-       {
+      data: {
         tenantId,
         userId: memberUserId,
         organizationId: orgId,
@@ -356,7 +356,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'added member to organization',
@@ -396,7 +396,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Log activity
     await prisma.activity.create({
-       {
+      data: {
         tenantId,
         userId,
         action: 'removed member from organization',

@@ -1,10 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { withActivityUsers } from '../lib/activity-users.js';
 
 const querySchema = z.object({
-  page: z.string().transform(Number).default('1'),
-  limit: z.string().transform(Number).default('20'),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).default(20),
   type: z.enum(['DEPLOY', 'CONFIG', 'USER', 'BILLING', 'ALERT', 'AUTH', 'API']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
@@ -52,16 +53,7 @@ export const activityRoutes: FastifyPluginAsync = async (fastify) => {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
-      }),
+      }).then(withActivityUsers),
       prisma.activity.count({ where }),
     ]);
 
