@@ -21,6 +21,9 @@ import { apiConfigRoutes } from './routes/api-config.js';
 import { healthRoutes } from './routes/health.js';
 import { roleRoutes } from './routes/roles.js';
 import { groupRoutes } from './routes/groups.js';
+import { organizationRoutes } from './routes/organizations.js';
+import { orgUnitRoutes } from './routes/org-units.js';
+import { tenantApplicationRoutes } from './routes/tenant-applications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
 
@@ -164,6 +167,15 @@ async function registerRoutes() {
 
     // Group management
     await protectedRoutes.register(groupRoutes, { prefix: '/groups' });
+
+    // Organization management (Phase 2)
+    await protectedRoutes.register(organizationRoutes, { prefix: '/organizations' });
+
+    // Org unit management (Phase 2)
+    await protectedRoutes.register(orgUnitRoutes, { prefix: '/org-units' });
+
+    // Tenant application entitlements (Phase 2)
+    await protectedRoutes.register(tenantApplicationRoutes, { prefix: '/tenant-applications' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });

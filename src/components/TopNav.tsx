@@ -65,6 +65,17 @@ const navItems: NavItem[] = [
       { id: 'users-all', label: 'All Users', path: '/users' },
       { id: 'users-groups', label: 'Groups', path: '/groups' },
       { id: 'users-roles', label: 'Role Assignments', path: '/role-assignments' },
+      { id: 'users-orgs', label: 'Organizations', path: '/organizations' },
+    ],
+  },
+  {
+    id: 'apps-mgmt',
+    label: 'App Management',
+    icon: AppWindow,
+    path: '/applications-management',
+    children: [
+      { id: 'apps-mgmt-list', label: 'Applications', path: '/applications-management' },
+      { id: 'apps-mgmt-entitlements', label: 'Tenant Entitlements', path: '/tenant-entitlements' },
     ],
   },
   { id: 'security', label: 'Security', icon: Shield, path: '/security' },

@@ -242,10 +242,23 @@ export async function hasPermission(
   // 4. Filter by scope if provided
   let validAssignments = allAssignments;
   if (scopeType && scopeId) {
-    validAssignments = allAssignments.filter(assignment => {
-      // Check if assignment scope is compatible with requested scope
-      return isScopeCompatible(assignment.scopeType, assignment.scopeId, scopeType, scopeId);
-    });
+    // Use Promise.all to handle async scope compatibility checks
+    const compatibilityChecks = await Promise.all(
+      allAssignments.map(async (assignment) => {
+        const isCompatible = await isScopeCompatible(
+          assignment.scopeType,
+          assignment.scopeId,
+          scopeType,
+          scopeId,
+          tenantId
+        );
+        return { assignment, isCompatible };
+      })
+    );
+    
+    validAssignments = compatibilityChecks
+      .filter(check => check.isCompatible)
+      .map(check => check.assignment);
   }
   
   // 5. Check for wildcard permissions
@@ -271,25 +284,72 @@ export async function hasPermission(
 
 /**
  * Check if assignment scope is compatible with requested scope
+ * Supports hierarchical scope checking for organizations and org units
  */
-function isScopeCompatible(
+async function isScopeCompatible(
   assignmentScopeType: string,
   assignmentScopeId: string,
   requestedScopeType: string,
-  requestedScopeId: string
-): boolean {
+  requestedScopeId: string,
+  tenantId: string
+): Promise<boolean> {
   // Exact match
   if (assignmentScopeType === requestedScopeType && assignmentScopeId === requestedScopeId) {
     return true;
   }
   
   // Tenant scope covers everything in tenant
-  if (assignmentScopeType === 'TENANT' && assignmentScopeId === requestedScopeId) {
+  if (assignmentScopeType === 'TENANT') {
     return true;
   }
   
-  // TODO: Add hierarchical scope checking for ORGANIZATION and ORG_UNIT
-  // This will be implemented in Phase 2 when org hierarchy is added
+  // Organization scope covers the organization and all its units
+  if (assignmentScopeType === 'ORGANIZATION') {
+    // If requesting organization scope, check if it's the same org
+    if (requestedScopeType === 'ORGANIZATION' && assignmentScopeId === requestedScopeId) {
+      return true;
+    }
+    
+    // If requesting org unit scope, check if the unit belongs to the assigned organization
+    if (requestedScopeType === 'ORG_UNIT') {
+      const unit = await prisma.orgUnit.findFirst({
+        where: {
+          id: requestedScopeId,
+          organizationId: assignmentScopeId,
+          tenantId,
+        },
+      });
+      return !!unit;
+    }
+  }
+  
+  // Org unit scope covers the unit and all its descendants
+  if (assignmentScopeType === 'ORG_UNIT') {
+    // If requesting the same org unit
+    if (requestedScopeType === 'ORG_UNIT' && assignmentScopeId === requestedScopeId) {
+      return true;
+    }
+    
+    // If requesting a descendant org unit, traverse up the hierarchy
+    if (requestedScopeType === 'ORG_UNIT') {
+      let currentUnitId: string | null = requestedScopeId;
+      
+      // Traverse up the hierarchy to find if assignment scope is an ancestor
+      while (currentUnitId) {
+        if (currentUnitId === assignmentScopeId) {
+          return true;
+        }
+        
+        // Get parent unit
+        const unit = await prisma.orgUnit.findUnique({
+          where: { id: currentUnitId },
+          select: { parentUnitId: true },
+        });
+        
+        currentUnitId = unit?.parentUnitId || null;
+      }
+    }
+  }
   
   return false;
 }

@@ -2,89 +2,86 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 
 const createApplicationSchema = z.object({
-  name: z.string().min(2),
+  key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
+  name: z.string().min(2).max(100),
   description: z.string().optional(),
   version: z.string().default('1.0.0'),
-  environment: z.enum(['PRODUCTION', 'STAGING', 'DEVELOPMENT']).default('DEVELOPMENT'),
-  url: z.string().url(),
 });
 
 const updateApplicationSchema = z.object({
-  name: z.string().min(2).optional(),
+  name: z.string().min(2).max(100).optional(),
   description: z.string().optional(),
-  status: z.enum(['RUNNING', 'STOPPED', 'DEPLOYING', 'ERROR']).optional(),
   version: z.string().optional(),
-  environment: z.enum(['PRODUCTION', 'STAGING', 'DEVELOPMENT']).optional(),
-  url: z.string().url().optional(),
-  cpu: z.number().min(0).max(100).optional(),
-  memory: z.number().min(0).max(100).optional(),
-  requests: z.number().min(0).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'DEPRECATED']).optional(),
 });
 
-const querySchema = z.object({
-  page: z.string().transform(Number).default('1'),
-  limit: z.string().transform(Number).default('10'),
-  status: z.enum(['RUNNING', 'STOPPED', 'DEPLOYING', 'ERROR']).optional(),
-  environment: z.enum(['PRODUCTION', 'STAGING', 'DEVELOPMENT']).optional(),
-  search: z.string().optional(),
+const createPermissionSchema = z.object({
+  name: z.string().min(2).max(100),
+  description: z.string().optional(),
+  resource: z.string().min(2).max(50),
+  action: z.string().min(2).max(50),
 });
 
 export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
-  // List applications for current tenant
+  // List all applications (platform-wide)
   fastify.get('/', {
     schema: {
       tags: ['applications'],
-      summary: 'List applications for current tenant',
+      summary: 'List all applications',
       querystring: {
         type: 'object',
         properties: {
           page: { type: 'string', default: '1' },
-          limit: { type: 'string', default: '10' },
-          status: { type: 'string', enum: ['RUNNING', 'STOPPED', 'DEPLOYING', 'ERROR'] },
-          environment: { type: 'string', enum: ['PRODUCTION', 'STAGING', 'DEVELOPMENT'] },
+          limit: { type: 'string', default: '20' },
           search: { type: 'string' },
+          status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'DEPRECATED'] },
         },
       },
     },
   }, async (request, reply) => {
-    const { page, limit, status, environment, search } = querySchema.parse(request.query);
-    const skip = (page - 1) * limit;
-
+    const userType = (request.user as any).userType;
+    const { page = '1', limit = '20', search, status } = request.query as any;
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
     const where = {
-      tenantId: request.tenant.id,
       AND: [
         status ? { status } : {},
-        environment ? { environment } : {},
-        search
-          ? {
-              OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { description: { contains: search, mode: 'insensitive' } },
-              ],
-            }
-          : {},
+        search ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { key: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
+        } : {},
       ],
     };
-
+    
     const [applications, total] = await Promise.all([
       prisma.application.findMany({
         where,
         skip,
-        take: limit,
+        take: parseInt(limit),
         orderBy: { createdAt: 'desc' },
+        include: {
+          _count: {
+            select: { permissions: true, tenantApplications: true },
+          },
+        },
       }),
       prisma.application.count({ where }),
     ]);
-
+    
     return {
-      data: applications,
+      applications,
       pagination: {
-        page,
-        limit,
+        page: parseInt(page),
+        limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / parseInt(limit)),
       },
     };
   });
@@ -103,65 +100,88 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
-
-    const application = await prisma.application.findFirst({
-      where: {
-        id,
-        tenantId: request.tenant.id,
+    const { id } = request.params as { id: string };
+    
+    const application = await prisma.application.findUnique({
+      where: { id },
+      include: {
+        permissions: true,
+        tenantApplications: {
+          include: {
+            tenant: {
+              select: { id: true, name: true, slug: true },
+            },
+          },
+        },
+        _count: {
+          select: { permissions: true, tenantApplications: true },
+        },
       },
     });
-
+    
     if (!application) {
       throw new AppError('Application not found', 404);
     }
-
+    
     return application;
   });
 
-  // Create application
+  // Create application (platform admin only)
   fastify.post('/', {
     schema: {
       tags: ['applications'],
       summary: 'Create application',
       body: {
         type: 'object',
-        required: ['name', 'url'],
+        required: ['key', 'name'],
         properties: {
-          name: { type: 'string', minLength: 2 },
+          key: { type: 'string', minLength: 2, maxLength: 50 },
+          name: { type: 'string', minLength: 2, maxLength: 100 },
           description: { type: 'string' },
-          version: { type: 'string', default: '1.0.0' },
-          environment: { type: 'string', enum: ['PRODUCTION', 'STAGING', 'DEVELOPMENT'], default: 'DEVELOPMENT' },
-          url: { type: 'string', format: 'uri' },
+          version: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
+    const userId = (request.user as any).userId;
+    const userType = (request.user as any).userType;
+    
+    // Only platform admins can create applications
+    if (!isPlatformAdmin(userType)) {
+      throw new AppError('Only platform admins can create applications', 403);
+    }
+    
     const data = createApplicationSchema.parse(request.body);
-
+    
+    // Check if key already exists
+    const existing = await prisma.application.findUnique({
+      where: { key: data.key },
+    });
+    
+    if (existing) {
+      throw new AppError('Application key already exists', 409);
+    }
+    
     const application = await prisma.application.create({
-      data: {
+       {
         ...data,
-        tenantId: request.tenant.id,
-        status: 'DEPLOYING',
       },
     });
-
+    
     // Log activity
     await prisma.activity.create({
-      data: {
-        tenantId: request.tenant.id,
-        userId: request.user.userId,
+       {
+        userId,
         action: 'created application',
         target: application.name,
-        type: 'DEPLOY',
+        type: 'CONFIG',
       },
     });
-
+    
     return reply.status(201).send(application);
   });
 
-  // Update application
+  // Update application (platform admin only)
   fastify.patch('/:id', {
     schema: {
       tags: ['applications'],
@@ -176,49 +196,43 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       body: {
         type: 'object',
         properties: {
-          name: { type: 'string', minLength: 2 },
+          name: { type: 'string', minLength: 2, maxLength: 100 },
           description: { type: 'string' },
-          status: { type: 'string', enum: ['RUNNING', 'STOPPED', 'DEPLOYING', 'ERROR'] },
           version: { type: 'string' },
-          environment: { type: 'string', enum: ['PRODUCTION', 'STAGING', 'DEVELOPMENT'] },
-          url: { type: 'string', format: 'uri' },
-          cpu: { type: 'number', minimum: 0, maximum: 100 },
-          memory: { type: 'number', minimum: 0, maximum: 100 },
-          requests: { type: 'number', minimum: 0 },
+          status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'DEPRECATED'] },
         },
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
+    const userId = (request.user as any).userId;
+    const userType = (request.user as any).userType;
+    const { id } = request.params as { id: string };
+    
+    if (!isPlatformAdmin(userType)) {
+      throw new AppError('Only platform admins can update applications', 403);
+    }
+    
     const data = updateApplicationSchema.parse(request.body);
-
+    
     const application = await prisma.application.update({
-      where: {
-        id,
-        tenantId: request.tenant.id,
-      },
-      data: {
-        ...data,
-        lastDeployedAt: data.version ? new Date() : undefined,
-      },
+      where: { id },
+      data,
     });
-
+    
     // Log activity
     await prisma.activity.create({
-      data: {
-        tenantId: request.tenant.id,
-        userId: request.user.userId,
+       {
+        userId,
         action: 'updated application',
         target: application.name,
         type: 'CONFIG',
-        metadata: data,
       },
     });
-
+    
     return application;
   });
 
-  // Delete application
+  // Delete application (platform admin only)
   fastify.delete('/:id', {
     schema: {
       tags: ['applications'],
@@ -232,34 +246,86 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
-
-    const application = await prisma.application.delete({
-      where: {
-        id,
-        tenantId: request.tenant.id,
-      },
+    const userId = (request.user as any).userId;
+    const userType = (request.user as any).userType;
+    const { id } = request.params as { id: string };
+    
+    if (!isPlatformAdmin(userType)) {
+      throw new AppError('Only platform admins can delete applications', 403);
+    }
+    
+    // Check if application has permissions
+    const permissionCount = await prisma.permission.count({
+      where: { applicationId: id },
     });
-
+    
+    if (permissionCount > 0) {
+      throw new AppError('Cannot delete application with permissions. Remove all permissions first.', 400);
+    }
+    
+    // Check if application has tenant entitlements
+    const entitlementCount = await prisma.tenantApplication.count({
+      where: { applicationId: id },
+    });
+    
+    if (entitlementCount > 0) {
+      throw new AppError('Cannot delete application with tenant entitlements. Remove all entitlements first.', 400);
+    }
+    
+    const application = await prisma.application.delete({
+      where: { id },
+    });
+    
     // Log activity
     await prisma.activity.create({
-      data: {
-        tenantId: request.tenant.id,
-        userId: request.user.userId,
+       {
+        userId,
         action: 'deleted application',
         target: application.name,
         type: 'CONFIG',
       },
     });
-
+    
     return reply.status(204).send();
   });
 
-  // Deploy application (simulate deployment)
-  fastify.post('/:id/deploy', {
+  // List permissions for an application
+  fastify.get('/:id/permissions', {
     schema: {
       tags: ['applications'],
-      summary: 'Deploy application',
+      summary: 'List permissions for an application',
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    
+    const application = await prisma.application.findUnique({
+      where: { id },
+    });
+    
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+    
+    const permissions = await prisma.permission.findMany({
+      where: { applicationId: id },
+      orderBy: [{ resource: 'asc' }, { action: 'asc' }],
+    });
+    
+    return { permissions };
+  });
+
+  // Create permission for an application
+  fastify.post('/:id/permissions', {
+    schema: {
+      tags: ['applications'],
+      summary: 'Create permission for an application',
       params: {
         type: 'object',
         required: ['id'],
@@ -269,61 +335,109 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       },
       body: {
         type: 'object',
+        required: ['name', 'resource', 'action'],
         properties: {
-          version: { type: 'string' },
+          name: { type: 'string', minLength: 2, maxLength: 100 },
+          description: { type: 'string' },
+          resource: { type: 'string', minLength: 2, maxLength: 50 },
+          action: { type: 'string', minLength: 2, maxLength: 50 },
         },
       },
     },
   }, async (request, reply) => {
-    const { id } = request.params;
-    const { version } = request.body as { version?: string };
-
-    // Update status to DEPLOYING
-    const application = await prisma.application.update({
-      where: {
-        id,
-        tenantId: request.tenant.id,
-      },
-      data: {
-        status: 'DEPLOYING',
-        version: version || undefined,
+    const userId = (request.user as any).userId;
+    const userType = (request.user as any).userType;
+    const { id } = request.params as { id: string };
+    
+    if (!isPlatformAdmin(userType)) {
+      throw new AppError('Only platform admins can create permissions', 403);
+    }
+    
+    const data = createPermissionSchema.parse(request.body);
+    
+    // Verify application exists
+    const application = await prisma.application.findUnique({
+      where: { id },
+    });
+    
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+    
+    // Check if permission name already exists
+    const existing = await prisma.permission.findUnique({
+      where: { name: data.name },
+    });
+    
+    if (existing) {
+      throw new AppError('Permission name already exists', 409);
+    }
+    
+    const permission = await prisma.permission.create({
+       {
+        applicationId: id,
+        ...data,
       },
     });
-
+    
     // Log activity
     await prisma.activity.create({
-      data: {
-        tenantId: request.tenant.id,
-        userId: request.user.userId,
-        action: 'deployed application',
-        target: `${application.name} v${application.version}`,
-        type: 'DEPLOY',
+       {
+        userId,
+        action: 'created permission',
+        target: `${permission.name} for ${application.name}`,
+        type: 'CONFIG',
       },
     });
+    
+    return reply.status(201).send(permission);
+  });
 
-    // Simulate deployment completion after 2 seconds
-    setTimeout(async () => {
-      await prisma.application.update({
-        where: { id },
-        data: {
-          status: 'RUNNING',
-          lastDeployedAt: new Date(),
+  // Delete permission
+  fastify.delete('/permissions/:permissionId', {
+    schema: {
+      tags: ['applications'],
+      summary: 'Delete permission',
+      params: {
+        type: 'object',
+        required: ['permissionId'],
+        properties: {
+          permissionId: { type: 'string', format: 'uuid' },
         },
-      });
-
-      await prisma.activity.create({
-        data: {
-          tenantId: request.tenant.id,
-          action: 'deployment completed',
-          target: `${application.name} v${application.version}`,
-          type: 'DEPLOY',
-        },
-      });
-    }, 2000);
-
-    return {
-      message: 'Deployment started',
-      application,
-    };
+      },
+    },
+  }, async (request, reply) => {
+    const userId = (request.user as any).userId;
+    const userType = (request.user as any).userType;
+    const { permissionId } = request.params as { permissionId: string };
+    
+    if (!isPlatformAdmin(userType)) {
+      throw new AppError('Only platform admins can delete permissions', 403);
+    }
+    
+    // Check if permission is used in any roles
+    const rolePermissionCount = await prisma.rolePermission.count({
+      where: { permissionId },
+    });
+    
+    if (rolePermissionCount > 0) {
+      throw new AppError('Cannot delete permission that is used in roles. Remove from all roles first.', 400);
+    }
+    
+    const permission = await prisma.permission.delete({
+      where: { id: permissionId },
+    });
+    
+    // Log activity
+    await prisma.activity.create({
+       {
+        userId,
+        action: 'deleted permission',
+        target: permission.name,
+        type: 'CONFIG',
+      },
+    });
+    
+    return reply.status(204).send();
   });
 };
