@@ -546,3 +546,189 @@ export async function createDefaultPermissions(): Promise<void> {
     },
   });
 }
+
+/**
+ * Enhanced permission data structure
+ */
+export interface EnhancedPermissionData {
+  permissions: string[];
+  sources: {
+    userType: string;
+    directRoles: string[];
+    groupRoles: string[];
+    delegations: string[];
+  };
+  effectivePermissions: Array<{
+    permission: string;
+    sources: string[];
+  }>;
+}
+
+/**
+ * Get enhanced user permissions with metadata about sources
+ */
+export async function getEnhancedUserPermissions(
+  userId: string,
+  tenantId: string,
+  userType: string
+): Promise<EnhancedPermissionData> {
+  const permissionSources = new Map<string, Set<string>>();
+  const directRoleNames = new Set<string>();
+  const groupRoleNames = new Set<string>();
+  const delegationNames = new Set<string>();
+
+  // Helper to add permission with source tracking
+  const addPermission = (permission: string, source: string) => {
+    if (!permissionSources.has(permission)) {
+      permissionSources.set(permission, new Set());
+    }
+    permissionSources.get(permission)!.add(source);
+  };
+
+  // 1. Get user type default permissions
+  const userTypePermissions = getDefaultPermissions(userType as UserType);
+  userTypePermissions.forEach(perm => addPermission(perm, 'userType'));
+
+  // 2. Get direct role assignments
+  const directAssignments = await prisma.roleAssignment.findMany({
+    where: {
+      userId,
+      tenantId,
+      principalType: 'USER',
+      status: 'ACTIVE',
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  for (const assignment of directAssignments) {
+    directRoleNames.add(assignment.role.name);
+    for (const rp of assignment.role.permissions) {
+      const permString = `${rp.permission.resource}:${rp.permission.action}`;
+      addPermission(permString, `role:${assignment.role.name}`);
+    }
+  }
+
+  // 3. Get group memberships and group-based permissions
+  const groupMemberships = await prisma.groupMembership.findMany({
+    where: {
+      userId,
+      tenantId,
+      validFrom: { lte: new Date() },
+      OR: [
+        { validTo: null },
+        { validTo: { gt: new Date() } },
+      ],
+    },
+    include: {
+      group: true,
+    },
+  });
+
+  const groupIds = groupMemberships.map(m => m.groupId);
+  
+  if (groupIds.length > 0) {
+    const groupAssignments = await prisma.roleAssignment.findMany({
+      where: {
+        groupId: { in: groupIds },
+        tenantId,
+        principalType: 'GROUP',
+        status: 'ACTIVE',
+        validFrom: { lte: new Date() },
+        OR: [
+          { validTo: null },
+          { validTo: { gt: new Date() } },
+        ],
+      },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+        group: true,
+      },
+    });
+
+    for (const assignment of groupAssignments) {
+      groupRoleNames.add(assignment.role.name);
+      for (const rp of assignment.role.permissions) {
+        const permString = `${rp.permission.resource}:${rp.permission.action}`;
+        addPermission(permString, `group:${assignment.group?.name || 'unknown'}:role:${assignment.role.name}`);
+      }
+    }
+  }
+
+  // 4. Get delegations
+  const delegations = await prisma.delegation.findMany({
+    where: {
+      delegateId: userId,
+      tenantId,
+      status: 'ACTIVE',
+      validTo: { gt: new Date() },
+    },
+    include: {
+      roleAssignment: {
+        include: {
+          role: {
+            include: {
+              permissions: {
+                include: {
+                  permission: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  for (const delegation of delegations) {
+    delegationNames.add(delegation.roleAssignment.role.name);
+    for (const rp of delegation.roleAssignment.role.permissions) {
+      const permString = `${rp.permission.resource}:${rp.permission.action}`;
+      addPermission(permString, `delegation:${delegation.roleAssignment.role.name}`);
+    }
+  }
+
+  // 5. Build effective permissions list
+  const effectivePermissions = Array.from(permissionSources.entries()).map(
+    ([permission, sources]) => ({
+      permission,
+      sources: Array.from(sources),
+    })
+  );
+
+  // 6. Build simple permissions array (for backward compatibility)
+  const permissions = Array.from(permissionSources.keys());
+
+  return {
+    permissions,
+    sources: {
+      userType,
+      directRoles: Array.from(directRoleNames),
+      groupRoles: Array.from(groupRoleNames),
+      delegations: Array.from(delegationNames),
+    },
+    effectivePermissions,
+  };
+}

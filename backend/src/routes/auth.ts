@@ -1086,25 +1086,56 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  // Get user permissions
+  // Get user permissions (enhanced)
   fastify.get('/permissions', {
     schema: {
       tags: ['auth'],
-      summary: 'Get current user permissions',
+      summary: 'Get current user permissions with metadata',
       security: [{ bearerAuth: [] }],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            permissions: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            sources: {
+              type: 'object',
+              properties: {
+                userType: { type: 'string' },
+                directRoles: { type: 'array', items: { type: 'string' } },
+                groupRoles: { type: 'array', items: { type: 'string' } },
+                delegations: { type: 'array', items: { type: 'string' } },
+              },
+            },
+            effectivePermissions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  permission: { type: 'string' },
+                  sources: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   }, async (request, reply) => {
     try {
       await request.jwtVerify();
       const userId = (request.user as any).userId;
       const tenantId = (request.user as any).tenantId;
+      const userType = (request.user as any).userType;
 
-      // Import the getUserPermissions function
-      const { getUserPermissions } = await import('../utils/authorization.js');
+      // Import the enhanced permission function
+      const { getEnhancedUserPermissions } = await import('../utils/authorization.js');
       
-      const permissions = await getUserPermissions(userId, tenantId);
+      const permissionData = await getEnhancedUserPermissions(userId, tenantId, userType);
 
-      return { permissions };
+      return permissionData;
     } catch (err) {
       throw new AppError('Failed to fetch permissions', 500);
     }

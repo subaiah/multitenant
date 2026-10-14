@@ -30,6 +30,7 @@ import { supportSessionRoutes } from './routes/support-sessions.js';
 import { accessRequestRoutes } from './routes/access-requests.js';
 import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
+import { permissionRoutes } from './routes/permissions.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { tenantContext } from './middleware/tenant-context.js';
 
@@ -192,6 +193,9 @@ async function registerRoutes() {
 
     // Menu items routes
     await protectedRoutes.register(menuItemRoutes, { prefix: '/menu-items' });
+
+    // Permission routes
+    await protectedRoutes.register(permissionRoutes, { prefix: '/permissions' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });
