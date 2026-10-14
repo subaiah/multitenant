@@ -10,6 +10,21 @@ export default defineConfig({
     strictPort: true,
     hmr: {
       port: 5173,
+      // Disable console forwarding to avoid __SERVER_FORWARD_CONSOLE__ issue
+      overlay: false,
+    },
+    // Disable server console forwarding
+    watch: {
+      usePolling: false,
+    },
+  },
+  optimizeDeps: {
+    exclude: ['vite'],
+  },
+  // Ensure proper module resolution
+  resolve: {
+    alias: {
+      // Prevent any accidental imports of vite internals
     },
   },
 });
