@@ -2,14 +2,16 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import { config } from '../config/env.js';
+import { verifyPassword } from '../utils/auth.js';
 import crypto from 'crypto';
 
 // Validation schemas
 const loginSchema = z.object({
   email: z.string().email(),
   tenantSlug: z.string(),
-  password: z.string().optional(),
+  password: z.string().min(1),
 });
 
 const otpRequestSchema = z.object({
@@ -48,16 +50,17 @@ function parseExpiryToMs(expiry: string): number {
 export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // Login endpoint - sets httpOnly cookies
   fastify.post('/login', {
+    config: { rateLimit: loginRateLimit('bff') },
     schema: {
       tags: ['bff-auth'],
       summary: 'Login and set secure cookies',
       body: {
         type: 'object',
-        required: ['email', 'tenantSlug'],
+        required: ['email', 'tenantSlug', 'password'],
         properties: {
           email: { type: 'string', format: 'email' },
           tenantSlug: { type: 'string' },
-          password: { type: 'string' },
+          password: { type: 'string', minLength: 1 },
         },
       },
     },
@@ -86,37 +89,22 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    if (!user) {
+    // Password is required. Verify it before revealing anything else about the account.
+    if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       throw new AppError('Invalid credentials', 401);
     }
 
     const tenantId = user.tenantId;
     if (!tenantId || tenantId !== tenant.id) {
-      throw new AppError('User is not associated with this tenant', 403);
+      throw new AppError('Invalid credentials', 401);
+    }
+
+    if (tenant.authConfig?.ssoOnly) {
+      throw new AppError('SSO authentication required', 403);
     }
 
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
-    }
-
-    // Verify password if provided
-    if (password) {
-      if (!user.passwordHash) {
-        throw new AppError('Password not set for this user', 400);
-      }
-
-      // Import verifyPassword function
-      const { verifyPassword } = await import('../utils/auth.js');
-      const isValid = await verifyPassword(password, user.passwordHash);
-      
-      if (!isValid) {
-        throw new AppError('Invalid credentials', 401);
-      }
-    } else {
-      // If no password, check if SSO is required
-      if (tenant.authConfig?.ssoOnly) {
-        throw new AppError('SSO authentication required', 403);
-      }
     }
 
     // Generate access token (short-lived)
@@ -206,6 +194,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Request OTP endpoint
   fastify.post('/otp/request', {
+    config: { rateLimit: otpRequestRateLimit('bff') },
     schema: {
       tags: ['bff-auth'],
       summary: 'Request OTP for passwordless login',
@@ -249,7 +238,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     if (!user) {
-      if (config.nodeEnv === 'development') {
+      if (config.devExposeOtp) {
         throw new AppError('User not found', 404);
       }
       return { message: 'If the email exists, an OTP has been sent' };
@@ -283,7 +272,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // In development, return the OTP for testing
-    if (config.nodeEnv === 'development') {
+    if (config.devExposeOtp) {
       return {
         message: 'OTP generated successfully',
         otp: code,
@@ -301,6 +290,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Verify OTP endpoint
   fastify.post('/otp/verify', {
+    config: { rateLimit: otpVerifyRateLimit('bff') },
     schema: {
       tags: ['bff-auth'],
       summary: 'Verify OTP and login',

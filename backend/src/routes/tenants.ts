@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authorization.js';
 
 const updateTenantSchema = z.object({
   name: z.string().min(2).optional(),
@@ -35,9 +36,9 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    // Check if user is admin
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
-      throw new AppError('Admin access required', 403);
+    // Listing all tenants is a platform-level operation
+    if (!isPlatformUser(request.user.userType)) {
+      throw new AppError('Platform access required', 403);
     }
 
     const { page, limit, status, plan, search } = querySchema.parse(request.query);
@@ -125,8 +126,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    // Only admins can view other tenants
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType) && request.tenant.id !== id) {
+    // Tenant users can only view their own tenant
+    if (!isPlatformUser(request.user.userType) && request.user.tenantId !== id) {
       throw new AppError('Access denied', 403);
     }
 
@@ -174,9 +175,15 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const data = updateTenantSchema.parse(request.body);
 
-    // Only admins can update tenants
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
-      throw new AppError('Admin access required', 403);
+    // Platform admins can update any tenant. Tenant admins can only rename
+    // their own tenant; plan and status (billing/suspension) are platform-only.
+    const { userType, tenantId } = request.user;
+    if (!isPlatformAdmin(userType)) {
+      const ownTenantRenameOnly =
+        isTenantAdmin(userType) && tenantId === id && data.plan === undefined && data.status === undefined;
+      if (!ownTenantRenameOnly) {
+        throw new AppError('Platform admin access required', 403);
+      }
     }
 
     const tenant = await prisma.tenant.update({
@@ -215,9 +222,9 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    // Only admins can delete tenants
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
-      throw new AppError('Admin access required', 403);
+    // Deleting a tenant cascades to all its data: platform admins only
+    if (!isPlatformAdmin(request.user.userType)) {
+      throw new AppError('Platform admin access required', 403);
     }
 
     await prisma.tenant.delete({

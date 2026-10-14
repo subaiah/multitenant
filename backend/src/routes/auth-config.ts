@@ -41,7 +41,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const config = await prisma.authConfig.findUnique({
       where: { tenantId: request.tenant.id },
       include: {
-        providers: true,
+        // Never return OAuth client secrets to the browser
+        providers: { omit: { clientSecret: true } },
       },
     });
 
@@ -103,7 +104,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const config = await prisma.authConfig.findUnique({
       where: { tenantId: request.tenant.id },
       include: {
-        providers: true,
+        // Never return OAuth client secrets to the browser
+        providers: { omit: { clientSecret: true } },
       },
     });
 
@@ -161,6 +163,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         ...data,
         authConfigId: config.id,
       },
+      omit: { clientSecret: true },
     });
 
     await prisma.activity.create({
@@ -208,9 +211,11 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const data = updateAuthProviderSchema.parse(request.body);
 
+    // Scoped to the caller's tenant: another tenant's provider is a 404
     const provider = await prisma.authProvider.update({
-      where: { id },
+      where: { id, authConfig: { tenantId: request.tenant.id } },
       data,
+      omit: { clientSecret: true },
     });
 
     await prisma.activity.create({
@@ -248,7 +253,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
 
     await prisma.authProvider.delete({
-      where: { id },
+      where: { id, authConfig: { tenantId: request.tenant.id } },
     });
 
     return reply.status(204).send();

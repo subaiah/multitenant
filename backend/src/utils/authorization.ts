@@ -22,6 +22,20 @@ export function hasMinimumUserType(userType: UserType, minimumType: UserType): b
 }
 
 /**
+ * Whether an actor may create, edit or grant a given user type.
+ * Nobody can grant or manage a user type ranked above their own.
+ */
+export function canManageUserType(actorType: UserType, targetType: UserType): boolean {
+  return USER_TYPE_HIERARCHY[targetType] <= USER_TYPE_HIERARCHY[actorType];
+}
+
+export function requireCanManageUserType(actorType: UserType, targetType: UserType): void {
+  if (!canManageUserType(actorType, targetType)) {
+    throw new AppError(`Cannot manage users of type ${targetType}`, 403);
+  }
+}
+
+/**
  * Check if user is a platform admin
  */
 export function isPlatformAdmin(userType: UserType): boolean {
@@ -130,7 +144,10 @@ export async function getUserPermissions(userId: string, tenantId?: string): Pro
   
   // 4. Get legacy UserRole assignments (for backward compatibility)
   const legacyRoles = await prisma.userRole.findMany({
-    where: { userId },
+    // Legacy roles: only the requested tenant's roles (or platform roles)
+    where: tenantId
+      ? { userId, role: { OR: [{ tenantId }, { tenantId: null }] } }
+      : { userId },
     include: {
       role: {
         include: {

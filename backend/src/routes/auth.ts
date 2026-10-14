@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import crypto from 'crypto';
 import { generateOtp, verifyPassword, hashPassword, getOtpExpiration } from '../utils/auth.js';
 import { config } from '../config/env.js';
@@ -10,6 +11,7 @@ import { config } from '../config/env.js';
 const loginSchema = z.object({
   email: z.string().email(),
   tenantId: z.string().uuid(),
+  password: z.string().min(1),
 });
 
 const registerSchema = z.object({
@@ -425,21 +427,22 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Login (email/password - fallback when SSO is not required)
   fastify.post('/login', {
+    config: { rateLimit: loginRateLimit('auth') },
     schema: {
       tags: ['auth'],
       summary: 'User login with email/password',
       body: {
         type: 'object',
-        required: ['email', 'tenantId'],
+        required: ['email', 'tenantId', 'password'],
         properties: {
           email: { type: 'string', format: 'email' },
           tenantId: { type: 'string', format: 'uuid' },
-          password: { type: 'string' }, // In production, hash passwords
+          password: { type: 'string', minLength: 1 },
         },
       },
     },
   }, async (request, reply) => {
-    const { email, tenantId } = loginSchema.parse(request.body);
+    const { email, tenantId, password } = loginSchema.parse(request.body);
 
     // Check if tenant requires SSO only
     const authConfig = await prisma.authConfig.findUnique({
@@ -469,7 +472,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    if (!user) {
+    // Verify the password before revealing anything else about the account
+    if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       throw new AppError('Invalid credentials', 401);
     }
 
@@ -484,9 +488,6 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     if (user.tenant.status === 'SUSPENDED') {
       throw new AppError('Tenant is suspended', 403);
     }
-
-    // In production, verify password hash here
-    // For demo, we'll accept any password
 
     // Update last login
     await prisma.user.update({
@@ -530,6 +531,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Request OTP for passwordless login
   fastify.post('/otp/request', {
+    config: { rateLimit: otpRequestRateLimit('auth') },
     schema: {
       tags: ['auth'],
       summary: 'Request OTP for passwordless login',
@@ -577,7 +579,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     if (!user) {
       // Don't reveal if user exists or not for security
       // But for development, we can be more explicit
-      if (config.nodeEnv === 'development') {
+      if (config.devExposeOtp) {
         throw new AppError('User not found', 404);
       }
       // In production, return success anyway to prevent email enumeration
@@ -607,7 +609,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // In development, return the OTP for testing
-    if (config.nodeEnv === 'development') {
+    if (config.devExposeOtp) {
       return {
         message: 'OTP generated successfully',
         otp: code, // Only in development!
@@ -627,6 +629,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Verify OTP and login
   fastify.post('/otp/verify', {
+    config: { rateLimit: otpVerifyRateLimit('auth') },
     schema: {
       tags: ['auth'],
       summary: 'Verify OTP and login',
@@ -757,6 +760,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Password-based login
   fastify.post('/password-login', {
+    config: { rateLimit: loginRateLimit('auth-password') },
     schema: {
       tags: ['auth'],
       summary: 'Login with email and password',
@@ -892,14 +896,27 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         required: ['password'],
         properties: {
           password: { type: 'string', minLength: 8 },
+          currentPassword: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
     await request.jwtVerify();
 
-    const { password } = request.body as { password: string };
-    const userId = (request.user as any).userId;
+    const { password, currentPassword } = request.body as { password: string; currentPassword?: string };
+    const userId = request.user.userId;
+
+    // Changing an existing password requires the current one, so a stolen
+    // session token can't be turned into a permanent account takeover.
+    const existing = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+    if (!existing) {
+      throw new AppError('User not found', 404);
+    }
+    if (existing.passwordHash) {
+      if (!currentPassword || !(await verifyPassword(currentPassword, existing.passwordHash))) {
+        throw new AppError('Current password is incorrect', 401);
+      }
+    }
 
     // Hash password
     const passwordHash = await hashPassword(password);
