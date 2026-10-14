@@ -374,7 +374,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
           tenantId: tenant.id,
           email: userInfo.email,
           name: userInfo.name,
-          role: 'USER',
+          userType: 'TENANT_USER',
           status: 'ACTIVE',
         },
       });
@@ -512,7 +512,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        userType: user.userType,
       },
       tenant: {
         id: user.tenant.id,
@@ -714,7 +714,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const token = fastify.jwt.sign({
       userId: user.id,
       tenantId: user.tenantId,
-      role: user.role,
+      userType: user.userType,
       provider: 'OTP',
     });
 
@@ -735,7 +735,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        userType: user.userType,
       },
       tenant: {
         id: user.tenant.id,
@@ -836,7 +836,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const token = fastify.jwt.sign({
       userId: user.id,
       tenantId: user.tenantId,
-      role: user.role,
+      userType: user.userType,
       provider: 'PASSWORD',
     });
 
@@ -857,7 +857,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        userType: user.userType,
       },
       tenant: {
         id: user.tenant.id,
@@ -1065,7 +1065,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         id: result.user.id,
         email: result.user.email,
         name: result.user.name,
-        role: result.user.role,
+        userType: result.user.userType,
       },
     });
   });

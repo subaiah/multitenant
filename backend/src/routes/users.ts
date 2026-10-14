@@ -6,19 +6,19 @@ import { AppError } from '../middleware/error-handler.js';
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(2),
-  role: z.enum(['ADMIN', 'MANAGER', 'USER']).default('USER'),
+  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).default('TENANT_USER'),
 });
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
-  role: z.enum(['ADMIN', 'MANAGER', 'USER']).optional(),
+  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
 });
 
 const querySchema = z.object({
   page: z.string().transform(Number).default('1'),
   limit: z.string().transform(Number).default('10'),
-  role: z.enum(['ADMIN', 'MANAGER', 'USER']).optional(),
+  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   search: z.string().optional(),
 });
@@ -34,20 +34,20 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         properties: {
           page: { type: 'string', default: '1' },
           limit: { type: 'string', default: '10' },
-          role: { type: 'string', enum: ['ADMIN', 'MANAGER', 'USER'] },
+          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
           status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
           search: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
-    const { page, limit, role, status, search } = querySchema.parse(request.query);
+    const { page, limit, userType, status, search } = querySchema.parse(request.query);
     const skip = (page - 1) * limit;
 
     const where = {
       tenantId: request.tenant.id,
       AND: [
-        role ? { role } : {},
+        userType ? { userType } : {},
         status ? { status } : {},
         search
           ? {
@@ -70,7 +70,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
           id: true,
           email: true,
           name: true,
-          role: true,
+          userType: true,
           status: true,
           lastLoginAt: true,
           createdAt: true,
@@ -103,7 +103,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         id: true,
         email: true,
         name: true,
-        role: true,
+        userType: true,
         status: true,
         lastLoginAt: true,
         createdAt: true,
@@ -138,7 +138,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         id: true,
         email: true,
         name: true,
-        role: true,
+        userType: true,
         status: true,
         lastLoginAt: true,
         createdAt: true,
@@ -163,13 +163,13 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         properties: {
           email: { type: 'string', format: 'email' },
           name: { type: 'string', minLength: 2 },
-          role: { type: 'string', enum: ['ADMIN', 'MANAGER', 'USER'], default: 'USER' },
+          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'], default: 'TENANT_USER' },
         },
       },
     },
   }, async (request, reply) => {
     // Only admins and managers can create users
-    if (!['ADMIN', 'MANAGER'].includes(request.user.role)) {
+    if (!['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER'].includes(request.user.userType)) {
       throw new AppError('Admin or Manager access required', 403);
     }
 
@@ -199,7 +199,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         id: true,
         email: true,
         name: true,
-        role: true,
+        userType: true,
         status: true,
         createdAt: true,
       },
@@ -235,7 +235,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 2 },
-          role: { type: 'string', enum: ['ADMIN', 'MANAGER', 'USER'] },
+          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
           status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
         },
       },
@@ -245,7 +245,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateUserSchema.parse(request.body);
 
     // Only admins can update users
-    if (request.user.role !== 'ADMIN') {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
       throw new AppError('Admin access required', 403);
     }
 
@@ -259,7 +259,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         id: true,
         email: true,
         name: true,
-        role: true,
+        userType: true,
         status: true,
         updatedAt: true,
       },
@@ -297,7 +297,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params;
 
     // Only admins can delete users
-    if (request.user.role !== 'ADMIN') {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
       throw new AppError('Admin access required', 403);
     }
 

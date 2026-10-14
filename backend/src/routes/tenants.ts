@@ -36,7 +36,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     // Check if user is admin
-    if (request.user.role !== 'ADMIN') {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
       throw new AppError('Admin access required', 403);
     }
 
@@ -126,7 +126,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params;
 
     // Only admins can view other tenants
-    if (request.user.role !== 'ADMIN' && request.tenant.id !== id) {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType) && request.tenant.id !== id) {
       throw new AppError('Access denied', 403);
     }
 
@@ -175,7 +175,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateTenantSchema.parse(request.body);
 
     // Only admins can update tenants
-    if (request.user.role !== 'ADMIN') {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
       throw new AppError('Admin access required', 403);
     }
 
@@ -216,7 +216,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params;
 
     // Only admins can delete tenants
-    if (request.user.role !== 'ADMIN') {
+    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
       throw new AppError('Admin access required', 403);
     }
 
