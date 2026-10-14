@@ -1,13 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ArrowRight } from 'lucide-react';
 import { apiGet } from '../lib/api-client';
+import { useAuth } from '../contexts/AuthContext';
+import { portalHome } from '../lib/permissions';
 
 export default function SmartLogin() {
   const [orgSlug, setOrgSlug] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+
+  // Already signed in: skip the org picker
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate(portalHome(user.portal), { replace: true });
+    }
+  }, [authLoading, user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +33,8 @@ export default function SmartLogin() {
     try {
       // Verify the organization exists
       const response = await apiGet<{ exists: boolean; portal: 'PLATFORM' | 'TENANT' }>(
-        `/auth/verify-organization/${orgSlug.trim()}`
+        `/auth/verify-organization/${encodeURIComponent(orgSlug.trim())}`,
+        { skipAuth: true },
       );
 
       if (!response.exists) {

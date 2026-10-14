@@ -79,7 +79,7 @@ export default function Groups() {
   const fetchAvailableUsers = async () => {
     try {
       const response = await apiGet('/users');
-      setAvailableUsers(response.users || []);
+      setAvailableUsers(response.data || []); // GET /users returns { data, pagination }
     } catch (error) {
       console.error('Failed to fetch users:', error);
     }

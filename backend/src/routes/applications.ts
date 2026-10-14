@@ -171,7 +171,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'created application',
         target: application.name,
@@ -223,7 +223,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'updated application',
         target: application.name,
@@ -281,7 +281,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'deleted application',
         target: application.name,
@@ -386,7 +386,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'created permission',
         target: `${permission.name} for ${application.name}`,
@@ -435,7 +435,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'deleted permission',
         target: permission.name,

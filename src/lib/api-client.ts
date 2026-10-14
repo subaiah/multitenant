@@ -1,197 +1,126 @@
 /**
- * API Client with automatic token refresh
- * 
- * This utility makes authenticated API calls using httpOnly cookies
- * and automatically refreshes tokens when they expire.
+ * API client.
+ *
+ * Authentication is entirely cookie-based: /bff/auth/login sets httpOnly
+ * `access_token` and `refresh_token` cookies, and every request sends them
+ * (`credentials: 'include'`). The tenant comes from the access token, so no
+ * tenant header is needed.
+ *
+ * On a 401 the client refreshes the access token once and retries. If that
+ * fails it throws `AuthError`; the AuthContext / route guards decide where to
+ * send the user (this module never navigates).
  */
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-const BFF_URL = import.meta.env.VITE_BFF_URL || 'http://localhost:4000';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly body?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** The session is gone (refresh failed); the user needs to log in again. */
+export class AuthError extends ApiError {
+  constructor() {
+    super('Session expired', 401);
+    this.name = 'AuthError';
+  }
+}
 
 interface ApiOptions extends RequestInit {
+  /** Don't try to refresh the session on 401 (login/public endpoints). */
   skipAuth?: boolean;
 }
 
-/**
- * Refresh the access token using the refresh token
- */
-async function refreshAccessToken(): Promise<boolean> {
-  try {
-    const response = await fetch(`${BFF_URL}/bff/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
-    });
+// One refresh at a time: refresh tokens rotate, so two parallel refreshes
+// would present the same token twice and trip reuse detection (logging the
+// user out everywhere).
+let refreshInFlight: Promise<boolean> | null = null;
 
-    return response.ok;
-  } catch (error) {
-    console.error('Token refresh failed:', error);
-    return false;
-  }
+function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= fetch(`${API_URL}/bff/auth/refresh`, { method: 'POST', credentials: 'include' })
+    .then((res) => res.ok)
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
 }
 
-/**
- * Make an authenticated API request
- */
-export async function apiRequest<T = any>(
-  endpoint: string,
-  options: ApiOptions = {}
-): Promise<T> {
-  const { skipAuth = false, ...fetchOptions } = options;
+async function send(url: string, options: RequestInit): Promise<Response> {
+  const headers = new Headers(options.headers);
+  if (options.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return fetch(url, { ...options, headers, credentials: 'include' });
+}
 
+async function parse<T>(response: Response): Promise<T> {
+  if (response.status === 204) return {} as T;
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new ApiError(body?.message || body?.error || `HTTP ${response.status}`, response.status, body);
+  }
+  return body as T;
+}
+
+export async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): Promise<T> {
+  const { skipAuth = false, ...fetchOptions } = options;
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
 
-  const response = await fetch(url, {
-    ...fetchOptions,
-    credentials: 'include', // Always include cookies for BFF authentication
-    headers: {
-      'Content-Type': 'application/json',
-      ...fetchOptions.headers,
-    },
-  });
-
-  // If unauthorized and not skipping auth, try to refresh token
-  if (response.status === 401 && !skipAuth) {
-    const refreshed = await refreshAccessToken();
-    
-    if (refreshed) {
-      // Retry the original request
-      const retryResponse = await fetch(url, {
-        ...fetchOptions,
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...fetchOptions.headers,
-        },
-      });
-
-      if (!retryResponse.ok) {
-        const error = await retryResponse.json().catch(() => ({ message: 'Request failed' }));
-        throw new Error(error.message || `HTTP ${retryResponse.status}`);
-      }
-
-      return retryResponse.json();
-    } else {
-      // Refresh failed, redirect to login
-      window.location.href = '/login';
-      throw new Error('Session expired');
-    }
+  const response = await send(url, fetchOptions);
+  if (response.status !== 401 || skipAuth) {
+    return parse<T>(response);
   }
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+  if (!(await refreshSession())) {
+    throw new AuthError();
   }
-
-  // Handle empty responses (e.g., 204 No Content)
-  if (response.status === 204) {
-    return {} as T;
+  const retry = await send(url, fetchOptions);
+  if (retry.status === 401) {
+    throw new AuthError();
   }
-
-  return response.json();
+  return parse<T>(retry);
 }
 
-/**
- * GET request helper
- */
-export async function apiGet<T = any>(
-  endpoint: string,
-  options?: Omit<ApiOptions, 'method'>
-): Promise<T> {
+export function apiGet<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'GET' });
 }
 
-/**
- * POST request helper
- */
-export async function apiPost<T = any>(
-  endpoint: string,
-  data?: any,
-  options?: Omit<ApiOptions, 'method' | 'body'>
-): Promise<T> {
-  return apiRequest<T>(endpoint, {
-    ...options,
-    method: 'POST',
-    body: data ? JSON.stringify(data) : undefined,
-  });
+export function apiPost<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+  return apiRequest<T>(endpoint, { ...options, method: 'POST', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-/**
- * PUT request helper
- */
-export async function apiPut<T = any>(
-  endpoint: string,
-  data?: any,
-  options?: Omit<ApiOptions, 'method' | 'body'>
-): Promise<T> {
-  return apiRequest<T>(endpoint, {
-    ...options,
-    method: 'PUT',
-    body: data ? JSON.stringify(data) : undefined,
-  });
+export function apiPut<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+  return apiRequest<T>(endpoint, { ...options, method: 'PUT', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-/**
- * PATCH request helper
- */
-export async function apiPatch<T = any>(
-  endpoint: string,
-  data?: any,
-  options?: Omit<ApiOptions, 'method' | 'body'>
-): Promise<T> {
-  return apiRequest<T>(endpoint, {
-    ...options,
-    method: 'PATCH',
-    body: data ? JSON.stringify(data) : undefined,
-  });
+export function apiPatch<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+  return apiRequest<T>(endpoint, { ...options, method: 'PATCH', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-/**
- * DELETE request helper
- */
-export async function apiDelete<T = any>(
-  endpoint: string,
-  options?: Omit<ApiOptions, 'method'>
-): Promise<T> {
+export function apiDelete<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'DELETE' });
 }
 
-/**
- * Check if user is authenticated
- */
-export async function checkAuth(): Promise<boolean> {
-  try {
-    const response = await apiGet<{ isAuthenticated: boolean }>('/bff/auth/status', {
-      skipAuth: true,
-    });
-    return response.isAuthenticated;
-  } catch {
-    return false;
-  }
+export interface CurrentUser {
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    userType: string;
+    portal: 'PLATFORM' | 'TENANT';
+  };
+  tenant: { id: string; name: string; slug: string } | null;
 }
 
-/**
- * Get current user info
- */
-export async function getCurrentUser() {
-  return apiGet<{
-    user: {
-      id: string;
-      email: string;
-      name: string | null;
-      userType: string;
-    };
-    tenant: {
-      id: string;
-      name: string;
-      slug: string;
-    };
-  }>('/bff/auth/me');
+export function getCurrentUser() {
+  return apiGet<CurrentUser>('/bff/auth/me');
 }
 
-/**
- * Logout
- */
+/** Ends the session server-side and clears the cookies. */
 export async function logout() {
-  await apiPost('/bff/auth/logout');
-  window.location.href = '/login';
+  await apiPost('/bff/auth/logout', undefined, { skipAuth: true });
 }

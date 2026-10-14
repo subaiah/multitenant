@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_BFF_URL?: string;
+  /** Backend base URL (default http://localhost:4000) */
+  readonly VITE_API_URL?: string;
 }
 
 interface ImportMeta {

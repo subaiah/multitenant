@@ -1,16 +1,29 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
+import { prisma } from '../lib/prisma.js';
+import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /**
+     * Route works without a tenant (platform-level operations).
+     * Platform users may call it without selecting a tenant; `request.tenant`
+     * is then undefined, so handlers must use `request.tenant?.id`.
+     */
+    platformScoped?: boolean;
+  }
+}
 
 /**
  * onRequest hook for protected routes.
  *
- * 1. Verifies the JWT.
+ * 1. Verifies the JWT from the Authorization header or the `access_token`
+ *    cookie set by /bff/auth/login.
  * 2. Rejects tokens that aren't user access tokens (e.g. BFF service tokens).
- * 3. Binds the tenant: `tenantContext` resolves the tenant from the
- *    x-tenant-id header, which the client controls. Tenant users may only
- *    act on the tenant in their token. Platform users may act on any tenant.
- *
- * Must run after `tenantContext`.
+ * 3. Resolves the tenant:
+ *    - tenant users: always the tenant in their token. An `x-tenant-id`
+ *      header is optional; if sent, it must match.
+ *    - platform users: the tenant named by `x-tenant-id`, if any.
  */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -19,12 +32,45 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return reply.status(401).send({ error: 'Unauthorized' });
   }
 
-  const { userId, userType, tenantId } = request.user;
+  const { userId, userType, tenantId: tokenTenantId } = request.user;
   if (!userId || !userType || !(userType in USER_TYPE_HIERARCHY)) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
 
-  if (!isPlatformUser(userType) && (!tenantId || request.tenant?.id !== tenantId)) {
-    return reply.status(403).send({ error: 'Forbidden', message: 'Access to this tenant is not allowed' });
+  const headerTenantId = request.headers[config.tenantHeader];
+  const requestedTenantId = typeof headerTenantId === 'string' && headerTenantId ? headerTenantId : undefined;
+  const platformUser = isPlatformUser(userType);
+
+  let tenantId: string | undefined;
+  if (platformUser) {
+    tenantId = requestedTenantId;
+  } else {
+    if (!tokenTenantId || (requestedTenantId && requestedTenantId !== tokenTenantId)) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Access to this tenant is not allowed' });
+    }
+    tenantId = tokenTenantId;
+  }
+
+  if (tenantId) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true, name: true, slug: true, plan: true, status: true },
+    });
+    if (!tenant) {
+      return reply.status(404).send({ error: 'Not Found', message: 'Tenant not found' });
+    }
+    // Platform users can still manage suspended tenants
+    if (tenant.status === 'SUSPENDED' && !platformUser) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Tenant is suspended' });
+    }
+    request.tenant = tenant;
+    return;
+  }
+
+  if (!request.routeOptions.config.platformScoped) {
+    return reply.status(400).send({
+      error: 'Bad Request',
+      message: `Select a tenant with the ${config.tenantHeader} header`,
+    });
   }
 }

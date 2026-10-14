@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { apiGet, apiPost } from '../lib/api-client';
+import { useAuth } from '../contexts/AuthContext';
+import { portalHome } from '../lib/permissions';
 import { Building2, Mail, Lock, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface TenantInfo {
-  id: string;
+  id: string | null; // null for the platform portal
   name: string;
   slug: string;
   logoUrl?: string;
@@ -70,7 +73,7 @@ const providerDetails: Record<string, ProviderInfo> = {
 export default function Login() {
   const { tenantSlug } = useParams<{ tenantSlug?: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const { user, loading: authLoading, login, reload } = useAuth();
   
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,19 +85,14 @@ export default function Login() {
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Handle OAuth callback
+  // Already signed in: go straight to the right portal
   useEffect(() => {
-    const token = searchParams.get('token');
-    const tenantId = searchParams.get('tenantId');
-    
-    if (token && tenantId) {
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('tenantId', tenantId);
-      navigate('/dashboard');
+    if (!authLoading && user) {
+      navigate(portalHome(user.portal), { replace: true });
     }
-  }, [searchParams, navigate]);
+  }, [authLoading, user, navigate]);
 
-  // Fetch tenant info if slug is provided
+  // Fetch tenant branding / login options for this slug
   useEffect(() => {
     const fetchTenant = async () => {
       if (!tenantSlug) {
@@ -103,14 +101,7 @@ export default function Login() {
       }
 
       try {
-        const response = await fetch(`http://localhost:4000/auth/tenant/${tenantSlug}`);
-        
-        if (!response.ok) {
-          throw new Error('Tenant not found');
-        }
-
-        const data = await response.json();
-        setTenant(data);
+        setTenant(await apiGet<TenantInfo>(`/auth/tenant/${encodeURIComponent(tenantSlug)}`, { skipAuth: true }));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load tenant');
       } finally {
@@ -128,23 +119,16 @@ export default function Login() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/auth/oauth/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const data = await apiPost<{ authorizationUrl: string }>(
+        '/auth/oauth/initiate',
+        {
           tenantSlug: tenant.slug,
           provider: providerId,
           redirectUri: window.location.origin + (tenantSlug ? `/${tenantSlug}/login` : '/login'),
-        }),
-      });
+        },
+        { skipAuth: true },
+      );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to initiate OAuth');
-      }
-
-      const data = await response.json();
-      
       // Redirect to provider's authorization URL
       window.location.href = data.authorizationUrl;
     } catch (err) {
@@ -155,31 +139,15 @@ export default function Login() {
 
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!tenant) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/bff/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for BFF authentication
-        body: JSON.stringify({
-          email,
-          tenantSlug: tenant.slug,
-          password,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Login failed');
-      }
-
-      // BFF sets httpOnly cookies, no need to store tokens in localStorage
-      navigate('/dashboard');
+      // Sets httpOnly session cookies and loads the user + permissions
+      const portal = await login(email, password, tenant.slug);
+      navigate(portalHome(portal), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
       setSubmitting(false);
@@ -188,7 +156,6 @@ export default function Login() {
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!tenant) return;
 
     setSubmitting(true);
@@ -196,63 +163,36 @@ export default function Login() {
     setDevOtp(null);
 
     try {
-      const response = await fetch('http://localhost:4000/bff/auth/otp/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for BFF authentication
-        body: JSON.stringify({
-          email,
-          tenantSlug: tenant.slug,
-        }),
-      });
+      const data = await apiPost<{ otp?: string }>(
+        '/bff/auth/otp/request',
+        { email, tenantSlug: tenant.slug },
+        { skipAuth: true },
+      );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to request OTP');
-      }
-
-      const data = await response.json();
-      
-      // In development, show the OTP
+      // Only present when the backend runs with NODE_ENV=development and DEV_EXPOSE_OTP=true
       if (data.otp) {
         setDevOtp(data.otp);
       }
-      
-      // Move to OTP input step
+
       setLoginMode('otp');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to request OTP');
+    } finally {
       setSubmitting(false);
     }
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!tenant) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:4000/bff/auth/otp/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for BFF authentication
-        body: JSON.stringify({
-          email,
-          tenantSlug: tenant.slug,
-          code: otp,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'OTP verification failed');
-      }
-
-      // BFF sets httpOnly cookies, no need to store tokens in localStorage
-      navigate('/dashboard');
+      await apiPost('/bff/auth/otp/verify', { email, tenantSlug: tenant.slug, code: otp }, { skipAuth: true });
+      const portal = await reload();
+      navigate(portal ? portalHome(portal) : '/login', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'OTP verification failed');
       setSubmitting(false);

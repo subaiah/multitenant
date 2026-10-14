@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyPluginAsync } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
@@ -32,7 +32,6 @@ import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { errorHandler } from './middleware/error-handler.js';
-import { tenantContext } from './middleware/tenant-context.js';
 import { authenticate } from './middleware/authenticate.js';
 
 // Create Fastify instance
@@ -61,6 +60,9 @@ async function registerPlugins() {
   // JWT authentication
   await fastify.register(jwt, {
     secret: config.jwtSecret,
+    // Browsers authenticate with the httpOnly cookie set by /bff/auth/login;
+    // API clients can still send `Authorization: Bearer` (checked first).
+    cookie: { cookieName: 'access_token', signed: false },
     sign: {
       expiresIn: config.jwtExpiresIn,
     },
@@ -120,9 +122,16 @@ async function registerPlugins() {
 async function registerMiddleware() {
   // Global error handler
   fastify.setErrorHandler(errorHandler);
+}
 
-  // Tenant context middleware (extracts tenant from header)
-  fastify.addHook('onRequest', tenantContext);
+// Marks every route in a plugin as usable without a tenant (see authenticate.ts)
+function platformScoped(plugin: FastifyPluginAsync): FastifyPluginAsync {
+  return async (instance) => {
+    instance.addHook('onRoute', (route) => {
+      route.config = { ...(route.config ?? {}), platformScoped: true };
+    });
+    await instance.register(plugin);
+  };
 }
 
 // Register routes
@@ -143,13 +152,13 @@ async function registerRoutes() {
     protectedRoutes.addHook('onRequest', authenticate);
 
     // Tenant management
-    await protectedRoutes.register(tenantRoutes, { prefix: '/tenants' });
+    await protectedRoutes.register(platformScoped(tenantRoutes), { prefix: '/tenants' });
 
     // User management
     await protectedRoutes.register(userRoutes, { prefix: '/users' });
 
     // Application management
-    await protectedRoutes.register(applicationRoutes, { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationRoutes), { prefix: '/applications' });
 
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });
@@ -186,10 +195,10 @@ async function registerRoutes() {
     await protectedRoutes.register(certificationRoutes, { prefix: '/certifications' });
 
     // Menu items routes
-    await protectedRoutes.register(menuItemRoutes, { prefix: '/menu-items' });
+    await protectedRoutes.register(platformScoped(menuItemRoutes), { prefix: '/menu-items' });
 
     // Permission routes
-    await protectedRoutes.register(permissionRoutes, { prefix: '/permissions' });
+    await protectedRoutes.register(platformScoped(permissionRoutes), { prefix: '/permissions' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });

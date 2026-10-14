@@ -14,6 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed-menus": "tsx prisma/seed-menu-items.ts",
     "db:push": "prisma db push",
     "db:reset": "prisma migrate reset",
     "test": "tsx --test test/*.test.ts"
