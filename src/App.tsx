@@ -50,9 +50,9 @@ function PlaceholderPage({ title, description }: { title: string; description: s
 
 export default function App() {
   return (
-    <AuthProvider>
-      <LayoutProvider>
-        <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <LayoutProvider>
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<SmartLogin />} />
@@ -166,8 +166,8 @@ export default function App() {
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </BrowserRouter>
-      </LayoutProvider>
-    </AuthProvider>
+        </LayoutProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
