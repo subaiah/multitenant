@@ -1085,4 +1085,28 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid token', 401);
     }
   });
+
+  // Get user permissions
+  fastify.get('/permissions', {
+    schema: {
+      tags: ['auth'],
+      summary: 'Get current user permissions',
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request, reply) => {
+    try {
+      await request.jwtVerify();
+      const userId = (request.user as any).userId;
+      const tenantId = (request.user as any).tenantId;
+
+      // Import the getUserPermissions function
+      const { getUserPermissions } = await import('../utils/authorization.js');
+      
+      const permissions = await getUserPermissions(userId, tenantId);
+
+      return { permissions };
+    } catch (err) {
+      throw new AppError('Failed to fetch permissions', 500);
+    }
+  });
 };

@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useMenuItems, MenuItem } from '../hooks/useMenuItems';
+import { usePermissions } from '../hooks/usePermissions';
 import {
   LayoutDashboard,
   Building2,
@@ -12,7 +13,7 @@ import {
   ChevronRight,
   LucideIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
 // Icon mapping
 const iconMap: Record<string, LucideIcon> = {
@@ -30,9 +31,42 @@ interface DynamicMenuProps {
 }
 
 export default function DynamicMenu({ portal }: DynamicMenuProps) {
-  const { menuItems, loading, error } = useMenuItems(portal);
+  const { menuItems, loading: menuLoading, error: menuError } = useMenuItems(portal);
+  const { hasPermission, loading: permLoading } = usePermissions();
   const location = useLocation();
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+
+  // Filter menu items based on permissions
+  const filteredMenuItems = useMemo(() => {
+    if (permLoading || menuLoading) return [];
+
+    const filterItem = (item: MenuItem): MenuItem | null => {
+      // Check if user has permission for this item
+      if (item.permission && !hasPermission(item.permission)) {
+        return null;
+      }
+
+      // Filter children recursively
+      if (item.children && item.children.length > 0) {
+        const filteredChildren = item.children
+          .map(filterItem)
+          .filter((child): child is MenuItem => child !== null);
+
+        // If no children are visible, hide the parent too
+        if (filteredChildren.length === 0) {
+          return null;
+        }
+
+        return { ...item, children: filteredChildren };
+      }
+
+      return item;
+    };
+
+    return menuItems
+      .map(filterItem)
+      .filter((item): item is MenuItem => item !== null);
+  }, [menuItems, hasPermission, menuLoading, permLoading]);
 
   const toggleExpanded = (id: string) => {
     setExpandedItems(prev => {
@@ -131,7 +165,9 @@ export default function DynamicMenu({ portal }: DynamicMenuProps) {
     );
   };
 
-  if (loading) {
+  const isLoading = menuLoading || permLoading;
+
+  if (isLoading) {
     return (
       <div className="p-4">
         <div className="animate-pulse space-y-3">
@@ -143,16 +179,16 @@ export default function DynamicMenu({ portal }: DynamicMenuProps) {
     );
   }
 
-  if (error) {
+  if (menuError) {
     return (
       <div className="p-4 text-red-500">
         <p>Failed to load menu</p>
-        <p className="text-sm">{error}</p>
+        <p className="text-sm">{menuError}</p>
       </div>
     );
   }
 
-  if (menuItems.length === 0) {
+  if (filteredMenuItems.length === 0) {
     return (
       <div className="p-4 text-slate-500 dark:text-slate-400">
         <p>No menu items available</p>
@@ -162,7 +198,7 @@ export default function DynamicMenu({ portal }: DynamicMenuProps) {
 
   return (
     <nav className="p-4">
-      {menuItems.map(item => renderMenuItem(item))}
+      {filteredMenuItems.map(item => renderMenuItem(item))}
     </nav>
   );
 }
