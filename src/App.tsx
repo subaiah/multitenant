@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LayoutProvider } from './context/LayoutContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { PermissionGuard } from './components/PermissionGuard';
+import { RequireAuth } from './components/RequireAuth';
 import Layout from './components/Layout';
 import PlatformLayout from './layouts/PlatformLayout';
 import TenantLayout from './layouts/TenantLayout';
@@ -61,9 +62,9 @@ export default function App() {
             <Route path="/unauthorized" element={<Unauthorized />} />
             
             {/* Platform Portal - Protected by PLATFORM_* user types */}
-            <Route element={<PlatformLayout />}>
+            <Route element={<RequireAuth portal="PLATFORM"><PlatformLayout /></RequireAuth>}>
               <Route path="/platform/dashboard" element={
-                <PermissionGuard anyOf={['PLATFORM_ADMIN', 'PLATFORM_USER']} redirectTo="/unauthorized">
+                <PermissionGuard permission="platform:read" redirectTo="/unauthorized">
                   <PlaceholderPage title="Platform Dashboard" description="Overview of all tenants and platform metrics" />
                 </PermissionGuard>
               } />
@@ -78,7 +79,7 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/platform/users" element={
-                <PermissionGuard permission="platform:users:read" redirectTo="/unauthorized">
+                <PermissionGuard permission="platform-users:read" redirectTo="/unauthorized">
                   <PlaceholderPage title="Platform Users" description="Manage platform-level users" />
                 </PermissionGuard>
               } />
@@ -88,24 +89,21 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/platform/settings" element={
-                <PermissionGuard permission="platform:settings:manage" redirectTo="/unauthorized">
+                <PermissionGuard permission="platform-settings:manage" redirectTo="/unauthorized">
                   <PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />
                 </PermissionGuard>
               } />
             </Route>
             
             {/* Tenant Portal - Protected by TENANT_* user types */}
-            <Route element={<TenantLayout />}>
+            <Route element={<RequireAuth portal="TENANT"><TenantLayout /></RequireAuth>}>
               <Route path="/dashboard" element={
-                <PermissionGuard anyOf={['tenant:read', 'dashboard:view']} redirectTo="/unauthorized">
+                <PermissionGuard permission="dashboard:view" redirectTo="/unauthorized">
                   <Dashboard />
                 </PermissionGuard>
               } />
-              <Route path="/profile" element={
-                <PermissionGuard permission="profile:read" redirectTo="/unauthorized">
-                  <Profile />
-                </PermissionGuard>
-              } />
+              {/* Every signed-in user can see their own profile */}
+              <Route path="/profile" element={<Profile />} />
               <Route path="/applications" element={
                 <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
                   <Applications />
@@ -157,7 +155,7 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/settings" element={
-                <PermissionGuard permission="settings:manage" redirectTo="/unauthorized">
+                <PermissionGuard permission="settings:read" redirectTo="/unauthorized">
                   <SettingsPage />
                 </PermissionGuard>
               } />

@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { isPlatformSlug } from '../lib/platform.js';
 import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import crypto from 'crypto';
 import { generateOtp, verifyPassword, hashPassword, getOtpExpiration } from '../utils/auth.js';
@@ -43,6 +44,19 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { slug } = request.params as { slug: string };
 
+    // The platform portal has no tenant row; describe it so the login page can render
+    if (isPlatformSlug(slug)) {
+      return {
+        id: null,
+        name: 'Platform Administration',
+        slug,
+        status: 'ACTIVE',
+        loginTitle: 'Platform Administration',
+        loginSubtitle: 'Sign in with your platform account',
+        authConfig: { ssoOnly: false, otpEnabled: false, providers: [] },
+      };
+    }
+
     const tenant = await prisma.tenant.findUnique({
       where: { slug },
       select: {
@@ -57,6 +71,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         authConfig: {
           select: {
             ssoOnly: true,
+            otpEnabled: true,
             providers: {
               where: { enabled: true },
               select: {
@@ -97,7 +112,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const { slug } = request.params as { slug: string };
 
     // Check if it's a special platform slug
-    if (slug === 'platform' || slug === 'admin') {
+    if (isPlatformSlug(slug)) {
       return {
         exists: true,
         portal: 'PLATFORM',
@@ -948,6 +963,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, name, tenantName, tenantSlug } = registerSchema.parse(request.body);
+
+    if (isPlatformSlug(tenantSlug)) {
+      throw new AppError('This slug is reserved', 409);
+    }
 
     // Check if slug is taken
     const existingTenant = await prisma.tenant.findUnique({

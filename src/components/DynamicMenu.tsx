@@ -9,6 +9,11 @@ import {
   Shield,
   Settings,
   Activity,
+  Boxes,
+  Server,
+  Database,
+  KeyRound,
+  Code,
   ChevronDown,
   ChevronRight,
   LucideIcon,
@@ -24,6 +29,11 @@ const iconMap: Record<string, LucideIcon> = {
   Shield,
   Settings,
   Activity,
+  Boxes,
+  Server,
+  Database,
+  KeyRound,
+  Code,
 };
 
 interface DynamicMenuProps {

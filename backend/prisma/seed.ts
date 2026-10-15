@@ -54,6 +54,27 @@ async function main() {
 
   console.log(`✅ Created ${tenants.length} tenants`);
 
+  // Platform users have no tenant; they sign in at /platform/login
+  await prisma.user.createMany({
+    data: [
+      {
+        email: 'admin@platform.local',
+        name: 'Platform Admin',
+        passwordHash: await hashPassword('admin123'),
+        userType: 'PLATFORM_ADMIN',
+        status: 'ACTIVE',
+      },
+      {
+        email: 'support@platform.local',
+        name: 'Platform Support',
+        passwordHash: await hashPassword('user123'),
+        userType: 'PLATFORM_USER',
+        status: 'ACTIVE',
+      },
+    ],
+  });
+  console.log('✅ Created 2 platform users (admin@platform.local, support@platform.local)');
+
   // Create users for each tenant
   const users = [];
   for (const tenant of tenants) {

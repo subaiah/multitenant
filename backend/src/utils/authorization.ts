@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { USER_TYPE_PERMISSIONS } from './permissions.js';
 
 // User type hierarchy (higher number = more permissions)
 export const USER_TYPE_HIERARCHY = {
@@ -438,58 +439,7 @@ export async function requireTenantAccess(userId: string, tenantId: string): Pro
  * Get default permissions for a user type
  */
 export function getDefaultPermissions(userType: UserType): string[] {
-  switch (userType) {
-    case 'PLATFORM_ADMIN':
-      return ['*:*']; // All permissions
-    
-    case 'PLATFORM_USER':
-      return [
-        'tenants:read',
-        'platform:read',
-      ];
-    
-    case 'TENANT_ADMIN':
-      return [
-        'tenant:*',
-        'applications:*',
-        'users:*',
-        'roles:*',
-        'settings:*',
-      ];
-    
-    case 'TENANT_MANAGER':
-      return [
-        'tenant:read',
-        'tenant:update',
-        'applications:*',
-        'users:read',
-        'users:create',
-        'users:update',
-      ];
-    
-    case 'TENANT_DEVELOPER':
-      return [
-        'tenant:read',
-        'applications:*',
-        'users:read',
-      ];
-    
-    case 'TENANT_USER':
-      return [
-        'tenant:read',
-        'applications:read',
-        'users:read',
-      ];
-    
-    case 'TENANT_VIEWER':
-      return [
-        'tenant:read',
-        'applications:read',
-      ];
-    
-    default:
-      return [];
-  }
+  return USER_TYPE_PERMISSIONS[userType] ?? [];
 }
 
 /**
@@ -593,7 +543,7 @@ export interface EnhancedPermissionData {
  */
 export async function getEnhancedUserPermissions(
   userId: string,
-  tenantId: string,
+  tenantId: string | undefined,
   userType: string
 ): Promise<EnhancedPermissionData> {
   const permissionSources = new Map<string, Set<string>>();
@@ -612,6 +562,20 @@ export async function getEnhancedUserPermissions(
   // 1. Get user type default permissions
   const userTypePermissions = getDefaultPermissions(userType as UserType);
   userTypePermissions.forEach(perm => addPermission(perm, 'userType'));
+
+  // Roles, groups and delegations are tenant-scoped. Without a tenant (platform
+  // users) only user-type permissions apply; querying with tenantId undefined
+  // would otherwise match assignments in every tenant.
+  if (!tenantId) {
+    return {
+      permissions: Array.from(permissionSources.keys()),
+      sources: { userType, directRoles: [], groupRoles: [], delegations: [] },
+      effectivePermissions: Array.from(permissionSources.entries()).map(([permission, sources]) => ({
+        permission,
+        sources: Array.from(sources),
+      })),
+    };
+  }
 
   // 2. Get direct role assignments
   const directAssignments = await prisma.roleAssignment.findMany({

@@ -37,7 +37,7 @@ lerna-debug.log*
 *.sw?
 
 # Prisma
-prisma/migrations/
+# Migrations are committed: they are the history of the production schema.
 
 # TypeScript
 *.tsbuildinfo

@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import { config } from '../config/env.js';
 import { verifyPassword } from '../utils/auth.js';
+import { isPlatformSlug } from '../lib/platform.js';
 import crypto from 'crypto';
 
 // Validation schemas
@@ -66,27 +67,29 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, tenantSlug, password } = loginSchema.parse(request.body);
+    const platformLogin = isPlatformSlug(tenantSlug);
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-      include: { authConfig: true },
-    });
+    // Platform users have no tenant; tenant users log in through their tenant's slug
+    const tenant = platformLogin
+      ? null
+      : await prisma.tenant.findUnique({
+          where: { slug: tenantSlug },
+          include: { authConfig: true },
+        });
 
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
+    if (!platformLogin) {
+      if (!tenant) {
+        throw new AppError('Tenant not found', 404);
+      }
+      if (tenant.status === 'SUSPENDED') {
+        throw new AppError('Tenant is suspended', 403);
+      }
     }
 
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
-
-    // Find user
     const user = await prisma.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        email,
-      },
+      where: tenant
+        ? { tenantId: tenant.id, email }
+        : { tenantId: null, email, userType: { in: ['PLATFORM_ADMIN', 'PLATFORM_USER'] } },
     });
 
     // Password is required. Verify it before revealing anything else about the account.
@@ -94,18 +97,20 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid credentials', 401);
     }
 
-    const tenantId = user.tenantId;
-    if (!tenantId || tenantId !== tenant.id) {
-      throw new AppError('Invalid credentials', 401);
-    }
-
-    if (tenant.authConfig?.ssoOnly) {
-      throw new AppError('SSO authentication required', 403);
+    if (tenant) {
+      if (user.tenantId !== tenant.id) {
+        throw new AppError('Invalid credentials', 401);
+      }
+      if (tenant.authConfig?.ssoOnly) {
+        throw new AppError('SSO authentication required', 403);
+      }
     }
 
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
+
+    const tenantId = user.tenantId ?? undefined;
 
     // Generate access token (short-lived)
     const accessToken = fastify.jwt.sign({
@@ -127,7 +132,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     await prisma.refreshToken.create({
       data: {
         userId: user.id,
-        tenantId,
+        tenantId: tenantId ?? null,
         token: refreshTokenValue,
         familyId,
         expiresAt: refreshExpiresAt,
@@ -184,7 +189,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
         userType: user.userType,
         portal,
       },
-      tenant: portal === 'TENANT' ? {
+      tenant: tenant ? {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
@@ -387,7 +392,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     await prisma.refreshToken.create({
       data: {
         userId: user.id,
-        tenantId,
+        tenantId: tenantId ?? null,
         token: refreshTokenValue,
         familyId,
         expiresAt: refreshExpiresAt,
@@ -444,7 +449,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
         userType: user.userType,
         portal,
       },
-      tenant: portal === 'TENANT' ? {
+      tenant: tenant ? {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
@@ -536,7 +541,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate new access token
     const newAccessToken = fastify.jwt.sign({
       userId: user.id,
-      tenantId: storedToken.tenantId,
+      tenantId: storedToken.tenantId ?? undefined,
       userType: user.userType,
       type: 'access',
     }, {
@@ -637,6 +642,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
           email: user.email,
           name: user.name,
           userType: user.userType,
+          portal: user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT',
         },
         tenant: user.tenant,
       };

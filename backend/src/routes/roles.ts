@@ -400,6 +400,53 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Assign role to user or group
+  // List role assignments in the current tenant (Role Assignments page)
+  fastify.get('/assignments', {
+    schema: {
+      tags: ['roles'],
+      summary: 'List role assignments in the current tenant',
+    },
+  }, async (request) => {
+    const tenantId = request.tenant.id;
+
+    const assignments = await prisma.roleAssignment.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        role: { include: { permissions: { include: { permission: true } } } },
+        user: { select: { email: true, name: true } },
+        group: { select: { name: true } },
+      },
+    });
+
+    // Resolve scope names in bulk
+    const idsOf = (type: string) => assignments.filter((a) => a.scopeType === type).map((a) => a.scopeId);
+    const [orgs, units] = await Promise.all([
+      prisma.organization.findMany({ where: { tenantId, id: { in: idsOf('ORGANIZATION') } }, select: { id: true, name: true } }),
+      prisma.orgUnit.findMany({ where: { tenantId, id: { in: idsOf('ORG_UNIT') } }, select: { id: true, name: true } }),
+    ]);
+    const scopeNames = new Map<string, string>([...orgs, ...units].map((x) => [x.id, x.name]));
+
+    return {
+      assignments: assignments.map((a) => ({
+        id: a.id,
+        roleId: a.roleId,
+        roleName: a.role.name,
+        principalType: a.principalType,
+        userId: a.userId,
+        groupId: a.groupId,
+        principalName: a.principalType === 'USER' ? (a.user?.name || a.user?.email || 'Unknown user') : (a.group?.name || 'Unknown group'),
+        scopeType: a.scopeType,
+        scopeId: a.scopeId,
+        scopeName: a.scopeType === 'TENANT' ? request.tenant.name : (scopeNames.get(a.scopeId) ?? a.scopeId),
+        validFrom: a.validFrom,
+        validTo: a.validTo,
+        status: a.status,
+        permissions: a.role.permissions.map((rp) => `${rp.permission.resource}:${rp.permission.action}`),
+      })),
+    };
+  });
+
   fastify.post('/assign', {
     schema: {
       tags: ['roles'],

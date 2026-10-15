@@ -303,7 +303,7 @@ enum ApiVersioning {
 // Activity log for audit trail
 model Activity {
   id          String       @id @default(uuid())
-  tenantId    String       @map("tenant_id")
+  tenantId    String?      @map("tenant_id") // Null for platform-level actions
   userId      String?      @map("user_id")
   action      String
   target      String
@@ -312,7 +312,7 @@ model Activity {
   createdAt   DateTime     @default(now()) @map("created_at")
   
   // Relations
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
   @@map("activities")
   @@index([tenantId])
@@ -409,7 +409,7 @@ model OtpCode {
 model RefreshToken {
   id            String    @id @default(uuid())
   userId        String    @map("user_id")
-  tenantId      String    @map("tenant_id")
+  tenantId      String?   @map("tenant_id") // Null for platform users
   token         String    @unique
   familyId      String    @map("family_id") // For token rotation detection
   expiresAt     DateTime  @map("expires_at")

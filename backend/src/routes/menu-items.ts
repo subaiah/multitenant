@@ -2,7 +2,8 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
-import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
+import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '../utils/authorization.js';
+import { permissionMatches } from '../utils/permissions.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -41,14 +42,21 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { portal } = request.params as { portal: 'PLATFORM' | 'TENANT' };
-    const userId = (request.user as any).userId;
-    const tenantId = (request.user as any).tenantId;
+    const { userId, userType } = request.user;
+    const tenantId = request.tenant?.id;
+
+    // Each user only sees their own portal's menu
+    const ownPortal = userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+    if (portal !== ownPortal) {
+      throw new AppError('Access denied to this portal', 403);
+    }
     
     // Get all active menu items for the portal
     const menuItems = await prisma.menuItem.findMany({
       where: {
         portal,
         isActive: true,
+        parentId: null, // children are nested below; don't list them twice
       },
       orderBy: { order: 'asc' },
       include: {
@@ -60,18 +68,19 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Get user permissions
-    const { getUserPermissions } = await import('../utils/authorization.js');
-    const userPermissions = await getUserPermissions(userId, tenantId);
+    // Same effective permissions the frontend guards use (user type + roles)
+    const { permissions } = await getEnhancedUserPermissions(userId, tenantId, userType);
+    const granted = new Set(permissions);
     
     // Filter menu items based on permissions
     const filteredItems = menuItems.filter(item => {
       if (!item.permission) return true; // No permission required
-      return userPermissions.includes(item.permission) || userPermissions.includes('*');
+      return permissionMatches(granted, item.permission);
     }).map(item => ({
       ...item,
       children: item.children.filter(child => {
         if (!child.permission) return true;
-        return userPermissions.includes(child.permission) || userPermissions.includes('*');
+        return permissionMatches(granted, child.permission);
       }),
     }));
     
@@ -210,7 +219,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'created menu item',
         target: menuItem.label,
@@ -281,7 +290,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'updated menu item',
         target: menuItem.label,
@@ -321,7 +330,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'deleted menu item',
         target: menuItem.label,
@@ -377,7 +386,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     // Log activity
     await prisma.activity.create({
       data: {
-        tenantId: request.tenant.id,
+        tenantId: request.tenant?.id ?? null, // null for platform-level actions
         userId,
         action: 'reordered menu items',
         target: `${items.length} items`,

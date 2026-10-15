@@ -95,6 +95,10 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get current tenant',
     },
   }, async (request, reply) => {
+    if (!request.tenant) {
+      throw new AppError('No tenant selected', 400);
+    }
+
     const tenant = await prisma.tenant.findUnique({
       where: { id: request.tenant.id },
       include: {

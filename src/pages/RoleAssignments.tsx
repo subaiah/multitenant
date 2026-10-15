@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, Plus, Trash2, Calendar, Users, User, Building2, MapPin, Package } from 'lucide-react';
-import { apiGet, apiPost, apiDelete } from '../lib/api-client';
+import { apiGet, apiPost, apiRequest } from '../lib/api-client';
 
 interface Role {
   id: string;
@@ -62,14 +62,14 @@ export default function RoleAssignments() {
   const fetchData = async () => {
     try {
       const [assignmentsRes, rolesRes, usersRes, groupsRes] = await Promise.all([
-        apiGet('/role-assignments'),
+        apiGet('/roles/assignments'),
         apiGet('/roles'),
         apiGet('/users'),
         apiGet('/groups'),
       ]);
       setAssignments(assignmentsRes.assignments || []);
       setRoles(rolesRes.roles || []);
-      setUsers(usersRes.users || []);
+      setUsers(usersRes.data || []); // GET /users returns { data, pagination }
       setGroups(groupsRes.groups || []);
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -100,7 +100,7 @@ export default function RoleAssignments() {
         payload.validTo = new Date(formData.validTo).toISOString();
       }
 
-      await apiPost('/role-assignments', payload);
+      await apiPost('/roles/assign', payload);
       setShowCreateModal(false);
       resetForm();
       fetchData();
@@ -113,7 +113,7 @@ export default function RoleAssignments() {
   const handleDeleteAssignment = async (assignmentId: string) => {
     if (!confirm('Are you sure you want to delete this assignment?')) return;
     try {
-      await apiDelete(`/role-assignments/${assignmentId}`);
+      await apiRequest('/roles/unassign', { method: 'DELETE', body: JSON.stringify({ assignmentId }) });
       fetchData();
     } catch (error) {
       console.error('Failed to delete assignment:', error);
