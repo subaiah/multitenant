@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase } from 'lucide-react';
 import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
 
@@ -281,6 +282,9 @@ export default function Profile() {
             <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
               <Briefcase size={20} className="text-blue-500" />
               Role Assignments
+              <Link to={user ? `/access-review/${user.id}` : '/access-review'} className="ml-auto text-sm font-medium text-blue-600 hover:text-blue-700">
+                See everything you can do
+              </Link>
             </h3>
             {roleAssignments.length > 0 ? (
               <div className="space-y-3">

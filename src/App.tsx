@@ -21,6 +21,7 @@ import Profile from './pages/Profile';
 import Groups from './pages/Groups';
 import RoleAssignments from './pages/RoleAssignments';
 import RoleEditor from './pages/RoleEditor';
+import AccessReview from './pages/AccessReview';
 import Organizations from './pages/Organizations';
 import ApplicationsManagement from './pages/ApplicationsManagement';
 import TenantEntitlements from './pages/TenantEntitlements';
@@ -158,6 +159,9 @@ export default function App() {
                   <RoleAssignments />
                 </PermissionGuard>
               } />
+              {/* Your own access is always viewable; others need roles:read (checked in the page and by the API) */}
+              <Route path="/access-review" element={<AccessReview />} />
+              <Route path="/access-review/:userId" element={<AccessReview />} />
               <Route path="/roles/new" element={
                 <PermissionGuard permission="roles:manage" redirectTo="/unauthorized">
                   <RoleEditor />

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, X, ChevronLeft, ChevronRight, Users as UsersIcon, MailCheck } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +47,7 @@ export default function Users() {
   const canCreate = hasPermission('users:create');
   const canUpdate = hasPermission('users:update');
   const canDelete = hasPermission('users:delete');
+  const canReviewAccess = hasPermission('roles:read');
   const myType = me?.userType ?? '';
   const assignableTypes = TENANT_USER_TYPES.filter((t) => canManageUserType(myType, t));
 
@@ -142,6 +143,9 @@ export default function Users() {
                           <td className="px-5 py-3 text-slate-500">{u.status === 'PENDING' ? '—' : formatRelative(u.lastLoginAt)}</td>
                           <td className="px-5 py-3">
                             <div className="flex justify-end gap-2">
+                              {(canReviewAccess || isMe) && (
+                                <Link to={`/access-review/${u.id}`} className="px-3 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Access</Link>
+                              )}
                               {u.status === 'PENDING' && canCreate && manageable && (
                                 <button className={secondaryButtonClass} onClick={() => act(() => apiPost(`/users/${u.id}/resend-invite`, {}), `Invitation resent to ${u.email}`)}>Resend invite</button>
                               )}
