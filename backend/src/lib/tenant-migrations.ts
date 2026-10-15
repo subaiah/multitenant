@@ -247,10 +247,17 @@ export interface RolloutReport {
   failed: { target: string; error: string }[];
 }
 
-/** Every target and the provisioned tenants on it; the shared database is always included. */
-export async function listTargets(): Promise<{ target: Target; tenants: { tenantId: string; role: string }[] }[]> {
+type ProvisioningStatus = 'READY' | 'FAILED' | 'PROVISIONING';
+
+/**
+ * Every target and the tenants on it (by default: READY, or part-way through
+ * provisioning and so possibly holding tables). The shared database is always included.
+ */
+export async function listTargets(
+  statuses: ProvisioningStatus[] = ['READY', 'FAILED', 'PROVISIONING'],
+): Promise<{ target: Target; tenants: { tenantId: string; role: string }[] }[]> {
   const configs = await controlDb.databaseConfig.findMany({
-    where: { dbRoleName: { not: null }, tenant: { provisioningStatus: { in: ['READY', 'FAILED', 'PROVISIONING'] } } },
+    where: { dbRoleName: { not: null }, tenant: { provisioningStatus: { in: statuses } } },
     select: { tenantId: true, strategy: true, schemaName: true, databaseName: true, dbRoleName: true },
   });
   const shared = configs.filter((c) => c.strategy === 'SHARED_TABLES');

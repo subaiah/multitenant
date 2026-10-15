@@ -414,7 +414,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     // Tenant roles live in every tenant target; check them all (platform role)
     let rolePermissionCount = 0;
-    for (const { target } of await listTargets()) {
+    for (const { target } of await listTargets(['READY'])) {
       rolePermissionCount += await platformDb(target).rolePermission.count({ where: { permission: existing.name } });
     }
     
