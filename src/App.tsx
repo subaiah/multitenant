@@ -24,6 +24,10 @@ import Organizations from './pages/Organizations';
 import ApplicationsManagement from './pages/ApplicationsManagement';
 import TenantEntitlements from './pages/TenantEntitlements';
 import Unauthorized from './pages/Unauthorized';
+import Users from './pages/Users';
+import AcceptInvite from './pages/AcceptInvite';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -60,6 +64,10 @@ export default function App() {
             <Route path="/login" element={<SmartLogin />} />
             <Route path="/:tenantSlug/login" element={<Login />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
+            {/* Links from emails (no session needed) */}
+            <Route path="/accept-invite" element={<AcceptInvite />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/:tenantSlug/forgot-password" element={<ForgotPassword />} />
             
             {/* Platform Portal - Protected by PLATFORM_* user types */}
             <Route element={<RequireAuth portal="PLATFORM"><PlatformLayout /></RequireAuth>}>
@@ -132,6 +140,11 @@ export default function App() {
               <Route path="/api" element={
                 <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
                   <ApiManagement />
+                </PermissionGuard>
+              } />
+              <Route path="/users" element={
+                <PermissionGuard permission="users:read" redirectTo="/unauthorized">
+                  <Users />
                 </PermissionGuard>
               } />
               <Route path="/groups" element={

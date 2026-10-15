@@ -7,6 +7,8 @@ import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/
 import crypto from 'crypto';
 import { generateOtp, verifyPassword, hashPassword, getOtpExpiration } from '../utils/auth.js';
 import { config } from '../config/env.js';
+import { sendMail } from '../lib/mailer.js';
+import { otpEmail } from '../lib/email-templates.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -598,7 +600,12 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         throw new AppError('User not found', 404);
       }
       // In production, return success anyway to prevent email enumeration
-      return { message: 'If the email exists, an OTP has been sent' };
+      return { message: 'If an active account exists for this email, a sign-in code has been sent' };
+    }
+
+    // Only active accounts can sign in; answer the same way as for unknown emails
+    if (user.status !== 'ACTIVE') {
+      return { message: 'If an active account exists for this email, a sign-in code has been sent' };
     }
 
     // Delete any existing OTPs for this email
@@ -623,6 +630,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
+    await sendMail(otpEmail(email, code, tenant.name, tenant.authConfig.otpExpiry));
+
     // In development, return the OTP for testing
     if (config.devExposeOtp) {
       return {
@@ -632,12 +641,9 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       };
     }
 
-    // In production, send OTP via email/SMS
-    // TODO: Integrate with email service (SendGrid, AWS SES, etc.)
-    // await sendOtpEmail(email, code);
 
     return {
-      message: 'OTP sent successfully',
+      message: 'If an active account exists for this email, a sign-in code has been sent',
       expiresAt,
     };
   });

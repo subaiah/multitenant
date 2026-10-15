@@ -1,4 +1,8 @@
-import { FastifyPluginAsync } from 'fastify';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { config } from '../config/env.js';
+import { sendMail } from '../lib/mailer.js';
+import { inviteEmail } from '../lib/email-templates.js';
+import { INVITE_TTL_DAYS, issueUserToken } from '../lib/user-tokens.js';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -28,6 +32,13 @@ const querySchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   search: z.string().optional(),
 });
+
+async function sendInvitation(request: FastifyRequest, user: { id: string; email: string }) {
+  const inviter = await prisma.user.findUnique({ where: { id: request.user.userId }, select: { name: true, email: true } });
+  const token = await issueUserToken(user.id, 'INVITE', INVITE_TTL_DAYS * 24 * 60 * 60 * 1000, request.user.userId);
+  const link = `${config.frontendUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+  await sendMail(inviteEmail(user.email, link, request.tenant.name, inviter?.name || inviter?.email || 'An administrator', INVITE_TTL_DAYS));
+}
 
 export const userRoutes: FastifyPluginAsync = async (fastify) => {
   // List users for current tenant
@@ -183,8 +194,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    // Only admins and managers can create users
-
     const data = createUserSchema.parse(request.body);
     requireCanManageUserType(request.user.userType, data.userType);
 
@@ -202,11 +211,12 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User with this email already exists', 409);
     }
 
+    // New users are invited: they set their own password from the emailed link
     const user = await prisma.user.create({
       data: {
         ...data,
         tenantId: request.tenant.id,
-        status: 'ACTIVE',
+        status: 'PENDING',
       },
       select: {
         id: true,
@@ -223,13 +233,39 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         tenantId: request.tenant.id,
         userId: request.user.userId,
-        action: 'created user',
+        action: 'invited user',
         target: user.email,
         type: 'USER',
       },
     });
 
-    return reply.status(201).send(user);
+    await sendInvitation(request, user);
+    return reply.status(201).send({ ...user, invitationSent: true });
+  });
+
+  // Resend an invitation (invalidates the previous link)
+  fastify.post('/:id/resend-invite', {
+    config: { permission: 'users:create' },
+    schema: {
+      tags: ['users'],
+      summary: 'Resend the invitation email to a pending user',
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const user = await prisma.user.findFirst({
+      where: { id, tenantId: request.tenant.id },
+      select: { id: true, email: true, name: true, userType: true, status: true },
+    });
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    if (user.status !== 'PENDING') {
+      throw new AppError('This user has already accepted their invitation', 409);
+    }
+    requireCanManageUserType(request.user.userType, user.userType);
+    await sendInvitation(request, user);
+    return { invitationSent: true };
   });
 
   // Update user

@@ -97,6 +97,7 @@ model User {
   accessRequestsAsRequester     AccessRequest[] @relation("AccessRequester")
   accessRequestsAsApprover      AccessRequest[] @relation("AccessApprover")
   certificationsAsReviewer      AccessCertification[] @relation("CertificationReviewer")
+  tokens                        UserToken[]
   
   @@map("users")
   @@unique([tenantId, email])
@@ -328,6 +329,29 @@ enum ActivityType {
   ALERT
   AUTH
   API
+}
+
+// Single-use tokens emailed to users (invitations, password resets).
+// Only a SHA-256 hash of the token is stored.
+model UserToken {
+  id         String        @id @default(uuid())
+  userId     String        @map("user_id")
+  type       UserTokenType
+  tokenHash  String        @unique @map("token_hash")
+  expiresAt  DateTime      @map("expires_at")
+  usedAt     DateTime?     @map("used_at")
+  createdById String?      @map("created_by_id")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_tokens")
+  @@index([userId, type])
+}
+
+enum UserTokenType {
+  INVITE
+  PASSWORD_RESET
 }
 
 // OAuth session state for secure OAuth flow

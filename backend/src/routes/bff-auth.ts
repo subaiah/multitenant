@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import { config } from '../config/env.js';
+import { sendMail } from '../lib/mailer.js';
+import { otpEmail } from '../lib/email-templates.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import crypto from 'crypto';
@@ -246,11 +248,16 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       if (config.devExposeOtp) {
         throw new AppError('User not found', 404);
       }
-      return { message: 'If the email exists, an OTP has been sent' };
+      return { message: 'If an active account exists for this email, a sign-in code has been sent' };
     }
 
     if (user.tenantId !== tenant.id) {
       throw new AppError('User is not associated with this tenant', 403);
+    }
+
+    // Only active accounts can sign in; answer the same way as for unknown emails
+    if (user.status !== 'ACTIVE') {
+      return { message: 'If an active account exists for this email, a sign-in code has been sent' };
     }
 
     // Delete any existing OTPs for this email
@@ -276,6 +283,8 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
+    await sendMail(otpEmail(email, code, tenant.name, tenant.authConfig.otpExpiry));
+
     // In development, return the OTP for testing
     if (config.devExposeOtp) {
       return {
@@ -285,10 +294,8 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       };
     }
 
-    // In production, send OTP via email
-    // TODO: Integrate with email service
     return {
-      message: 'OTP sent successfully',
+      message: 'If an active account exists for this email, a sign-in code has been sent',
       expiresAt,
     };
   });
