@@ -1,6 +1,6 @@
 import { AUTHENTICATED, requireCanGrant, requirePermission } from '../middleware/authorize.js';
 import { assignmentState, rolePermissionNames } from '../lib/access.js';
-import { isTenantGrantable } from '../utils/permissions.js';
+import { PERMISSIONS, PERMISSION_INFO, RESOURCE_INFO, isTenantGrantable } from '../utils/permissions.js';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
@@ -9,6 +9,7 @@ import {
   requireUserType, 
   requireTenantAccess, 
   getUserPermissions,
+  createDefaultPermissions,
   createDefaultTenantRoles,
   UserType 
 } from '../utils/authorization.js';
@@ -39,13 +40,35 @@ const assignRoleSchema = z.object({
 
 const memberCount = (n: number) => `${n} ${n === 1 ? 'member' : 'members'}`;
 
-/** A role may only hold tenant-level catalog permissions that the editor has. */
-async function checkRolePermissions(request: FastifyRequest, permissions: string[]) {
-  const refused = permissions.filter((p) => !isTenantGrantable(p));
+/**
+ * Check and resolve the permissions for a role: catalog names only, nothing
+ * platform-level, and only what the editor holds. Returns the DB rows.
+ */
+async function validRolePermissions(request: FastifyRequest, requested: string[]) {
+  const names = [...new Set(requested)];
+  const catalog = new Set<string>(PERMISSIONS);
+  const unknown = names.filter((p) => !catalog.has(p));
+  if (unknown.length > 0) {
+    throw new AppError(`Unknown permissions: ${unknown.join(', ')}`, 400);
+  }
+  const refused = names.filter((p) => !isTenantGrantable(p));
   if (refused.length > 0) {
     throw new AppError(`These permissions can't be part of a tenant role: ${refused.join(', ')}`, 400);
   }
-  await requireCanGrant(request, permissions, 'build a role with these permissions');
+  await requireCanGrant(request, names, 'build a role with these permissions');
+
+  let rows = await prisma.permission.findMany({ where: { name: { in: names } }, select: { id: true, name: true } });
+  if (rows.length !== names.length) {
+    // Catalog entries added since the database was seeded
+    await createDefaultPermissions();
+    rows = await prisma.permission.findMany({ where: { name: { in: names } }, select: { id: true, name: true } });
+  }
+  return rows;
+}
+
+async function requireUniqueRoleName(tenantId: string, name: string) {
+  const clash = await prisma.role.findFirst({ where: { tenantId, name: { equals: name, mode: 'insensitive' } } });
+  if (clash) throw new AppError(`A role called "${clash.name}" already exists`, 409);
 }
 
 export const roleRoutes: FastifyPluginAsync = async (fastify) => {
@@ -133,6 +156,22 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     return role;
   });
 
+  // Permissions a tenant role can contain, grouped for the role editor
+  fastify.get('/catalog', {
+    config: { permission: 'roles:read' },
+    schema: { tags: ['roles'], summary: 'Permissions available to tenant roles' },
+  }, async () => {
+    const groups = new Map<string, { resource: string; label: string; description: string; permissions: { name: string; action: string; description: string }[] }>();
+    for (const name of PERMISSIONS) {
+      if (!isTenantGrantable(name)) continue;
+      const [resource, action] = name.split(':');
+      const info = RESOURCE_INFO[resource] ?? { label: resource, description: '' };
+      if (!groups.has(resource)) groups.set(resource, { resource, ...info, permissions: [] });
+      groups.get(resource)!.permissions.push({ name, action, description: PERMISSION_INFO[name] ?? `${action} ${resource}` });
+    }
+    return { resources: [...groups.values()] };
+  });
+
   // Create role
   fastify.post('/', {
     config: { permission: 'roles:manage' },
@@ -144,7 +183,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         required: ['name'],
         properties: {
           name: { type: 'string', minLength: 2, maxLength: 50 },
-          description: { type: 'string' },
+          description: { type: 'string', maxLength: 500 },
           tenantId: { type: 'string', format: 'uuid' },
           permissions: { type: 'array', items: { type: 'string' } },
         },
@@ -152,61 +191,28 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
     const data = createRoleSchema.parse(request.body);
     const tenantId = request.tenant.id;
     const bodyTenant = (request.body as { tenantId?: string }).tenantId;
     if (bodyTenant && bodyTenant !== tenantId) {
       throw new AppError('Access denied to this tenant', 403);
     }
-    if (data.permissions) await checkRolePermissions(request, data.permissions);
+    const name = data.name.trim();
+    const permissions = await validRolePermissions(request, data.permissions ?? []);
+    await requireUniqueRoleName(tenantId, name);
 
-    // Check if role name already exists
-    const existingRole = await prisma.role.findFirst({
-      where: { tenantId, name: data.name },
-    });
-
-    if (existingRole) {
-      throw new AppError('Role name already exists', 409);
-    }
-
-    // Create role
     const role = await prisma.role.create({
       data: {
         tenantId,
-        name: data.name,
-        description: data.description,
+        name,
+        description: data.description?.trim() || null,
         isSystem: false,
+        permissions: { create: permissions.map((p) => ({ permissionId: p.id })) },
       },
     });
 
-    // Assign permissions if provided
-    if (data.permissions && data.permissions.length > 0) {
-      const permissions = await prisma.permission.findMany({
-        where: { name: { in: data.permissions } },
-      });
-
-      if (permissions.length !== data.permissions.length) {
-        throw new AppError('Some permissions not found', 400);
-      }
-
-      await prisma.rolePermission.createMany({
-        data: permissions.map(p => ({
-          roleId: role.id,
-          permissionId: p.id,
-        })),
-      });
-    }
-
-    // Log activity
     await prisma.activity.create({
-      data: {
-        tenantId,
-        userId,
-        action: 'created role',
-        target: role.name,
-        type: 'CONFIG',
-      },
+      data: { tenantId, userId, action: 'created role', target: role.name, type: 'CONFIG' },
     });
 
     return reply.status(201).send(role);
@@ -229,73 +235,70 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 2, maxLength: 50 },
-          description: { type: 'string' },
+          description: { type: 'string', maxLength: 500 },
           permissions: { type: 'array', items: { type: 'string' } },
         },
       },
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
     const { id } = request.params as { id: string };
+    const tenantId = request.tenant.id;
     const data = updateRoleSchema.parse(request.body);
 
-    const role = await prisma.role.findFirst({
-      where: { id, tenantId: request.tenant.id },
-    });
-
+    const role = await prisma.role.findFirst({ where: { id, tenantId } });
     if (!role) {
       throw new AppError('Role not found', 404);
     }
-
-    // Can't update system roles
+    // Built-in roles mirror the user types; duplicate one to customise it
     if (role.isSystem) {
-      throw new AppError('Cannot update system roles', 403);
+      throw new AppError('Built-in roles can\'t be changed. Duplicate it and edit the copy.', 403);
     }
 
+    const name = data.name?.trim();
+    if (name && name !== role.name) await requireUniqueRoleName(tenantId, name);
+
+    let permissions: { id: string; name: string }[] | undefined;
+    let added: string[] = [];
+    let removed: string[] = [];
     if (data.permissions) {
-      await checkRolePermissions(request, data.permissions);
-      // Changing a role changes everyone who holds it
-      await requireCanGrant(request, await rolePermissionNames(id), 'change this role');
+      permissions = await validRolePermissions(request, data.permissions);
+      // Changing a role changes everyone who holds it, so the editor must
+      // also cover what it grants today
+      const before = await rolePermissionNames(id);
+      await requireCanGrant(request, before, 'change this role');
+      const after = new Set(permissions.map((p) => p.name));
+      added = [...after].filter((p) => !before.includes(p));
+      removed = before.filter((p) => !after.has(p));
     }
 
-    // Update role
-    const updatedRole = await prisma.role.update({
-      where: { id },
+    const updated = await prisma.$transaction(async (tx) => {
+      const r = await tx.role.update({
+        where: { id },
+        data: { name, description: data.description === undefined ? undefined : data.description.trim() || null },
+      });
+      if (permissions) {
+        await tx.rolePermission.deleteMany({ where: { roleId: id } });
+        await tx.rolePermission.createMany({ data: permissions.map((p) => ({ roleId: id, permissionId: p.id })) });
+      }
+      return r;
+    });
+
+    const changes = [
+      added.length && `+${added.join(', +')}`,
+      removed.length && `-${removed.join(', -')}`,
+    ].filter(Boolean).join('; ');
+    await prisma.activity.create({
       data: {
-        name: data.name,
-        description: data.description,
+        tenantId,
+        userId,
+        action: 'updated role',
+        target: changes ? `${updated.name} (${changes})`.slice(0, 500) : updated.name,
+        type: 'CONFIG',
       },
     });
 
-    // Replace permissions if provided (all or nothing)
-    if (data.permissions) {
-      const permissions = await prisma.permission.findMany({
-        where: { name: { in: data.permissions } },
-      });
-      if (permissions.length !== new Set(data.permissions).size) {
-        throw new AppError('Some permissions not found', 400);
-      }
-      await prisma.$transaction([
-        prisma.rolePermission.deleteMany({ where: { roleId: id } }),
-        prisma.rolePermission.createMany({ data: permissions.map((p) => ({ roleId: id, permissionId: p.id })) }),
-      ]);
-    }
-
-    // Log activity
-    if (role.tenantId) {
-      await prisma.activity.create({
-        data: {
-          tenantId: role.tenantId,
-          userId,
-          action: 'updated role',
-          target: updatedRole.name,
-          type: 'CONFIG',
-        },
-      });
-    }
-
-    return updatedRole;
+    return updated;
   });
 
   // Delete role
@@ -314,49 +317,27 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
     const { id } = request.params as { id: string };
+    const tenantId = request.tenant.id;
 
     const role = await prisma.role.findFirst({
-      where: { id, tenantId: request.tenant.id },
-      include: {
-        _count: {
-          select: { users: true, roleAssignments: true },
-        },
-      },
+      where: { id, tenantId },
+      include: { _count: { select: { users: true, roleAssignments: true } } },
     });
-
     if (!role) {
       throw new AppError('Role not found', 404);
     }
-
-    // Can't delete system roles
     if (role.isSystem) {
-      throw new AppError('Cannot delete system roles', 403);
+      throw new AppError('Built-in roles can\'t be deleted', 403);
     }
-
-    // Check if role has users
     if (role._count.users > 0 || role._count.roleAssignments > 0) {
       throw new AppError('Cannot delete a role that is assigned. Remove its assignments first.', 400);
     }
 
-
-    await prisma.role.delete({
-      where: { id },
+    await prisma.role.delete({ where: { id } });
+    await prisma.activity.create({
+      data: { tenantId, userId, action: 'deleted role', target: role.name, type: 'CONFIG' },
     });
-
-    // Log activity
-    if (role.tenantId) {
-      await prisma.activity.create({
-        data: {
-          tenantId: role.tenantId,
-          userId,
-          action: 'deleted role',
-          target: role.name,
-          type: 'CONFIG',
-        },
-      });
-    }
 
     return reply.status(204).send();
   });

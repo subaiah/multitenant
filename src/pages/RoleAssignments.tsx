@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, KeyRound, MailCheck, Search, Shield, User as UserIcon, Users as UsersIcon } from 'lucide-react';
+import { ChevronDown, ChevronRight, KeyRound, MailCheck, Plus, Search, Shield, User as UserIcon, Users as UsersIcon } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiDelete } from '../lib/api-client';
@@ -245,32 +245,47 @@ function PermissionChips({ permissions }: { permissions: string[] }) {
 }
 
 function RolesTab() {
+  const { hasPermission } = useAuth();
   const roles = useApi<{ roles: Role[] }>('/roles');
+  const canManage = hasPermission('roles:manage');
   return (
     <>
-      <PageHeader title="Roles" description="The roles available in this tenant and what each one allows." />
+      <PageHeader title="Roles" description="The roles available in this tenant and what each one allows."
+        actions={canManage && <Link to="/roles/new" className={primaryButtonClass}><Plus size={16} />New role</Link>} />
       <DataView {...roles}>
         {({ roles: list }) => list.length === 0 ? (
           <Card><EmptyState icon={Shield} title="No roles yet" /></Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {list.map((r) => (
-              <Card key={r.id}>
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className="font-semibold text-slate-800 dark:text-white">{r.name}</h3>
-                    {r.description && <p className="text-sm text-slate-500">{r.description}</p>}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {list.map((r) => {
+              const perms = rolePermissions(r);
+              const areas = [...new Set(perms.map((p) => p.split(':')[0]))].sort();
+              return (
+                <div key={r.id} className="flex flex-col bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <Link to={`/roles/${r.id}`} className="font-semibold text-slate-800 dark:text-white hover:text-blue-600">{r.name}</Link>
                     {r.isSystem && <Badge value="BUILT_IN" />}
-                    <Link to={`/role-assignments?role=${encodeURIComponent(r.name)}`} className="text-xs font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">
+                  </div>
+                  {r.description && <p className="mt-1 text-sm text-slate-500">{r.description}</p>}
+                  <p className="mt-3 text-xs text-slate-500">
+                    {perms.length} {perms.length === 1 ? 'permission' : 'permissions'}{areas.length > 0 && ` across ${areas.length} ${areas.length === 1 ? 'area' : 'areas'}`}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {areas.slice(0, 8).map((a) => <span key={a} className="px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{a}</span>)}
+                    {areas.length > 8 && <span className="px-2 py-0.5 text-xs text-slate-400">+{areas.length - 8}</span>}
+                  </div>
+                  <div className="mt-auto pt-4 flex items-center justify-between gap-2 text-sm">
+                    <Link to={`/role-assignments?role=${encodeURIComponent(r.name)}`} className="text-slate-500 hover:text-blue-600">
                       {r._count.roleAssignments} {r._count.roleAssignments === 1 ? 'assignment' : 'assignments'}
                     </Link>
+                    <div className="flex gap-3">
+                      {canManage && <Link to={`/roles/new?from=${r.id}`} className="font-medium text-slate-600 dark:text-slate-300 hover:text-blue-600">Duplicate</Link>}
+                      <Link to={`/roles/${r.id}`} className="font-medium text-blue-600 hover:text-blue-700">{canManage && !r.isSystem ? 'Edit' : 'View'}</Link>
+                    </div>
                   </div>
                 </div>
-                <PermissionChips permissions={rolePermissions(r)} />
-              </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </DataView>

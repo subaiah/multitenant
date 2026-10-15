@@ -71,6 +71,69 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
+/** Plain-language names for the role editor (tenant-grantable resources only). */
+export const RESOURCE_INFO: Record<string, { label: string; description: string }> = {
+  dashboard: { label: 'Dashboard', description: 'The tenant overview' },
+  tenant: { label: 'Tenant profile', description: 'Name, branding and plan details' },
+  applications: { label: 'Applications', description: 'Apps available to and deployed in the tenant' },
+  activity: { label: 'Activity log', description: 'Audit trail of changes' },
+  infrastructure: { label: 'Infrastructure', description: 'Deployments and resource usage' },
+  database: { label: 'Database', description: 'Data isolation, backups and connections' },
+  auth: { label: 'Authentication', description: 'Sign-in methods, SSO and password policy' },
+  api: { label: 'API', description: 'API keys, rate limits and webhooks' },
+  users: { label: 'Users', description: 'People in the tenant' },
+  groups: { label: 'Groups', description: 'Groups and their members' },
+  roles: { label: 'Roles', description: 'Roles and who holds them' },
+  organizations: { label: 'Organizations', description: 'Organizations and units' },
+  settings: { label: 'Settings', description: 'Tenant-wide settings' },
+  policies: { label: 'Policies', description: 'Access policies' },
+  'access-requests': { label: 'Access requests', description: 'Requests for roles' },
+  certifications: { label: 'Access reviews', description: 'Periodic reviews of who has access' },
+  delegations: { label: 'Delegations', description: 'Temporary hand-over of roles' },
+};
+
+/** What each permission allows, where the action name alone isn't clear. */
+export const PERMISSION_INFO: Partial<Record<Permission, string>> = {
+  'dashboard:view': 'See the dashboard',
+  'tenant:read': 'See tenant details',
+  'tenant:update': 'Change tenant details and branding',
+  'applications:read': 'See applications',
+  'applications:manage': 'Enable, deploy and configure applications',
+  'activity:read': 'See the activity log',
+  'infrastructure:read': 'See infrastructure and usage',
+  'database:read': 'See database configuration',
+  'database:manage': 'Change database configuration and backups',
+  'auth:read': 'See sign-in settings',
+  'auth:manage': 'Change sign-in methods, SSO and password policy',
+  'api:read': 'See API settings and keys',
+  'api:manage': 'Create keys and change API settings',
+  'users:read': 'See people',
+  'users:create': 'Invite people',
+  'users:update': 'Change type, deactivate and reactivate people',
+  'users:delete': 'Remove people',
+  'groups:read': 'See groups and members',
+  'groups:create': 'Create groups',
+  'groups:update': 'Rename groups and change members',
+  'groups:delete': 'Delete groups',
+  'roles:read': 'See roles and assignments',
+  'roles:assign': 'Give roles to people and groups (only roles within their own access)',
+  'roles:manage': 'Create, edit and delete roles',
+  'organizations:read': 'See organizations and units',
+  'organizations:create': 'Create organizations and units',
+  'organizations:update': 'Change organizations and units',
+  'organizations:delete': 'Delete organizations and units',
+  'settings:read': 'See settings',
+  'settings:manage': 'Change settings',
+  'policies:read': 'See access policies',
+  'policies:manage': 'Create and change access policies',
+  'access-requests:read': 'See access requests',
+  'access-requests:approve': 'Approve or reject access requests',
+  'certifications:read': 'See access reviews',
+  'certifications:manage': 'Run access reviews',
+  'delegations:read': 'See delegations',
+  'delegations:manage': "Revoke anyone's delegation",
+};
+
 /** What each user type can do before any roles are assigned. */
 export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
   PLATFORM_ADMIN: ['*'],
