@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 const createDelegationSchema = z.object({
   delegateId: z.string().uuid(),
@@ -19,6 +21,7 @@ const revokeDelegationSchema = z.object({
 export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
   // List delegations for current tenant
   fastify.get('/', {
+    config: { permission: 'delegations:read' },
     schema: {
       tags: ['delegations'],
       summary: 'List delegations',
@@ -88,6 +91,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get delegation by ID
   fastify.get('/:id', {
+    config: { permission: 'delegations:read' },
     schema: {
       tags: ['delegations'],
       summary: 'Get delegation by ID',
@@ -129,6 +133,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create delegation
   fastify.post('/', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['delegations'],
       summary: 'Create delegation',
@@ -234,6 +239,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Revoke delegation
   fastify.post('/:id/revoke', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['delegations'],
       summary: 'Revoke delegation',
@@ -271,7 +277,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Only delegator or tenant admin can revoke
     const userType = (request.user as any).userType;
-    if (delegation.delegatorId !== userId && userType !== 'TENANT_ADMIN') {
+    if (delegation.delegatorId !== userId && !(await hasPermission(request, 'delegations:manage'))) {
       throw new AppError('Not authorized to revoke this delegation', 403);
     }
     
@@ -300,6 +306,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my delegations (as delegate)
   fastify.get('/my/delegations', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['delegations'],
       summary: 'Get my active delegations',

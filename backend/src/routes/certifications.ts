@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 const createCertificationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -23,6 +25,7 @@ const submitDecisionSchema = z.object({
 export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
   // List certifications
   fastify.get('/', {
+    config: { permission: 'certifications:read' },
     schema: {
       tags: ['certifications'],
       summary: 'List access certifications',
@@ -50,7 +53,8 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       AND: [
         status ? { status } : {},
         reviewerId ? { reviewerId } : {},
-        userType !== 'TENANT_ADMIN' ? { reviewerId: userId } : {},
+        // Certification managers see all; reviewers see the ones assigned to them
+        (await hasPermission(request, 'certifications:manage')) ? {} : { reviewerId: userId },
       ],
     };
     
@@ -85,6 +89,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get certification by ID
   fastify.get('/:id', {
+    config: { permission: 'certifications:read' },
     schema: {
       tags: ['certifications'],
       summary: 'Get certification by ID',
@@ -132,6 +137,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create certification
   fastify.post('/', {
+    config: { permission: 'certifications:manage' },
     schema: {
       tags: ['certifications'],
       summary: 'Create access certification',
@@ -154,7 +160,6 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createCertificationSchema.parse(request.body);
     
@@ -197,6 +202,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Submit certification decision
   fastify.post('/:id/decisions', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['certifications'],
       summary: 'Submit certification decision',
@@ -286,6 +292,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Complete certification
   fastify.post('/:id/complete', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['certifications'],
       summary: 'Complete certification',
@@ -342,6 +349,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my certifications
   fastify.get('/my/certifications', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['certifications'],
       summary: 'Get my certifications',

@@ -1,3 +1,4 @@
+import { AUTHENTICATED } from '../middleware/authorize.js';
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -15,6 +16,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
    * Get current user's permissions with metadata
    */
   fastify.get('/', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['permissions'],
       summary: 'Get current user permissions with metadata',
@@ -66,6 +68,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
    * Get current user's permissions as simple array (backward compatibility)
    */
   fastify.get('/simple', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['permissions'],
       summary: 'Get current user permissions as simple array',
@@ -96,6 +99,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
    * Check if user has a specific permission
    */
   fastify.get('/check', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['permissions'],
       summary: 'Check if user has a specific permission',
@@ -143,6 +147,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
    * Get all roles assigned to current user
    */
   fastify.get('/roles', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['permissions'],
       summary: 'Get all roles assigned to current user',
@@ -315,6 +320,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
    * Get all groups the current user belongs to
    */
   fastify.get('/groups', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['permissions'],
       summary: 'Get all groups the current user belongs to',

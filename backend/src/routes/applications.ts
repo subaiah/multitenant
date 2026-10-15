@@ -28,6 +28,7 @@ const createPermissionSchema = z.object({
 export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   // List all applications (platform-wide)
   fastify.get('/', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['applications'],
       summary: 'List all applications',
@@ -88,6 +89,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get application by ID
   fastify.get('/:id', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['applications'],
       summary: 'Get application by ID',
@@ -128,6 +130,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create application (platform admin only)
   fastify.post('/', {
+    config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
       summary: 'Create application',
@@ -147,9 +150,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     
     // Only platform admins can create applications
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can create applications', 403);
-    }
     
     const data = createApplicationSchema.parse(request.body);
     
@@ -184,6 +184,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update application (platform admin only)
   fastify.patch('/:id', {
+    config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
       summary: 'Update application',
@@ -209,9 +210,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can update applications', 403);
-    }
     
     const data = updateApplicationSchema.parse(request.body);
     
@@ -236,6 +234,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete application (platform admin only)
   fastify.delete('/:id', {
+    config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
       summary: 'Delete application',
@@ -252,9 +251,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can delete applications', 403);
-    }
     
     // Check if application has permissions
     const permissionCount = await prisma.permission.count({
@@ -294,6 +290,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // List permissions for an application
   fastify.get('/:id/permissions', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['applications'],
       summary: 'List permissions for an application',
@@ -326,6 +323,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create permission for an application
   fastify.post('/:id/permissions', {
+    config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
       summary: 'Create permission for an application',
@@ -352,9 +350,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can create permissions', 403);
-    }
     
     const data = createPermissionSchema.parse(request.body);
     
@@ -399,6 +394,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete permission
   fastify.delete('/permissions/:permissionId', {
+    config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
       summary: 'Delete permission',
@@ -415,9 +411,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { permissionId } = request.params as { permissionId: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can delete permissions', 403);
-    }
     
     // Check if permission is used in any roles
     const rolePermissionCount = await prisma.rolePermission.count({

@@ -4,6 +4,8 @@ import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { countBy } from '../lib/stats.js';
 import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -30,6 +32,7 @@ const querySchema = z.object({
 export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
   // List tenants (admin only)
   fastify.get('/', {
+    config: { permission: 'tenants:read' },
     schema: {
       tags: ['tenants'],
       summary: 'List all tenants',
@@ -45,11 +48,6 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    // Listing all tenants is a platform-level operation
-    if (!isPlatformUser(request.user.userType)) {
-      throw new AppError('Platform access required', 403);
-    }
-
     const { page, limit, status, plan, search } = querySchema.parse(request.query);
     const skip = (page - 1) * limit;
 
@@ -114,6 +112,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get current tenant
   fastify.get('/current', {
+    config: { permission: 'tenant:read' },
     schema: {
       tags: ['tenants'],
       summary: 'Get current tenant',
@@ -140,6 +139,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get tenant by ID
   fastify.get('/:id', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['tenants'],
       summary: 'Get tenant by ID',
@@ -155,7 +155,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
 
     // Tenant users can only view their own tenant
-    if (!isPlatformUser(request.user.userType) && request.user.tenantId !== id) {
+    if (request.user.tenantId !== id && !(await hasPermission(request, 'tenants:read'))) {
       throw new AppError('Access denied', 403);
     }
 
@@ -180,6 +180,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update tenant
   fastify.patch('/:id', {
+    config: { permission: ['tenants:manage', 'settings:manage'] },
     schema: {
       tags: ['tenants'],
       summary: 'Update tenant',
@@ -210,7 +211,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     // Platform admins can update any tenant. Tenant admins can update their own
     // tenant's name and branding; plan and status (billing/suspension) are platform-only.
     const { userType, tenantId } = request.user;
-    if (!isPlatformAdmin(userType)) {
+    if (!(await hasPermission(request, 'tenants:manage'))) {
+      // Route requires settings:manage otherwise; limit it to the caller's own tenant profile
       const ownTenantProfileOnly =
         isTenantAdmin(userType) && tenantId === id && data.plan === undefined && data.status === undefined;
       if (!ownTenantProfileOnly) {
@@ -240,6 +242,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete tenant
   fastify.delete('/:id', {
+    config: { permission: 'tenants:manage' },
     schema: {
       tags: ['tenants'],
       summary: 'Delete tenant',
@@ -254,11 +257,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    // Deleting a tenant cascades to all its data: platform admins only
-    if (!isPlatformAdmin(request.user.userType)) {
-      throw new AppError('Platform admin access required', 403);
-    }
-
+    // Deleting a tenant cascades to all its data (route requires tenants:manage)
     await prisma.tenant.delete({
       where: { id },
     });

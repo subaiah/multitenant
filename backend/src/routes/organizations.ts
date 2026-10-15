@@ -18,6 +18,7 @@ const updateOrganizationSchema = z.object({
 export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
   // List organizations for current tenant
   fastify.get('/', {
+    config: { permission: 'organizations:read' },
     schema: {
       tags: ['organizations'],
       summary: 'List organizations for current tenant',
@@ -79,6 +80,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get organization by ID
   fastify.get('/:id', {
+    config: { permission: 'organizations:read' },
     schema: {
       tags: ['organizations'],
       summary: 'Get organization by ID',
@@ -131,6 +133,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create organization
   fastify.post('/', {
+    config: { permission: 'organizations:create' },
     schema: {
       tags: ['organizations'],
       summary: 'Create organization',
@@ -149,7 +152,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     // Only admins can create organizations
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createOrganizationSchema.parse(request.body);
     
@@ -185,6 +187,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update organization
   fastify.patch('/:id', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['organizations'],
       summary: 'Update organization',
@@ -210,7 +213,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = updateOrganizationSchema.parse(request.body);
     
@@ -235,6 +237,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete organization
   fastify.delete('/:id', {
+    config: { permission: 'organizations:delete' },
     schema: {
       tags: ['organizations'],
       summary: 'Delete organization',
@@ -252,7 +255,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Check if organization has units
     const unitCount = await prisma.orgUnit.count({
@@ -292,6 +294,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add member to organization
   fastify.post('/:id/members', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['organizations'],
       summary: 'Add member to organization',
@@ -317,7 +320,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { userId: memberUserId } = request.body as any;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Verify organization exists
     const organization = await prisma.organization.findFirst({
@@ -370,6 +372,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove member from organization
   fastify.delete('/:id/members/:userId', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['organizations'],
       summary: 'Remove member from organization',
@@ -388,7 +391,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id: orgId, userId: memberUserId } = request.params as { id: string; userId: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     await prisma.orgMembership.deleteMany({
       where: { organizationId: orgId, userId: memberUserId, tenantId },

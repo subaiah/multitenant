@@ -1,3 +1,4 @@
+import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { Shield, Plus, Trash2, Calendar, Users, User, Building2, MapPin, Package } from 'lucide-react';
 import { apiGet, apiPost, apiRequest } from '../lib/api-client';
@@ -40,6 +41,7 @@ interface Group {
 export default function RoleAssignments() {
   const [assignments, setAssignments] = useState<RoleAssignment[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const canAssign = useAuth().hasPermission('roles:assign');
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,13 +189,15 @@ export default function RoleAssignments() {
             <span>{assignments.length} active assignments</span>
           </div>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-        >
-          <Plus size={20} />
-          New Assignment
-        </button>
+        {canAssign && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            <Plus size={20} />
+            New Assignment
+          </button>
+        )}
       </div>
 
       {/* Assignments Table */}
@@ -297,13 +301,13 @@ export default function RoleAssignments() {
                     )}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button
+                    {canAssign && <button
                       onClick={() => handleDeleteAssignment(assignment.id)}
                       className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900 rounded-lg transition-colors"
                       title="Delete Assignment"
                     >
                       <Trash2 size={18} />
-                    </button>
+                    </button>}
                   </td>
                 </tr>
               ))}

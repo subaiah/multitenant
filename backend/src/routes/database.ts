@@ -20,6 +20,7 @@ const updateDatabaseConfigSchema = z.object({
 export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
   // Get database config for current tenant
   fastify.get('/', {
+    config: { permission: 'database:read' },
     schema: {
       tags: ['database'],
       summary: 'Get database configuration for current tenant',
@@ -40,6 +41,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update database config
   fastify.patch('/', {
+    config: { permission: 'database:manage' },
     schema: {
       tags: ['database'],
       summary: 'Update database configuration',
@@ -60,10 +62,6 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    // Only admins can update database config
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const data = updateDatabaseConfigSchema.parse(request.body);
 
@@ -110,6 +108,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get database strategies info
   fastify.get('/strategies', {
+    config: { permission: 'database:read' },
     schema: {
       tags: ['database'],
       summary: 'Get available database strategies',

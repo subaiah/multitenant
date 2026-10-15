@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 const createAccessRequestSchema = z.object({
   roleId: z.string().uuid(),
@@ -20,6 +22,7 @@ const approveAccessRequestSchema = z.object({
 export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
   // List access requests
   fastify.get('/', {
+    config: { permission: 'access-requests:read' },
     schema: {
       tags: ['access-requests'],
       summary: 'List access requests',
@@ -47,7 +50,8 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
       AND: [
         status ? { status } : {},
         requesterId ? { requesterId } : {},
-        userType !== 'TENANT_ADMIN' ? { requesterId: userId } : {},
+        // Approvers see every request; everyone else sees their own
+        (await hasPermission(request, 'access-requests:approve')) ? {} : { requesterId: userId },
       ],
     };
     
@@ -85,6 +89,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create access request (Just-in-Time)
   fastify.post('/', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['access-requests'],
       summary: 'Create access request',
@@ -157,6 +162,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Approve/Deny access request
   fastify.post('/:id/decide', {
+    config: { permission: 'access-requests:approve' },
     schema: {
       tags: ['access-requests'],
       summary: 'Approve or deny access request',
@@ -183,7 +189,6 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const { approved, reason } = approveAccessRequestSchema.parse(request.body);
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const accessRequest = await prisma.accessRequest.findFirst({
       where: { id, tenantId },
@@ -246,6 +251,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my pending requests
   fastify.get('/my/pending', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['access-requests'],
       summary: 'Get my pending requests',

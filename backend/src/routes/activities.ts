@@ -15,6 +15,7 @@ const querySchema = z.object({
 export const activityRoutes: FastifyPluginAsync = async (fastify) => {
   // List activities for current tenant
   fastify.get('/', {
+    config: { permission: 'activity:read' },
     schema: {
       tags: ['activities'],
       summary: 'List activities for current tenant',
@@ -80,6 +81,7 @@ export const activityRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get activity statistics
   fastify.get('/stats', {
+    config: { permission: 'activity:read' },
     schema: {
       tags: ['activities'],
       summary: 'Get activity statistics',

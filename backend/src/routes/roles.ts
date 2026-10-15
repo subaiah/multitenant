@@ -1,3 +1,4 @@
+import { AUTHENTICATED, requirePermission } from '../middleware/authorize.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
@@ -37,6 +38,7 @@ const assignRoleSchema = z.object({
 export const roleRoutes: FastifyPluginAsync = async (fastify) => {
   // List all roles (platform-wide or tenant-specific)
   fastify.get('/', {
+    config: { permission: 'roles:read' },
     schema: {
       tags: ['roles'],
       summary: 'List roles',
@@ -102,6 +104,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get role by ID
   fastify.get('/:id', {
+    config: { permission: 'roles:read' },
     schema: {
       tags: ['roles'],
       summary: 'Get role by ID',
@@ -154,6 +157,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create role
   fastify.post('/', {
+    config: { permission: 'roles:manage' },
     schema: {
       tags: ['roles'],
       summary: 'Create role',
@@ -178,7 +182,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     await requireTenantAccess(userId, tenantId);
 
     // Check if user can create roles
-    requireUserType(userType, 'TENANT_ADMIN');
 
     // Check if role name already exists
     const existingRole = await prisma.role.findFirst({
@@ -233,6 +236,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update role
   fastify.patch('/:id', {
+    config: { permission: 'roles:manage' },
     schema: {
       tags: ['roles'],
       summary: 'Update role',
@@ -276,8 +280,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       await requireTenantAccess(userId, role.tenantId);
     }
 
-    // Check permissions
-    requireUserType(userType, 'TENANT_ADMIN');
 
     // Update role
     const updatedRole = await prisma.role.update({
@@ -332,6 +334,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete role
   fastify.delete('/:id', {
+    config: { permission: 'roles:manage' },
     schema: {
       tags: ['roles'],
       summary: 'Delete role',
@@ -376,8 +379,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       await requireTenantAccess(userId, role.tenantId);
     }
 
-    // Check permissions
-    requireUserType(userType, 'TENANT_ADMIN');
 
     await prisma.role.delete({
       where: { id },
@@ -402,6 +403,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
   // Assign role to user or group
   // List role assignments in the current tenant (Role Assignments page)
   fastify.get('/assignments', {
+    config: { permission: 'roles:read' },
     schema: {
       tags: ['roles'],
       summary: 'List role assignments in the current tenant',
@@ -448,6 +450,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/assign', {
+    config: { permission: 'roles:assign' },
     schema: {
       tags: ['roles'],
       summary: 'Assign role to user or group with scope',
@@ -510,8 +513,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       principalName = group.name;
     }
     
-    // Check permissions
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Check for existing assignment
     const existing = await prisma.roleAssignment.findFirst({
@@ -559,6 +560,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove role assignment
   fastify.delete('/unassign', {
+    config: { permission: 'roles:assign' },
     schema: {
       tags: ['roles'],
       summary: 'Remove role assignment',
@@ -576,8 +578,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { assignmentId } = request.body as { assignmentId: string };
     
-    // Check permissions
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Get assignment
     const assignment = await prisma.roleAssignment.findFirst({
@@ -618,6 +618,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get user roles and assignments
   fastify.get('/user/:userId', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['roles'],
       summary: 'Get user roles and assignments',
@@ -688,13 +689,12 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    if (!user) {
+    // Only users in the current tenant; your own roles, or anyone's with roles:read
+    if (!user || user.tenantId !== request.tenant.id) {
       throw new AppError('User not found', 404);
     }
-
-    // Check tenant access
-    if (user.tenantId) {
-      await requireTenantAccess(requesterId, user.tenantId);
+    if (userId !== requesterId) {
+      await requirePermission(request, 'roles:read');
     }
 
     return {
@@ -736,6 +736,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get user permissions
   fastify.get('/user/:userId/permissions', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['roles'],
       summary: 'Get user permissions',
@@ -755,22 +756,22 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       where: { id: userId },
     });
 
-    if (!user) {
+    // Only users in the current tenant; your own roles, or anyone's with roles:read
+    if (!user || user.tenantId !== request.tenant.id) {
       throw new AppError('User not found', 404);
     }
-
-    // Check tenant access
-    if (user.tenantId) {
-      await requireTenantAccess(requesterId, user.tenantId);
+    if (userId !== requesterId) {
+      await requirePermission(request, 'roles:read');
     }
 
-    const permissions = await getUserPermissions(userId);
+    const permissions = await getUserPermissions(userId, request.tenant.id);
 
     return { permissions };
   });
 
   // List all permissions
   fastify.get('/permissions/list', {
+    config: { permission: 'roles:read' },
     schema: {
       tags: ['roles'],
       summary: 'List all available permissions',
@@ -785,6 +786,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Initialize default roles for tenant
   fastify.post('/initialize/:tenantId', {
+    config: { permission: 'roles:manage' },
     schema: {
       tags: ['roles'],
       summary: 'Initialize default roles for tenant',
@@ -804,7 +806,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Only platform admins or tenant admins can initialize roles
     if (userType !== 'PLATFORM_ADMIN') {
       await requireTenantAccess(userId, tenantId);
-      requireUserType(userType, 'TENANT_ADMIN');
     }
 
     await createDefaultTenantRoles(tenantId);

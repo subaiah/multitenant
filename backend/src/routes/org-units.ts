@@ -21,6 +21,7 @@ const updateOrgUnitSchema = z.object({
 export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
   // List org units for an organization
   fastify.get('/organization/:orgId', {
+    config: { permission: 'organizations:read' },
     schema: {
       tags: ['org-units'],
       summary: 'List org units for an organization',
@@ -85,6 +86,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get org unit by ID (with hierarchy)
   fastify.get('/:id', {
+    config: { permission: 'organizations:read' },
     schema: {
       tags: ['org-units'],
       summary: 'Get org unit by ID',
@@ -142,6 +144,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create org unit
   fastify.post('/organization/:orgId', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['org-units'],
       summary: 'Create org unit',
@@ -169,7 +172,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const { orgId } = request.params as { orgId: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createOrgUnitSchema.parse(request.body);
     
@@ -226,6 +228,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update org unit
   fastify.patch('/:id', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['org-units'],
       summary: 'Update org unit',
@@ -252,7 +255,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = updateOrgUnitSchema.parse(request.body);
     
@@ -302,6 +304,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete org unit
   fastify.delete('/:id', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['org-units'],
       summary: 'Delete org unit',
@@ -319,7 +322,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Check if unit has children
     const childCount = await prisma.orgUnit.count({
@@ -359,6 +361,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get org unit hierarchy (tree structure)
   fastify.get('/organization/:orgId/hierarchy', {
+    config: { permission: 'organizations:read' },
     schema: {
       tags: ['org-units'],
       summary: 'Get org unit hierarchy',
@@ -417,6 +420,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add member to org unit
   fastify.post('/:id/members', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['org-units'],
       summary: 'Add member to org unit',
@@ -442,7 +446,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { userId: memberUserId } = request.body as any;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Verify unit exists
     const unit = await prisma.orgUnit.findFirst({
@@ -497,6 +500,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove member from org unit
   fastify.delete('/:id/members/:userId', {
+    config: { permission: 'organizations:update' },
     schema: {
       tags: ['org-units'],
       summary: 'Remove member from org unit',
@@ -515,7 +519,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const { id: unitId, userId: memberUserId } = request.params as { id: string; userId: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     await prisma.orgMembership.deleteMany({
       where: { orgUnitId: unitId, userId: memberUserId, tenantId },

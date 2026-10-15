@@ -18,6 +18,7 @@ const updateApiConfigSchema = z.object({
 export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
   // Get API config for current tenant
   fastify.get('/', {
+    config: { permission: 'api:read' },
     schema: {
       tags: ['api-config'],
       summary: 'Get API configuration for current tenant',
@@ -36,6 +37,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update API config
   fastify.patch('/', {
+    config: { permission: 'api:manage' },
     schema: {
       tags: ['api-config'],
       summary: 'Update API configuration',
@@ -54,9 +56,6 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const data = updateApiConfigSchema.parse(request.body);
 
@@ -86,6 +85,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get API gateways info
   fastify.get('/gateways', {
+    config: { permission: 'api:read' },
     schema: {
       tags: ['api-config'],
       summary: 'Get available API gateways',
@@ -127,6 +127,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get BFF pattern info
   fastify.get('/bff-info', {
+    config: { permission: 'api:read' },
     schema: {
       tags: ['api-config'],
       summary: 'Get BFF pattern information',

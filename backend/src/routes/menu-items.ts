@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '../utils/authorization.js';
 import { permissionMatches } from '../utils/permissions.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -29,6 +30,7 @@ const updateMenuItemSchema = z.object({
 export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
   // Get menu items for a portal (public endpoint for authenticated users)
   fastify.get('/portal/:portal', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['menu-items'],
       summary: 'Get menu items for a portal',
@@ -89,6 +91,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // List all menu items (admin only)
   fastify.get('/', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'List all menu items',
@@ -104,9 +107,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const { portal } = request.query as { portal?: 'PLATFORM' | 'TENANT' };
     
     // Only platform admins can manage menu items
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can manage menu items', 403);
-    }
     
     const where = portal ? { portal } : {};
     
@@ -131,6 +131,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get menu item by ID
   fastify.get('/:id', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'Get menu item by ID',
@@ -146,9 +147,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can view menu items', 403);
-    }
     
     const menuItem = await prisma.menuItem.findUnique({
       where: { id },
@@ -169,6 +167,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create menu item
   fastify.post('/', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'Create menu item',
@@ -191,9 +190,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can create menu items', 403);
-    }
     
     const data = createMenuItemSchema.parse(request.body);
     
@@ -232,6 +228,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update menu item
   fastify.patch('/:id', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'Update menu item',
@@ -260,9 +257,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can update menu items', 403);
-    }
     
     const data = updateMenuItemSchema.parse(request.body);
     
@@ -303,6 +297,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete menu item
   fastify.delete('/:id', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'Delete menu item',
@@ -319,9 +314,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can delete menu items', 403);
-    }
     
     const menuItem = await prisma.menuItem.delete({
       where: { id },
@@ -343,6 +335,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Reorder menu items
   fastify.post('/reorder', {
+    config: { permission: 'menus:manage' },
     schema: {
       tags: ['menu-items'],
       summary: 'Reorder menu items',
@@ -369,9 +362,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { items } = request.body as { items: Array<{ id: string; order: number }> };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can reorder menu items', 403);
-    }
     
     // Update all items in a transaction
     await prisma.$transaction(

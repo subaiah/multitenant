@@ -74,11 +74,14 @@ test('a tenant admin cannot modify another tenant\'s auth providers', async () =
   assert.ok(await prisma.authProvider.findUnique({ where: { id: B.providerId } }), 'provider B still exists');
 });
 
-test('auth config never returns OAuth client secrets', async () => {
-  const token = await login(A, A.userEmail);
+test('auth config never returns OAuth client secrets, and is admin-only', async () => {
+  const token = await login(A, A.adminEmail);
   const res = await api('GET', '/auth-config', { token, tenant: A.tenantId });
   assert.equal(res.status, 200);
   assert.ok(!JSON.stringify(res.json).includes('TOP-SECRET'));
+
+  const userToken = await login(A, A.userEmail);
+  assert.equal((await api('GET', '/auth-config', { token: userToken, tenant: A.tenantId })).status, 403);
 });
 
 // ---------------------------------------------------------------- privilege escalation

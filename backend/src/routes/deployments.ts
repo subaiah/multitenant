@@ -16,6 +16,7 @@ const querySchema = z.object({
 
 export const deploymentRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['deployments'],
       summary: "List the current tenant's deployed applications",
@@ -52,6 +53,7 @@ export const deploymentRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get('/:id', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['deployments'],
       summary: 'Get a deployed application',
