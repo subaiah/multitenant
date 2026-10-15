@@ -1,3 +1,4 @@
+import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { Package, Plus, Edit2, Trash2, Key, CheckCircle, XCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
@@ -26,6 +27,7 @@ interface Permission {
 
 export default function ApplicationsManagement() {
   const [applications, setApplications] = useState<Application[]>([]);
+  const canManage = useAuth().hasPermission('app-registry:manage');
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,12 +179,15 @@ export default function ApplicationsManagement() {
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Applications</h2>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                <Plus size={20} />
-              </button>
+              {canManage && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  aria-label="Add application"
+                  className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  <Plus size={20} />
+                </button>
+              )}
             </div>
             <div className="divide-y divide-slate-200 dark:divide-slate-700">
               {applications.map((app) => (
@@ -228,7 +233,7 @@ export default function ApplicationsManagement() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    {canManage && <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -247,7 +252,7 @@ export default function ApplicationsManagement() {
                       >
                         <Trash2 size={16} />
                       </button>
-                    </div>
+                    </div>}
                   </div>
                 </div>
               ))}
@@ -273,13 +278,15 @@ export default function ApplicationsManagement() {
                     Define granular permissions for this application
                   </p>
                 </div>
-                <button
-                  onClick={() => setShowPermissionModal(true)}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
-                >
-                  <Plus size={20} />
-                  Add Permission
-                </button>
+                {canManage && (
+                  <button
+                    onClick={() => setShowPermissionModal(true)}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+                  >
+                    <Plus size={20} />
+                    Add Permission
+                  </button>
+                )}
               </div>
               <div className="p-4">
                 {permissions.length > 0 ? (
@@ -307,12 +314,12 @@ export default function ApplicationsManagement() {
                               <span>Action: {perm.action}</span>
                             </div>
                           </div>
-                          <button
+                          {canManage && <button
                             onClick={() => handleDeletePermission(perm.id)}
                             className="p-1 text-slate-400 hover:text-red-500 transition-colors"
                           >
                             <Trash2 size={16} />
-                          </button>
+                          </button>}
                         </div>
                       </div>
                     ))}

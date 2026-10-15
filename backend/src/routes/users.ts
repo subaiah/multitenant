@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireCanManageUserType } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
@@ -30,6 +32,7 @@ const querySchema = z.object({
 export const userRoutes: FastifyPluginAsync = async (fastify) => {
   // List users for current tenant
   fastify.get('/', {
+    config: { permission: 'users:read' },
     schema: {
       tags: ['users'],
       summary: 'List users for current tenant',
@@ -96,6 +99,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get current user
   fastify.get('/me', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['users'],
       summary: 'Get current user',
@@ -119,6 +123,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get user by ID
   fastify.get('/:id', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['users'],
       summary: 'Get user by ID',
@@ -132,6 +137,11 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
+
+    // Anyone can read their own record; reading others needs users:read
+    if (id !== request.user.userId) {
+      await requirePermission(request, 'users:read');
+    }
 
     const user = await prisma.user.findFirst({
       where: {
@@ -158,6 +168,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create user
   fastify.post('/', {
+    config: { permission: 'users:create' },
     schema: {
       tags: ['users'],
       summary: 'Create user',
@@ -173,9 +184,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     // Only admins and managers can create users
-    if (!['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER'].includes(request.user.userType)) {
-      throw new AppError('Admin or Manager access required', 403);
-    }
 
     const data = createUserSchema.parse(request.body);
     requireCanManageUserType(request.user.userType, data.userType);
@@ -226,6 +234,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update user
   fastify.patch('/:id', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['users'],
       summary: 'Update user',
@@ -266,9 +275,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       }
     } else {
       // Only admins can update other users, and only users ranked at or below them
-      if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(actorType)) {
-        throw new AppError('Admin access required', 403);
-      }
+      await requirePermission(request, 'users:update');
       requireCanManageUserType(actorType, target.userType);
       if (data.userType) {
         requireCanManageUserType(actorType, data.userType);
@@ -308,6 +315,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete user
   fastify.delete('/:id', {
+    config: { permission: 'users:delete' },
     schema: {
       tags: ['users'],
       summary: 'Delete user',
@@ -323,9 +331,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
 
     // Only admins can delete users
-    if (!['PLATFORM_ADMIN', 'TENANT_ADMIN'].includes(request.user.userType)) {
-      throw new AppError('Admin access required', 403);
-    }
 
     // Prevent self-deletion
     if (id === request.user.userId) {

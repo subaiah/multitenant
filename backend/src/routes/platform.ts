@@ -14,6 +14,7 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get('/stats', {
+    config: { permission: 'platform:read' },
     schema: { tags: ['platform'], summary: 'Cross-tenant statistics for the platform dashboard' },
   }, async () => {
     const [byStatus, byPlan, tenantUsers, platformUsers, appsByStatus, recent, topTenants, perDay] = await Promise.all([
@@ -61,6 +62,7 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get('/users', {
+    config: { permission: 'platform-users:read' },
     schema: { tags: ['platform'], summary: 'List platform users (users without a tenant)' },
   }, async () => {
     const users = await prisma.user.findMany({

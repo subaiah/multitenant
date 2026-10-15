@@ -33,7 +33,9 @@ function pagePermissions() {
   const dir = join(FRONTEND, 'pages');
   return readdirSync(dir)
     .filter((f) => f.endsWith('.tsx') && f !== 'PermissionDemo.tsx')
-    .flatMap((f) => [...readFileSync(join(dir, f), 'utf8').matchAll(/permission="([^"]+)"/g)].map((m) => ({ file: f, permission: m[1] })));
+    .flatMap((f) =>
+      [...readFileSync(join(dir, f), 'utf8').matchAll(/permission="([^"]+)"|hasPermission\('([^']+)'\)/g)].map((m) => ({ file: f, permission: m[1] ?? m[2] })),
+    );
 }
 
 function flatten(items: (typeof MENUS)['TENANT']): (typeof MENUS)['TENANT'] {

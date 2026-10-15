@@ -20,6 +20,7 @@ const updateTenantApplicationSchema = z.object({
 export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
   // List tenant applications (entitlements)
   fastify.get('/', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'List tenant applications',
@@ -83,6 +84,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get tenant application by ID
   fastify.get('/:id', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'Get tenant application by ID',
@@ -118,6 +120,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Enable application for tenant
   fastify.post('/', {
+    config: { permission: 'applications:manage' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'Enable application for tenant',
@@ -137,7 +140,6 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createTenantApplicationSchema.parse(request.body);
     
@@ -189,6 +191,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update tenant application
   fastify.patch('/:id', {
+    config: { permission: 'applications:manage' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'Update tenant application',
@@ -214,7 +217,6 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = updateTenantApplicationSchema.parse(request.body);
     
@@ -248,6 +250,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Disable application for tenant
   fastify.delete('/:id', {
+    config: { permission: 'applications:manage' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'Disable application for tenant',
@@ -265,7 +268,6 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const tenantApplication = await prisma.tenantApplication.delete({
       where: { id, tenantId },
@@ -292,6 +294,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Check if tenant has entitlement to application
   fastify.get('/check/:applicationId', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['tenant-applications'],
       summary: 'Check if tenant has entitlement to application',

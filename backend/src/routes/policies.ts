@@ -30,6 +30,7 @@ const createBindingSchema = z.object({
 export const policyRoutes: FastifyPluginAsync = async (fastify) => {
   // List policies
   fastify.get('/', {
+    config: { permission: 'policies:read' },
     schema: {
       tags: ['policies'],
       summary: 'List access policies',
@@ -87,6 +88,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get policy by ID
   fastify.get('/:id', {
+    config: { permission: 'policies:read' },
     schema: {
       tags: ['policies'],
       summary: 'Get policy by ID',
@@ -122,6 +124,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create policy
   fastify.post('/', {
+    config: { permission: 'policies:manage' },
     schema: {
       tags: ['policies'],
       summary: 'Create access policy',
@@ -143,7 +146,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createPolicySchema.parse(request.body);
     
@@ -170,6 +172,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update policy
   fastify.patch('/:id', {
+    config: { permission: 'policies:manage' },
     schema: {
       tags: ['policies'],
       summary: 'Update access policy',
@@ -198,7 +201,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { id } = request.params as { id: string };
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = updatePolicySchema.parse(request.body);
     
@@ -223,6 +225,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete policy
   fastify.delete('/:id', {
+    config: { permission: 'policies:manage' },
     schema: {
       tags: ['policies'],
       summary: 'Delete access policy',
@@ -240,7 +243,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { id } = request.params as { id: string };
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const policy = await prisma.accessPolicy.delete({
       where: { id, tenantId },
@@ -262,6 +264,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add binding to policy
   fastify.post('/:id/bindings', {
+    config: { permission: 'policies:manage' },
     schema: {
       tags: ['policies'],
       summary: 'Add binding to policy',
@@ -287,7 +290,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { id } = request.params as { id: string };
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createBindingSchema.parse(request.body);
     
@@ -325,6 +327,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove binding from policy
   fastify.delete('/:id/bindings/:bindingId', {
+    config: { permission: 'policies:manage' },
     schema: {
       tags: ['policies'],
       summary: 'Remove binding from policy',
@@ -342,7 +345,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id, bindingId } = request.params as { id: string; bindingId: string };
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     await prisma.policyBinding.delete({
       where: { id: bindingId, policyId: id },
@@ -353,6 +355,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Test policy evaluation
   fastify.post('/evaluate', {
+    config: { permission: 'policies:read' },
     schema: {
       tags: ['policies'],
       summary: 'Test policy evaluation',

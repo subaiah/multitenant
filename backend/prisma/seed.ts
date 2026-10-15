@@ -1,5 +1,6 @@
 import { prisma, pool } from '../src/lib/prisma.js';
 import { hashPassword } from '../src/utils/auth.js';
+import { createDefaultTenantRoles } from '../src/utils/authorization.js';
 
 async function main() {
   console.log('🌱 Starting database seed...');
@@ -53,6 +54,12 @@ async function main() {
   ]);
 
   console.log(`✅ Created ${tenants.length} tenants`);
+
+  // Permission catalog + default roles (Tenant Admin, Manager, Developer, User, Viewer) per tenant
+  for (const tenant of tenants) {
+    await createDefaultTenantRoles(tenant.id);
+  }
+  console.log('✅ Created default roles for each tenant');
 
   // Platform users have no tenant; they sign in at /platform/login
   await prisma.user.createMany({

@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
-import { USER_TYPE_PERMISSIONS } from './permissions.js';
+import { PERMISSIONS, USER_TYPE_PERMISSIONS, isTenantGrantable, permissionMatches } from './permissions.js';
 
 // User type hierarchy (higher number = more permissions)
 export const USER_TYPE_HIERARCHY = {
@@ -445,40 +445,37 @@ export function getDefaultPermissions(userType: UserType): string[] {
 /**
  * Create default roles for a tenant
  */
-export async function createDefaultTenantRoles(tenantId: string): Promise<void> {
-  const defaultRoles = [
-    {
-      name: 'Tenant Admin',
-      description: 'Full access to tenant resources',
-      isSystem: true,
-    },
-    {
-      name: 'Tenant Manager',
-      description: 'Can manage applications and users',
-      isSystem: true,
-    },
-    {
-      name: 'Developer',
-      description: 'Can manage applications',
-      isSystem: true,
-    },
-    {
-      name: 'User',
-      description: 'Can view and use applications',
-      isSystem: true,
-    },
-    {
-      name: 'Viewer',
-      description: 'Read-only access',
-      isSystem: true,
-    },
-  ];
+const DEFAULT_TENANT_ROLES: { name: string; description: string; userType: UserType }[] = [
+  { name: 'Tenant Admin', description: 'Full access to tenant resources', userType: 'TENANT_ADMIN' },
+  { name: 'Tenant Manager', description: 'Can manage applications, users and groups', userType: 'TENANT_MANAGER' },
+  { name: 'Developer', description: 'Can manage applications and APIs', userType: 'TENANT_DEVELOPER' },
+  { name: 'User', description: 'Can view and use applications', userType: 'TENANT_USER' },
+  { name: 'Viewer', description: 'Read-only access', userType: 'TENANT_VIEWER' },
+];
 
-  for (const roleData of defaultRoles) {
+/**
+ * Create the default roles for a tenant. Each role carries the same
+ * permissions as the matching user type, so assigning e.g. "Tenant Manager"
+ * to a regular user grants exactly what a manager has. Existing roles with
+ * the same name are left as they are.
+ */
+export async function createDefaultTenantRoles(tenantId: string): Promise<void> {
+  await createDefaultPermissions();
+  const catalog = await prisma.permission.findMany({ where: { name: { in: [...PERMISSIONS] } } });
+
+  for (const template of DEFAULT_TENANT_ROLES) {
+    const existing = await prisma.role.findFirst({ where: { tenantId, name: template.name } });
+    if (existing) continue;
+    const granted = catalog.filter(
+      (p) => isTenantGrantable(p.name) && permissionMatches(USER_TYPE_PERMISSIONS[template.userType], p.name),
+    );
     await prisma.role.create({
       data: {
         tenantId,
-        ...roleData,
+        name: template.name,
+        description: template.description,
+        isSystem: true,
+        permissions: { create: granted.map((p) => ({ permissionId: p.id })) },
       },
     });
   }
@@ -487,38 +484,21 @@ export async function createDefaultTenantRoles(tenantId: string): Promise<void> 
 /**
  * Create default permissions
  */
+/**
+ * Make the permissions table match the catalog (src/utils/permissions.ts), so
+ * roles can be built from any catalog permission. Idempotent.
+ */
 export async function createDefaultPermissions(): Promise<void> {
-  const resources = ['tenants', 'applications', 'users', 'roles', 'settings', 'billing', 'platform'];
-  const actions = ['create', 'read', 'update', 'delete'];
-
-  for (const resource of resources) {
-    for (const action of actions) {
-      await prisma.permission.upsert({
-        where: {
-          name: `${resource}:${action}`,
-        },
-        update: {},
-        create: {
-          name: `${resource}:${action}`,
-          description: `${action} ${resource}`,
-          resource,
-          action,
-        },
-      });
-    }
+  for (const name of PERMISSIONS) {
+    const i = name.indexOf(':');
+    const resource = name.slice(0, i);
+    const action = name.slice(i + 1);
+    await prisma.permission.upsert({
+      where: { name },
+      update: {},
+      create: { name, resource, action, description: `${action} ${resource}` },
+    });
   }
-
-  // Add wildcard permission
-  await prisma.permission.upsert({
-    where: { name: '*:*' },
-    update: {},
-    create: {
-      name: '*:*',
-      description: 'All permissions',
-      resource: '*',
-      action: '*',
-    },
-  });
 }
 
 /**
@@ -551,8 +531,13 @@ export async function getEnhancedUserPermissions(
   const groupRoleNames = new Set<string>();
   const delegationNames = new Set<string>();
 
-  // Helper to add permission with source tracking
+  // Helper to add permission with source tracking.
+  // Tenant users can't gain platform-level permissions through tenant roles.
+  const platformUser = isPlatformUser(userType as UserType);
   const addPermission = (permission: string, source: string) => {
+    if (source !== 'userType' && !platformUser && !isTenantGrantable(permission)) {
+      return;
+    }
     if (!permissionSources.has(permission)) {
       permissionSources.set(permission, new Set());
     }

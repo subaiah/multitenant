@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma.js';
 import { withActivityUsers } from '../lib/activity-users.js';
 import { activityByDay, countBy } from '../lib/stats.js';
 import { hasMinimumUserType, isPlatformUser } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
+import { hasPermission, requirePermission } from '../middleware/authorize.js';
 
 /**
  * BFF (Backend for Frontend) Routes
@@ -17,6 +19,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
   // Dashboard aggregation endpoint
   // Combines multiple API calls into one
   fastify.get('/dashboard', {
+    config: { permission: 'dashboard:view' },
     schema: {
       tags: ['bff'],
       summary: 'Get aggregated dashboard data',
@@ -96,6 +99,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
   // Token exchange endpoint
   // Frontend sends BFF token, gets backend service token
   fastify.post('/token/exchange', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['bff'],
       summary: 'Exchange BFF token for backend service token',
@@ -134,6 +138,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
   // Multi-tenant data aggregation
   // Example: Get data from multiple services for a specific tenant
   fastify.get('/tenant/:tenantId/data', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['bff'],
       summary: 'Get aggregated data for a specific tenant',
@@ -152,8 +157,8 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
     // Platform users can view any tenant; tenant admins only their own
     const { userType } = request.user;
     const allowed =
-      isPlatformUser(userType) ||
-      (hasMinimumUserType(userType, 'TENANT_ADMIN') && tenantId === request.tenant.id);
+      (await hasPermission(request, 'tenants:read')) ||
+      (tenantId === request.tenant?.id && (await hasPermission(request, 'settings:manage')));
     if (!allowed) {
       return reply.status(403).send({ error: 'Admin access required' });
     }
@@ -205,6 +210,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Health check with tenant context
   fastify.get('/health', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['bff'],
       summary: 'BFF health check with tenant context',
@@ -228,6 +234,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
   // API aggregation example
   // Combines multiple endpoints into one call
   fastify.get('/apps/:appId/overview', {
+    config: { permission: 'applications:read' },
     schema: {
       tags: ['bff'],
       summary: 'Get application overview with aggregated data',

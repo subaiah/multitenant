@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
+import { AUTHENTICATED } from '../middleware/authorize.js';
 
 const createSupportSessionSchema = z.object({
   tenantId: z.string().uuid(),
@@ -19,6 +20,7 @@ const approveSupportSessionSchema = z.object({
 export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
   // List support sessions (platform admin only)
   fastify.get('/', {
+    config: { permission: 'support:manage' },
     schema: {
       tags: ['support-sessions'],
       summary: 'List support sessions',
@@ -35,9 +37,6 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const userType = (request.user as any).userType;
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can view support sessions', 403);
-    }
     
     const { page = '1', limit = '20', status, tenantId } = request.query as any;
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -83,6 +82,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Request support session (platform user)
   fastify.post('/request', {
+    config: { permission: ['support:request', 'support:manage'] },
     schema: {
       tags: ['support-sessions'],
       summary: 'Request support session',
@@ -101,9 +101,6 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     
-    if (!isPlatformAdmin(userType) && userType !== 'PLATFORM_USER') {
-      throw new AppError('Only platform users can request support sessions', 403);
-    }
     
     const data = createSupportSessionSchema.parse(request.body);
     
@@ -152,6 +149,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Revoke support session
   fastify.post('/:id/revoke', {
+    config: { permission: 'support:manage' },
     schema: {
       tags: ['support-sessions'],
       summary: 'Revoke support session',
@@ -168,9 +166,6 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     
-    if (!isPlatformAdmin(userType)) {
-      throw new AppError('Only platform admins can revoke support sessions', 403);
-    }
     
     const session = await prisma.supportSession.findUnique({
       where: { id },
@@ -208,6 +203,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get my active support sessions
   fastify.get('/my/sessions', {
+    config: { permission: AUTHENTICATED },
     schema: {
       tags: ['support-sessions'],
       summary: 'Get my active support sessions',

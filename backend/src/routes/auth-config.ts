@@ -37,6 +37,7 @@ const updateAuthProviderSchema = z.object({
 export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
   // Get auth config for current tenant
   fastify.get('/', {
+    config: { permission: 'auth:read' },
     schema: {
       tags: ['auth-config'],
       summary: 'Get authentication configuration for current tenant',
@@ -59,6 +60,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update auth config
   fastify.patch('/', {
+    config: { permission: 'auth:manage' },
     schema: {
       tags: ['auth-config'],
       summary: 'Update authentication configuration',
@@ -75,9 +77,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const data = updateAuthConfigSchema.parse(request.body);
 
@@ -102,6 +101,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // List auth providers
   fastify.get('/providers', {
+    config: { permission: 'auth:read' },
     schema: {
       tags: ['auth-config'],
       summary: 'List authentication providers for current tenant',
@@ -120,6 +120,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add auth provider
   fastify.post('/providers', {
+    config: { permission: 'auth:manage' },
     schema: {
       tags: ['auth-config'],
       summary: 'Add authentication provider',
@@ -139,9 +140,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const data = createAuthProviderSchema.parse(request.body);
 
@@ -188,6 +186,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update auth provider
   fastify.patch('/providers/:id', {
+    config: { permission: 'auth:manage' },
     schema: {
       tags: ['auth-config'],
       summary: 'Update authentication provider',
@@ -212,9 +211,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const { id } = request.params as { id: string };
     const data = updateAuthProviderSchema.parse(request.body);
@@ -242,6 +238,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete auth provider
   fastify.delete('/providers/:id', {
+    config: { permission: 'auth:manage' },
     schema: {
       tags: ['auth-config'],
       summary: 'Delete authentication provider',
@@ -254,9 +251,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    if (!hasMinimumUserType(request.user.userType, 'TENANT_ADMIN')) {
-      throw new AppError('Admin access required', 403);
-    }
 
     const { id } = request.params as { id: string };
 
@@ -269,6 +263,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get available providers info
   fastify.get('/available-providers', {
+    config: { permission: 'auth:read' },
     schema: {
       tags: ['auth-config'],
       summary: 'Get available authentication providers',

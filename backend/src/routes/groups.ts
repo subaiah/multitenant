@@ -19,6 +19,7 @@ const updateGroupSchema = z.object({
 export const groupRoutes: FastifyPluginAsync = async (fastify) => {
   // List groups for current tenant
   fastify.get('/', {
+    config: { permission: 'groups:read' },
     schema: {
       tags: ['groups'],
       summary: 'List groups for current tenant',
@@ -80,6 +81,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get group by ID
   fastify.get('/:id', {
+    config: { permission: 'groups:read' },
     schema: {
       tags: ['groups'],
       summary: 'Get group by ID',
@@ -125,6 +127,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create group
   fastify.post('/', {
+    config: { permission: 'groups:create' },
     schema: {
       tags: ['groups'],
       summary: 'Create group',
@@ -144,7 +147,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     // Only admins can create groups
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = createGroupSchema.parse(request.body);
     
@@ -180,6 +182,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update group
   fastify.patch('/:id', {
+    config: { permission: 'groups:update' },
     schema: {
       tags: ['groups'],
       summary: 'Update group',
@@ -205,7 +208,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     const data = updateGroupSchema.parse(request.body);
     
@@ -230,6 +232,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete group
   fastify.delete('/:id', {
+    config: { permission: 'groups:delete' },
     schema: {
       tags: ['groups'],
       summary: 'Delete group',
@@ -247,7 +250,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Check if group has members
     const memberCount = await prisma.groupMembership.count({
@@ -287,6 +289,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add member to group
   fastify.post('/:id/members', {
+    config: { permission: 'groups:update' },
     schema: {
       tags: ['groups'],
       summary: 'Add member to group',
@@ -314,7 +317,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { userId: memberUserId, validFrom, validTo } = request.body as any;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     // Verify group exists
     const group = await prisma.group.findFirst({
@@ -369,6 +371,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove member from group
   fastify.delete('/:id/members/:userId', {
+    config: { permission: 'groups:update' },
     schema: {
       tags: ['groups'],
       summary: 'Remove member from group',
@@ -387,7 +390,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const { id: groupId, userId: memberUserId } = request.params as { id: string; userId: string };
     const tenantId = request.tenant.id;
     
-    requireUserType(userType, 'TENANT_ADMIN');
     
     await prisma.groupMembership.deleteMany({
       where: { groupId, userId: memberUserId, tenantId },

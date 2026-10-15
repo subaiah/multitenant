@@ -35,6 +35,7 @@ import { platformRoutes } from './routes/platform.js';
 import { deploymentRoutes } from './routes/deployments.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
+import { authorize } from './middleware/authorize.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -155,6 +156,9 @@ async function registerRoutes() {
     // Add authentication hook
     // Verify JWT and bind request.tenant to the token's tenant
     protectedRoutes.addHook('onRequest', authenticate);
+    // Enforce each route's declared permission (see authorize.ts). Runs before
+    // body validation so unauthorized callers get 403, not schema details.
+    protectedRoutes.addHook('preValidation', authorize);
 
     // Tenant management
     await protectedRoutes.register(platformScoped(tenantRoutes), { prefix: '/tenants' });
