@@ -1,5 +1,7 @@
 import { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
+import { classifyDatabaseError } from '../lib/db-errors.js';
+import { controlDb } from '../lib/prisma.js';
 
 export class AppError extends Error {
   statusCode: number;
@@ -13,7 +15,7 @@ export class AppError extends Error {
   }
 }
 
-export const errorHandler = (
+export const errorHandler = async (
   error: FastifyError | ZodError | AppError | Error,
   request: FastifyRequest,
   reply: FastifyReply
@@ -45,6 +47,28 @@ export const errorHandler = (
       message: 'Invalid request data',
       details: error.validation,
     });
+  }
+
+  // Tenant database unreachable, or a privilege / row-level security refusal
+  const dbKind = classifyDatabaseError(error);
+  if (dbKind === 'unavailable') {
+    // Name the organization, also when this happened before the tenant was resolved (session check)
+    const tenantId = request.tenant?.id ?? (request.user as { tenantId?: string } | undefined)?.tenantId;
+    const name =
+      request.tenant?.name ??
+      (tenantId ? (await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }).catch(() => null))?.name : undefined);
+    request.log.error({ err: error, tenantId }, 'Database unavailable');
+    return reply.status(503).send({
+      error: 'Service Unavailable',
+      message: name ? `${name}'s data is temporarily unavailable. Try again shortly.` : 'The database is temporarily unavailable. Try again shortly.',
+    });
+  }
+  if (dbKind === 'denied') {
+    request.log.warn(
+      { securityEvent: 'tenant-isolation', tenantId: request.tenant?.id, userId: request.user?.userId, route: request.routeOptions?.url, method: request.method, err: error },
+      'Database refused access outside the tenant',
+    );
+    return reply.status(403).send({ error: 'Forbidden', message: "This request touches data outside your organization, so it isn't allowed." });
   }
 
   // Prisma errors

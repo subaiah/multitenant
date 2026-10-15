@@ -12,6 +12,8 @@ In every mode, the tenant's requests connect as its own Postgres login role (`tn
 
 The control-plane database (`DATABASE_URL`) holds platform users, tenants and each tenant's encrypted connection details. It never holds tenant data.
 
+Tenant data is always on PostgreSQL. Isolation relies on its roles, schemas and row-level security, so other engines aren't offered. MySQL, for one, has no row-level security.
+
 ## Roles
 
 | Role | Can | Used for | Setting |
@@ -40,6 +42,19 @@ Then:
 1. Set the three `TENANT_*_URL` settings (see `.env.example`).
 2. Run `npm run tenant:migrate`. It creates the shared tables and their row-level security.
 
+At startup the server checks the setup and logs what's wrong. A production server refuses to start if any of these fail:
+
+- **Platform role:** has BYPASSRLS.
+- **Provisioner:** has CREATEROLE and CREATEDB, is a member of the migration owner, and has ADMIN OPTION on the shared-tables group role.
+- **Migration owner:** can create schemas in the shared database.
+- **Pool size:** `TENANT_POOL_MAX` fits under `TENANT_ROLE_CONNECTION_LIMIT`.
+
+The checks guard against quiet failures. Without BYPASSRLS, for example, usage counts read nothing, and deleting a shared-tables tenant leaves its rows behind.
+
+The server also warns when tenants are behind the newest migration.
+
+Use password authentication (`scram-sha-256` in `pg_hba.conf`), never `trust`. Under `trust`, a tenant's role password protects nothing.
+
 Several environments can share one server, say dev, test and e2e. Each needs its own `shared_db` and its own `TENANT_ROLE_PREFIX`, passed to the script as `-v role_prefix=dev_`, because role names are server-wide.
 
 ## Creating a tenant
@@ -58,6 +73,18 @@ The tenant is then `READY`. Until then, nobody can sign in or work inside it, pl
 If a step fails, the tenant is `FAILED` and the Tenants page shows the error. Every step is safe to re-run, so **Retry setup** picks up where it stopped. A tenant left `PENDING` or `PROVISIONING` by a restart is resumed automatically after a couple of minutes.
 
 The isolation mode can't be changed once a tenant has data. Moving data between modes needs a data-move tool, which doesn't exist yet.
+
+Only one job at a time runs for a tenant, across every app server: setup, deletion or credential rotation. Each job holds an advisory lock in the control database while it runs. Deletion and rotation wait a few seconds for a job that's finishing, then answer "busy".
+
+Outcomes go to the platform activity log: tenant set up, setup failed, retried, credentials rotated, deleted, and migrations run.
+
+## Rotating a tenant's credentials
+
+Use **Rotate credentials** in the tenant's panel, or `POST /tenants/:id/rotate-credentials`. It gives the tenant's role a new generated password and stores it encrypted.
+
+- Connections already open finish normally.
+- This server closes its old pool.
+- Other servers switch on their next request for that tenant. Each request checks the version of the tenant's connection details, so the change applies at once rather than after the cache expires.
 
 ## Deleting a tenant
 
@@ -91,6 +118,19 @@ Keep changes backward compatible. During a rollout, tenants are on different mig
 A data migration (an `UPDATE` backfill, say) must run as the platform role. The migration owner is subject to row-level security like everyone else, so it sees no rows.
 
 With no migrations committed yet, `npm run tenant:baseline` writes a baseline of the whole tenant schema. CI uses it to start from empty.
+
+Tenants on an older schema than the newest migration show up in three places:
+
+- an "Older schema" badge on the Tenants page
+- a banner with **Run migrations**, which runs the same rollout (platform admins)
+- a warning at server start
+
+Once migrations are committed, CI checks that they match the schema files, for both planes, using a throwaway shadow database. It fails when a schema file changed without a migration.
+
+## When a tenant database fails
+
+- **Unreachable** (server down, database or role gone, login refused): requests for that tenant get a 503 that names the organization ("… data is temporarily unavailable"). Nobody is signed out because of it, and other tenants are unaffected.
+- **Refused on privilege** (row-level security, or a grant): the request gets a 403, and the server logs a `tenant-isolation` security event. Correct app code never triggers one, so treat any as a bug to investigate.
 
 ## Platform pages
 

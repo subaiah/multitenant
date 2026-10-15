@@ -9,6 +9,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
 import { controlDb, disconnectDatabases } from './lib/prisma.js';
 import { resumeProvisioning } from './lib/provisioning.js';
+import { checkTenantServer } from './lib/tenant-server-check.js';
+import { latestMigration, tenantsBehind } from './lib/tenant-migrations.js';
 import { startUsageRefresh, stopUsageRefresh } from './lib/tenant-usage.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
@@ -255,6 +257,18 @@ async function start() {
     // Test database connection
     await controlDb.$connect();
     fastify.log.info('Database connected successfully');
+
+    // The tenant database server must be set up the way isolation relies on
+    const serverCheck = await checkTenantServer();
+    for (const w of serverCheck.warnings) fastify.log.warn(`Tenant database server: ${w}`);
+    for (const e of serverCheck.errors) fastify.log.error(`Tenant database server: ${e}`);
+    if (serverCheck.errors.length && config.nodeEnv === 'production') {
+      throw new Error('The tenant database server is not set up correctly (see the errors above and prisma/tenant/setup-roles.sql)');
+    }
+    const behind = await tenantsBehind().catch(() => 0);
+    if (behind) {
+      fastify.log.warn(`${behind} tenant(s) are on an older schema than ${latestMigration()}; run npm run tenant:migrate (or Run migrations on the Tenants page)`);
+    }
 
     // Start server
     await fastify.listen({ 

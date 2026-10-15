@@ -31,7 +31,7 @@ interface Strategy {
   bestFor: string;
 }
 
-const PROVIDER_NAMES: Record<string, string> = { POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', MONGODB: 'MongoDB', SQLSERVER: 'SQL Server' };
+const PROVIDER_NAMES: Record<string, string> = { POSTGRESQL: 'PostgreSQL' };
 
 export default function DataIsolation() {
   const config = useApi<DatabaseConfig>('/database');
@@ -77,7 +77,7 @@ function Placement({ config, strategy }: { config: DatabaseConfig; strategy?: St
       <div className="flex items-start gap-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900">
         <Lock size={18} className="mt-0.5 text-slate-400 shrink-0" />
         <div className="text-sm">
-          <p className="font-medium text-slate-800 dark:text-white">{strategy?.name ?? humanize(config.strategy)}</p>
+          <p className="font-medium text-slate-800 dark:text-white">{strategy?.name ?? humanize(config.strategy)} · PostgreSQL</p>
           {strategy && <p className="text-slate-500 mt-1">{strategy.description}</p>}
           <p className="text-slate-500 mt-2">Chosen when your organization was set up. It can't be changed here, because moving existing data between modes needs a dedicated migration.</p>
         </div>

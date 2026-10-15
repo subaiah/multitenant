@@ -20,6 +20,8 @@
  *  6. Invite the first administrator (once).
  */
 import crypto from 'node:crypto';
+import pg from 'pg';
+import { AppError } from '../middleware/error-handler.js';
 import { config } from '../config/env.js';
 import { closeTenantClients, controlDb } from './prisma.js';
 import { dbForTenant, forgetTenant } from './tenant-db.js';
@@ -42,6 +44,35 @@ export function scramVerifier(password: string, iterations = 4096): string {
   const serverKey = crypto.createHmac('sha256', salted).update('Server Key').digest();
   return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }
+
+/**
+ * One job at a time per tenant, across every app server: provisioning,
+ * deleting and rotating credentials take a session advisory lock in the
+ * control database for as long as they run. Returns null (without running
+ * fn) when another job holds it.
+ */
+async function withTenantJobLock<T>(tenantId: string, fn: () => Promise<T>, waitMs = 0): Promise<{ value: T } | null> {
+  const c = new pg.Client({ connectionString: config.databaseUrl });
+  await c.connect();
+  try {
+    const key = `tenant-job:${tenantId}`;
+    // Actions people start (delete, rotate) wait briefly for a job that's finishing
+    const until = Date.now() + waitMs;
+    while (!(await c.query('SELECT pg_try_advisory_lock(hashtext($1)) AS ok', [key])).rows[0].ok) {
+      if (Date.now() >= until) return null;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    try {
+      return { value: await fn() };
+    } finally {
+      await c.query('SELECT pg_advisory_unlock(hashtext($1))', [key]).catch(() => {});
+    }
+  } finally {
+    await c.end().catch(() => {});
+  }
+}
+
+export const BUSY_MESSAGE = 'Something else is changing this tenant right now (setting it up, deleting it or rotating its credentials). Try again in a moment.';
 
 const running = new Map<string, Promise<void>>();
 
@@ -71,20 +102,38 @@ export async function resumeProvisioning(): Promise<void> {
   for (const t of stuck) void startProvisioning(t.id).catch(() => {});
 }
 
-/** Provision a tenant. Records FAILED with the error instead of throwing. */
+/**
+ * Provision a tenant. Records FAILED with the error instead of throwing.
+ * Does nothing if another server is already working on this tenant.
+ */
 export async function provisionTenant(tenantId: string): Promise<void> {
-  await controlDb.tenant.update({ where: { id: tenantId }, data: { provisioningStatus: 'PROVISIONING', provisioningError: null } });
-  try {
-    await runSteps(tenantId);
-    await controlDb.tenant.update({
-      where: { id: tenantId },
-      data: { provisioningStatus: 'READY', provisioningError: null, provisionedAt: new Date() },
-    });
+  const outcome = await withTenantJobLock(tenantId, async () => {
+    const tenant = await controlDb.tenant.findUnique({ where: { id: tenantId }, include: { databaseConfig: { select: { strategy: true } } } });
+    // Gone, being deleted, or finished by another server in the meantime
+    if (!tenant || tenant.provisioningStatus === 'DEPROVISIONING' || tenant.provisioningStatus === 'READY') return null;
+    const audit = { tenantId, userId: null, target: `${tenant.name} (${tenant.slug})`, type: 'CONFIG' as const };
+    await controlDb.tenant.update({ where: { id: tenantId }, data: { provisioningStatus: 'PROVISIONING', provisioningError: null } });
+    try {
+      await runSteps(tenantId);
+      await controlDb.tenant.update({
+        where: { id: tenantId },
+        data: { provisioningStatus: 'READY', provisioningError: null, provisionedAt: new Date() },
+      });
+      return { audit, ok: true as const, isolation: tenant.databaseConfig?.strategy ?? null };
+    } catch (err) {
+      const error = describeError(err);
+      await controlDb.tenant.update({ where: { id: tenantId }, data: { provisioningStatus: 'FAILED', provisioningError: error } }).catch(() => {});
+      return { audit, ok: false as const, error };
+    }
+  });
+  // Bookkeeping after the lock is released, so the tenant is free to change at once
+  const result = outcome?.value;
+  if (!result) return;
+  if (result.ok) {
+    await logPlatformActivity({ ...result.audit, action: 'tenant set up', metadata: { isolation: result.isolation } }).catch(() => {});
     await refreshTenantUsage([tenantId]).catch(() => {});
-  } catch (err) {
-    await controlDb.tenant
-      .update({ where: { id: tenantId }, data: { provisioningStatus: 'FAILED', provisioningError: describeError(err) } })
-      .catch(() => {});
+  } else {
+    await logPlatformActivity({ ...result.audit, action: 'tenant setup failed', type: 'ALERT', metadata: { error: result.error } }).catch(() => {});
   }
 }
 
@@ -165,7 +214,13 @@ async function runSteps(tenantId: string) {
  * listed as DEPROVISIONING with the error, so deleting again retries).
  */
 export async function deprovisionTenant(tenantId: string, actorId?: string): Promise<void> {
-  const tenant = await controlDb.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { databaseConfig: true } });
+  const done = await withTenantJobLock(tenantId, () => deprovisionLocked(tenantId, actorId), 5_000);
+  if (!done) throw new AppError(BUSY_MESSAGE, 409);
+}
+
+async function deprovisionLocked(tenantId: string, actorId?: string): Promise<void> {
+  const tenant = await controlDb.tenant.findUnique({ where: { id: tenantId }, include: { databaseConfig: true } });
+  if (!tenant) return; // already deleted by another server
   await controlDb.tenant.update({ where: { id: tenantId }, data: { provisioningStatus: 'DEPROVISIONING', provisioningError: null } });
   try {
     const cfg = tenant.databaseConfig;
@@ -213,4 +268,33 @@ export async function deprovisionTenant(tenantId: string, actorId?: string): Pro
       .catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Give a tenant's database role a new password. The role and its data stay as
+ * they are; the new password is stored (encrypted) first, then set on the
+ * role, so a failure in between is fixed by rotating again. Connections
+ * already open keep working until they close; this server closes its own,
+ * and other servers switch on their next request for the tenant (the
+ * config's version changes, see lib/tenant-db.ts).
+ */
+export async function rotateTenantCredentials(tenantId: string, actorId: string): Promise<void> {
+  const done = await withTenantJobLock(tenantId, async () => {
+    const tenant = await controlDb.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { databaseConfig: true } });
+    const cfg = tenant.databaseConfig;
+    if (tenant.provisioningStatus !== 'READY' || !cfg?.dbRoleName || !cfg.connectionString) {
+      throw new AppError('Only a tenant that is set up has credentials to rotate', 409);
+    }
+    const role = cfg.dbRoleName;
+    const target = targetOf(cfg);
+    const oldUrl = decryptSecret(cfg.connectionString, secretContext('connectionString'));
+    const password = crypto.randomBytes(32).toString('base64url');
+
+    await controlDb.databaseConfig.update({ where: { tenantId }, data: { connectionString: tenantRoleUrl(target, role, password) } });
+    await withConnection(config.tenantProvisionerUrl, (c) => c.query(`ALTER ROLE ${ident(role)} WITH PASSWORD '${scramVerifier(password)}'`));
+    forgetTenant(tenantId);
+    await closeTenantClients((u) => u === oldUrl);
+    await logPlatformActivity({ tenantId, userId: actorId, action: 'rotated database credentials', target: `${tenant.name} (${tenant.slug})`, type: 'CONFIG' });
+  }, 5_000);
+  if (!done) throw new AppError(BUSY_MESSAGE, 409);
 }

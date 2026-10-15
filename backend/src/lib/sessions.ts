@@ -34,7 +34,10 @@ export function endAllPlatformSessions(userId: string, at = new Date()) {
 export async function findSessionAccount(token: { userId: string; tenantId?: string }) {
   const select = { id: true, status: true, userType: true, sessionsValidAfter: true } as const;
   if (token.tenantId) {
-    const user = await (await dbForTenant(token.tenantId)).user.findFirst({ where: { id: token.userId, tenantId: token.tenantId }, select });
+    // The config's version, so changed connection details apply at once
+    const cfg = await controlDb.databaseConfig.findUnique({ where: { tenantId: token.tenantId }, select: { updatedAt: true } });
+    if (!cfg) return null;
+    const user = await (await dbForTenant(token.tenantId, cfg.updatedAt)).user.findFirst({ where: { id: token.userId, tenantId: token.tenantId }, select });
     return user ? { ...user, tenantId: token.tenantId as string | null } : null;
   }
   const user = await controlDb.platformUser.findUnique({ where: { id: token.userId }, select });

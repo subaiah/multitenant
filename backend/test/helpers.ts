@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createServer, type AddressInfo } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { TenantDb } from '../src/lib/tenant-db.js';
 
@@ -18,7 +19,16 @@ if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must 
 process.env.TENANT_USAGE_REFRESH_MS ??= '0';
 
 export const PASSWORD = 'correct-horse-battery';
-const PORT = 4000 + Math.floor(Math.random() * 1000);
+// A port the OS says is free (a fixed range could hit a dev server already
+// running, and the health check would then talk to the wrong database)
+const PORT = await new Promise<number>((resolve, reject) => {
+  const probe = createServer();
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', () => {
+    const { port } = probe.address() as AddressInfo;
+    probe.close(() => resolve(port));
+  });
+});
 const BASE = `http://127.0.0.1:${PORT}`;
 const run = randomUUID().slice(0, 8);
 
@@ -84,7 +94,7 @@ export async function seedTenant(label: string, strategy: Strategy = nextStrateg
   const tenant = await controlDb.tenant.create({
     data: {
       name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE',
-      databaseConfig: { create: { strategy, provider: 'POSTGRESQL', region: 'test', storageLimit: '1 GB' } },
+      databaseConfig: { create: { strategy, region: 'test', storageLimit: '1 GB' } },
     },
   });
   created.tenants.push(tenant.id);
@@ -138,7 +148,11 @@ export async function startServer() {
     env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
+  let exited = false;
+  server.once('exit', () => (exited = true));
   for (let i = 0; i < 100; i++) {
+    // Our server must be the one answering
+    if (exited) throw new Error('server exited during startup');
     try {
       if ((await fetch(`${BASE}/health`)).ok) return;
     } catch {

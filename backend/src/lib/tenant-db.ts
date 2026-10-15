@@ -14,11 +14,17 @@ import { AppError } from '../middleware/error-handler.js';
 export type { TenantDb };
 
 const TTL_MS = 60_000;
-const configs = new Map<string, { expires: number; url: string; target: Target }>();
+const configs = new Map<string, { expires: number; version: number; url: string; target: Target }>();
 
-async function load(tenantId: string) {
+/**
+ * `version` is the config's updatedAt as the caller just read it (authenticate
+ * does, on every request): a different one means the config changed on some
+ * server (e.g. rotated credentials), so the cached copy is dropped at once
+ * instead of after the TTL.
+ */
+async function load(tenantId: string, version?: Date | null) {
   const hit = configs.get(tenantId);
-  if (hit && hit.expires > Date.now()) return hit;
+  if (hit && hit.expires > Date.now() && (!version || version.getTime() === hit.version)) return hit;
   const cfg = await controlDb.databaseConfig.findUnique({ where: { tenantId } });
   if (!cfg?.connectionString) {
     // Not provisioned (yet): nothing to connect to
@@ -26,6 +32,7 @@ async function load(tenantId: string) {
   }
   const entry = {
     expires: Date.now() + TTL_MS,
+    version: cfg.updatedAt.getTime(),
     url: decryptSecret(cfg.connectionString, secretContext('connectionString')),
     target: targetOf(cfg),
   };
@@ -34,8 +41,8 @@ async function load(tenantId: string) {
 }
 
 /** The tenant's own client: connected as its role, so it sees only its rows. */
-export async function dbForTenant(tenantId: string): Promise<TenantDb> {
-  const { url, target } = await load(tenantId);
+export async function dbForTenant(tenantId: string, version?: Date | null): Promise<TenantDb> {
+  const { url, target } = await load(tenantId, version);
   return tenantClient(url, schemaOf(target));
 }
 

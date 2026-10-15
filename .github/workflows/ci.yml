@@ -75,8 +75,27 @@ jobs:
           PGPASSWORD=ci psql -h localhost -U ci -d postgres
           -v shared_db=ci_tenant -v owner_password=owner -v provisioner_password=prov -v platform_password=plat
           -f prisma/tenant/setup-roles.sql
-      - name: Control plane schema
-        run: npm run db:push
+      - name: Committed migrations match the schema files
+        # Skipped while a plane has no committed migrations
+        env:
+          SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_shadow_control
+          TENANT_SHADOW_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_shadow_tenant
+        run: |
+          has() { ls "$1"/*/migration.sql >/dev/null 2>&1; }
+          for plane in control tenant; do
+            dir=prisma/$plane/migrations
+            if ! has "$dir"; then echo "$plane: no committed migrations, skipped"; continue; fi
+            PGPASSWORD=ci psql -h localhost -U ci -d postgres -c "CREATE DATABASE ci_shadow_$plane"
+            cfg=$([ $plane = tenant ] && echo prisma.tenant.config.ts || echo prisma.config.ts)
+            schema=$([ $plane = tenant ] && echo prisma/tenant || echo prisma/control/schema.prisma)
+            if ! npx prisma migrate diff --config $cfg --from-migrations $dir --to-schema $schema --exit-code; then
+              echo "::error::The $plane schema changed without a matching migration. Run npm run prisma:migrate$([ $plane = tenant ] && echo :tenant) and commit it."
+              exit 1
+            fi
+          done
+      - name: Control plane schema (migrations when committed, else db push)
+        run: |
+          if ls prisma/control/migrations/*/migration.sql >/dev/null 2>&1; then npx prisma migrate deploy; else npm run db:push; fi
       - name: Tenant migrations (a throwaway baseline when none are committed)
         run: npm run tenant:baseline && npm run tenant:migrate
       - name: Test
