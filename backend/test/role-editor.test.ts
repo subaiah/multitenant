@@ -38,7 +38,8 @@ test('catalog lists only tenant permissions, grouped and described', async () =>
   const users = res.json.resources.find((r: any) => r.resource === 'users');
   assert.equal(users.label, 'Users');
   assert.equal(users.permissions.find((p: any) => p.name === 'users:create').description, 'Invite people');
-  assert.equal((await api('GET', '/roles/catalog', as('user'))).status, 403, 'needs roles:read');
+  assert.equal((await api('GET', '/roles/catalog', as('user'))).status, 200, 'descriptions only; any signed-in user');
+  assert.equal((await api('GET', '/roles/catalog')).status, 401);
 });
 
 test('create, edit and delete a custom role; holders see changes immediately', async () => {

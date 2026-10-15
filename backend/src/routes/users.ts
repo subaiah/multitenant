@@ -5,6 +5,7 @@ import { inviteEmail } from '../lib/email-templates.js';
 import { INVITE_TTL_DAYS, issueUserToken } from '../lib/user-tokens.js';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { explainAccess } from '../lib/access.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireCanManageUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
@@ -130,6 +131,27 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     return user;
+  });
+
+  // Access review: what this user can do, and where each permission comes from
+  fastify.get('/:id/access', {
+    config: { permission: AUTHENTICATED },
+    schema: {
+      tags: ['users'],
+      summary: "Explain a user's effective permissions and their sources",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    // Your own access is always visible; anyone else's needs roles:read
+    if (id !== request.user.userId) {
+      await requirePermission(request, 'roles:read');
+    }
+    const review = await explainAccess(id, request.tenant.id, request.tenant.name);
+    if (!review) {
+      throw new AppError('User not found', 404);
+    }
+    return review;
   });
 
   // Get user by ID

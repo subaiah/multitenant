@@ -158,7 +158,8 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Permissions a tenant role can contain, grouped for the role editor
   fastify.get('/catalog', {
-    config: { permission: 'roles:read' },
+    // Names and descriptions only; also used to explain your own access
+    config: { permission: AUTHENTICATED },
     schema: { tags: ['roles'], summary: 'Permissions available to tenant roles' },
   }, async () => {
     const groups = new Map<string, { resource: string; label: string; description: string; permissions: { name: string; action: string; description: string }[] }>();

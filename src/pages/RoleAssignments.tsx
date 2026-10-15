@@ -193,6 +193,8 @@ function AssignmentRow({ a, open, onToggle, onRemove, removable }: {
             <div>
               {a.principalType === 'GROUP' && a.groupId ? (
                 <Link to={`/groups?group=${a.groupId}`} className="font-medium text-slate-800 dark:text-white hover:text-blue-600">{a.principalName}</Link>
+              ) : a.userId ? (
+                <Link to={`/access-review/${a.userId}`} title="Review all of their access" className="font-medium text-slate-800 dark:text-white hover:text-blue-600">{a.principalName}</Link>
               ) : (
                 <p className="font-medium text-slate-800 dark:text-white">{a.principalName}</p>
               )}

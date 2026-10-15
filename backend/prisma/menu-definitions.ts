@@ -33,6 +33,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
         { label: 'Users', path: '/users', icon: 'Users', permission: 'users:read' },
         { label: 'Groups', path: '/groups', icon: 'Users', permission: 'groups:read' },
         { label: 'Role Assignments', path: '/role-assignments', icon: 'Shield', permission: 'roles:read' },
+        { label: 'Access Review', path: '/access-review', icon: 'ShieldCheck', permission: 'roles:read' },
       ],
     },
     { label: 'Organizations', path: '/organizations', icon: 'Building2', permission: 'organizations:read' },

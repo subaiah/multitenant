@@ -664,7 +664,14 @@ export async function getEnhancedUserPermissions(
       delegateId: userId,
       tenantId,
       status: 'ACTIVE',
+      // Not before it starts, and only while the delegator's own assignment is in force
+      validFrom: { lte: new Date() },
       validTo: { gt: new Date() },
+      roleAssignment: {
+        status: 'ACTIVE',
+        validFrom: { lte: new Date() },
+        OR: [{ validTo: null }, { validTo: { gt: new Date() } }],
+      },
     },
     include: {
       roleAssignment: {
