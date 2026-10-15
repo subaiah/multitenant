@@ -1,6 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { controlDb, tenantDb } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { listTargets } from '../lib/tenant-migrations.js';
+import { platformDb } from '../lib/tenant-targets.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
@@ -410,7 +412,11 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     if (!existing) {
       throw new AppError('Permission not found', 404);
     }
-    const rolePermissionCount = await tenantDb.rolePermission.count({ where: { permission: existing.name } });
+    // Tenant roles live in every tenant target; check them all (platform role)
+    let rolePermissionCount = 0;
+    for (const { target } of await listTargets()) {
+      rolePermissionCount += await platformDb(target).rolePermission.count({ where: { permission: existing.name } });
+    }
     
     if (rolePermissionCount > 0) {
       throw new AppError('Cannot delete permission that is used in roles. Remove from all roles first.', 400);

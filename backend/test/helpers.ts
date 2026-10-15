@@ -8,25 +8,50 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { TenantDb } from '../src/lib/tenant-db.js';
 
 process.env.JWT_SECRET ??= 'test-jwt-secret-test-jwt-secret-1234';
 process.env.NODE_ENV = 'test';
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a test control-plane database');
-if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must point at a test tenant database');
+if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must point at a test tenant database (as the migration owner)');
+// Background jobs would race the tests' own provisioning and cleanup
+process.env.TENANT_USAGE_REFRESH_MS ??= '0';
 
 export const PASSWORD = 'correct-horse-battery';
 const PORT = 4000 + Math.floor(Math.random() * 1000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const run = randomUUID().slice(0, 8);
 
+export type Strategy = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
 export type TenantSeed = {
   tenantId: string;
   slug: string;
+  strategy: Strategy;
+  /** Postgres schema holding its tables (for raw SQL through db) */
+  schema: string;
   adminEmail: string;
   managerEmail: string;
   userEmail: string;
   providerId: string;
+  /** Direct access to this tenant's data for fixtures and checks (platform role: bypasses row-level security, so filter by tenantId) */
+  db: TenantDb;
 };
+
+/**
+ * Which isolation mode seeded tenants get. TEST_TENANT_MODE forces one
+ * (CI runs the suite once per mode); otherwise successive tenants rotate
+ * through all three, so every run also crosses modes.
+ */
+const STRATEGIES: Strategy[] = ['SHARED_TABLES', 'SCHEMA_PER_TENANT', 'DATABASE_PER_TENANT'];
+let rotation = Math.floor(Math.random() * 3);
+function nextStrategy(): Strategy {
+  const forced = process.env.TEST_TENANT_MODE;
+  if (forced && forced !== 'mixed') {
+    if (!STRATEGIES.includes(forced as Strategy)) throw new Error(`TEST_TENANT_MODE must be mixed or one of ${STRATEGIES.join(', ')}`);
+    return forced as Strategy;
+  }
+  return STRATEGIES[rotation++ % STRATEGIES.length];
+}
 export type PlatformSeed = { adminEmail: string; supportEmail: string };
 
 let server: ChildProcess | undefined;
@@ -41,32 +66,56 @@ export async function db() {
   return import('../src/lib/prisma.js');
 }
 
-export async function seedTenant(label: string): Promise<TenantSeed> {
-  const { controlDb, tenantDb } = await db();
+/** Platform-role client on the target holding this tenant's data. */
+export async function dataOf(tenantId: string): Promise<TenantDb> {
+  const { targetForTenant } = await import('../src/lib/tenant-db.js');
+  const { platformDb } = await import('../src/lib/tenant-targets.js');
+  return platformDb(await targetForTenant(tenantId));
+}
+
+/** A provisioned tenant (its own role, schema or database, row-level security) with three users and an SSO provider. */
+export async function seedTenant(label: string, strategy: Strategy = nextStrategy()): Promise<TenantSeed> {
+  const { controlDb } = await db();
+  const { provisionTenant } = await import('../src/lib/provisioning.js');
+  const { dbForTenant } = await import('../src/lib/tenant-db.js');
   const { hashPassword } = await import('../src/utils/auth.js');
   const passwordHash = await hashPassword(PASSWORD);
   const slug = `t-${label}-${run}`;
-  const tenant = await controlDb.tenant.create({ data: { name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE' } });
+  const tenant = await controlDb.tenant.create({
+    data: {
+      name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE',
+      databaseConfig: { create: { strategy, provider: 'POSTGRESQL', region: 'test', storageLimit: '1 GB' } },
+    },
+  });
   created.tenants.push(tenant.id);
+  await provisionTenant(tenant.id);
+  const state = await controlDb.tenant.findUniqueOrThrow({ where: { id: tenant.id } });
+  assert.equal(state.provisioningStatus, 'READY', `provisioning ${slug} (${strategy}) failed: ${state.provisioningError}`);
+
+  const cfg = await controlDb.databaseConfig.findUniqueOrThrow({ where: { tenantId: tenant.id } });
   const seed = {
     tenantId: tenant.id,
     slug,
+    strategy,
+    schema: cfg.schemaName ?? 'public',
     adminEmail: `admin-${label}-${run}@test.local`,
     managerEmail: `manager-${label}-${run}@test.local`,
     userEmail: `user-${label}-${run}@test.local`,
   };
-  await tenantDb.user.createMany({
+  // Fixtures go in as the tenant's own role, like the app writes them
+  const own = await dbForTenant(tenant.id);
+  await own.user.createMany({
     data: [
       { tenantId: tenant.id, email: seed.adminEmail, name: 'Admin', userType: 'TENANT_ADMIN', passwordHash },
       { tenantId: tenant.id, email: seed.managerEmail, name: 'Manager', userType: 'TENANT_MANAGER', passwordHash },
       { tenantId: tenant.id, email: seed.userEmail, name: 'User', userType: 'TENANT_USER', passwordHash },
     ],
   });
-  const authConfig = await tenantDb.authConfig.create({ data: { tenantId: tenant.id, otpEnabled: true } });
-  const provider = await tenantDb.authProvider.create({
+  const authConfig = await own.authConfig.update({ where: { tenantId: tenant.id }, data: { otpEnabled: true } });
+  const provider = await own.authProvider.create({
     data: { tenantId: tenant.id, authConfigId: authConfig.id, provider: 'GOOGLE', clientId: 'cid', clientSecret: 'TOP-SECRET', scopes: ['email'] },
   });
-  return { ...seed, providerId: provider.id };
+  return { ...seed, providerId: provider.id, db: await dataOf(tenant.id) };
 }
 
 export async function seedPlatformUsers(): Promise<PlatformSeed> {
@@ -103,19 +152,16 @@ export async function startServer() {
 export async function stopServerAndCleanUp() {
   server?.kill();
   const { controlDb, disconnectDatabases } = await db();
-  const { deleteTenantData } = await import('../src/lib/tenant-data.js');
+  const { deprovisionTenant } = await import('../src/lib/provisioning.js');
   const platformUsers = await controlDb.platformUser.findMany({ where: { email: { in: created.platformEmails } }, select: { id: true } });
   const platformIds = platformUsers.map((u) => u.id);
+  // Each tenant's role, schema or database, rows and control-plane records
+  for (const id of created.tenants) {
+    if (await controlDb.tenant.findUnique({ where: { id } })) await deprovisionTenant(id);
+  }
   await controlDb.platformRefreshToken.deleteMany({ where: { userId: { in: platformIds } } });
   await controlDb.platformActivity.deleteMany({ where: { OR: [{ userId: { in: platformIds } }, { tenantId: { in: created.tenants } }] } });
   await controlDb.platformUser.deleteMany({ where: { id: { in: platformIds } } });
-  // The tenant plane has no foreign keys to tenants: delete its rows explicitly
-  for (const id of created.tenants) await deleteTenantData(id);
-  const tenantIds = { tenantId: { in: created.tenants } };
-  await controlDb.supportSession.deleteMany({ where: tenantIds });
-  await controlDb.tenantApplication.deleteMany({ where: tenantIds });
-  await controlDb.databaseConfig.deleteMany({ where: tenantIds });
-  await controlDb.tenant.deleteMany({ where: { id: { in: created.tenants } } });
   await disconnectDatabases();
 }
 
@@ -166,4 +212,17 @@ export async function loginSession(slug: string, email: string) {
 /** Bearer token only (API-client style). */
 export async function login(t: TenantSeed, email: string) {
   return (await loginSession(t.slug, email)).token;
+}
+
+/** Wait until a tenant created through the API is provisioned (or failed). */
+export async function waitForProvisioning(tenantId: string, timeoutMs = 30_000): Promise<string> {
+  const { controlDb } = await db();
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const t = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { provisioningStatus: true, provisioningError: true } });
+    if (!t) throw new Error('tenant disappeared');
+    if (t.provisioningStatus === 'READY' || t.provisioningStatus === 'FAILED') return t.provisioningStatus;
+    if (Date.now() > until) throw new Error(`still ${t.provisioningStatus} after ${timeoutMs}ms`);
+    await sleep(100);
+  }
 }

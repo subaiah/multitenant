@@ -200,7 +200,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = (request.user as any).tenantId as string | undefined;
     if (!tenantId) return { directRoles: [], groupRoles: [], delegatedRoles: [] }; // platform users hold no tenant roles
-    const db = dbForTenant(tenantId);
+    const db = await dbForTenant(tenantId);
 
     // Get direct role assignments
     const directAssignments = await db.roleAssignment.findMany({
@@ -348,7 +348,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = (request.user as any).tenantId as string | undefined;
     if (!tenantId) return { groups: [] };
-    const db = dbForTenant(tenantId);
+    const db = await dbForTenant(tenantId);
 
     const groupMemberships = await db.groupMembership.findMany({
       where: {

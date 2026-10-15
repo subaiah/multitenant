@@ -19,8 +19,7 @@ before(async () => {
   tok.manager = await login(A, A.managerEmail);
   tok.user = await login(A, A.userEmail);
   assert.equal((await api('POST', `/roles/initialize/${A.tenantId}`, as('admin'))).status, 200);
-  const { tenantDb, controlDb } = await db();
-  for (const u of await tenantDb.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
+  for (const u of await A.db.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
   for (const r of (await api('GET', '/roles', as('admin'))).json.roles) roles[r.name] = r.id;
 });
 
@@ -62,8 +61,7 @@ test('create, edit and delete a custom role; holders see changes immediately', a
   assert.equal((await api('GET', '/roles', as('user'))).status, 200, 'holder gains the added permission');
 
   // The change is in the activity log with what was added and removed
-  const { tenantDb, controlDb } = await db();
-  const log = await tenantDb.activity.findFirst({ where: { tenantId: A.tenantId, action: 'updated role' }, orderBy: { createdAt: 'desc' } });
+  const log = await A.db.activity.findFirst({ where: { tenantId: A.tenantId, action: 'updated role' }, orderBy: { createdAt: 'desc' } });
   assert.match(log!.target, /\+roles:read/);
   assert.match(log!.target, /-dashboard:view/);
 

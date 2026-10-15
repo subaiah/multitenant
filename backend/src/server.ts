@@ -7,7 +7,9 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
-import { controlDb, tenantDb, disconnectDatabases } from './lib/prisma.js';
+import { controlDb, disconnectDatabases } from './lib/prisma.js';
+import { resumeProvisioning } from './lib/provisioning.js';
+import { startUsageRefresh, stopUsageRefresh } from './lib/tenant-usage.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
@@ -251,7 +253,7 @@ async function start() {
     if (emailWarning) fastify.log.warn(emailWarning);
 
     // Test database connection
-    await Promise.all([controlDb.$connect(), tenantDb.$connect()]);
+    await controlDb.$connect();
     fastify.log.info('Database connected successfully');
 
     // Start server
@@ -262,6 +264,11 @@ async function start() {
 
     fastify.log.info(`Server started on http://${config.host}:${config.port}`);
     fastify.log.info(`API documentation available at http://localhost:${config.port}/docs`);
+
+    // Background work: finish provisioning interrupted by a restart, and keep
+    // platform usage snapshots fresh
+    await resumeProvisioning().catch((err) => fastify.log.error({ err }, 'Resuming provisioning failed'));
+    startUsageRefresh((msg) => fastify.log.warn(msg), resumeProvisioning);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -271,6 +278,7 @@ async function start() {
 // Graceful shutdown
 const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
+  stopUsageRefresh();
   await disconnectDatabases();
   await fastify.close();
   process.exit(0);

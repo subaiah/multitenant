@@ -27,15 +27,56 @@ model Tenant {
   loginTitle      String?      @map("login_title")
   loginSubtitle   String?      @map("login_subtitle")
 
+  // Provisioning (lib/provisioning.ts). Nobody signs in until READY.
+  provisioningStatus ProvisioningStatus @default(PENDING) @map("provisioning_status")
+  provisioningError  String?            @map("provisioning_error")
+  provisionedAt      DateTime?          @map("provisioned_at")
+  /// The first administrator, created and invited by the provisioning job
+  initialAdminEmail  String?            @map("initial_admin_email")
+  initialAdminName   String?            @map("initial_admin_name")
+  adminInvitedAt     DateTime?          @map("admin_invited_at")
+  /// The platform user who created the tenant (named in the invitation)
+  createdById        String?            @map("created_by_id")
+
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
   databaseConfig     DatabaseConfig?
   tenantApplications TenantApplication[]
   supportSessions    SupportSession[]
+  usage              TenantUsage?
 
   @@map("tenants")
   @@index([status])
+  @@index([provisioningStatus])
+}
+
+enum ProvisioningStatus {
+  PENDING
+  PROVISIONING
+  READY
+  FAILED
+  DEPROVISIONING
+}
+
+// Per-tenant figures for platform pages, refreshed by a periodic job
+// (lib/tenant-usage.ts) so those pages don't query every tenant database.
+model TenantUsage {
+  tenantId       String    @id @map("tenant_id")
+  users          Int       @default(0)
+  applications   Int       @default(0)
+  /// { RUNNING: 2, ... }
+  appsByStatus   Json      @default("{}") @map("apps_by_status")
+  lastActiveAt   DateTime? @map("last_active_at")
+  /// [{ date: 'YYYY-MM-DD', count }] for the last 14 days
+  activityByDay  Json      @default("[]") @map("activity_by_day")
+  /// The latest few activity entries, with user names resolved
+  recentActivity Json      @default("[]") @map("recent_activity")
+  refreshedAt    DateTime  @default(now()) @map("refreshed_at")
+
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_usage")
 }
 
 enum TenantPlan {
@@ -62,12 +103,20 @@ model DatabaseConfig {
   encryptionAtRest  Boolean          @default(false) @map("encryption_at_rest")
   maxConnections    Int              @default(100) @map("max_connections")
   storageLimit      String           @map("storage_limit")
-  /// Encrypted at rest (lib/secrets.ts)
+  /// How the app connects as the tenant's role. Encrypted at rest (lib/secrets.ts).
   connectionString  String?          @map("connection_string")
+  /// SCHEMA_PER_TENANT: the tenant's schema in the shared tenant database
   schemaName        String?          @map("schema_name")
+  /// DATABASE_PER_TENANT: the tenant's database
+  databaseName      String?          @map("database_name")
   tenantColumn      String?          @map("tenant_column")
-  /// The tenant's own Postgres role (set when it is provisioned)
+  /// The tenant's own Postgres role. Set once at provisioning and never rebuilt
+  /// from the slug, so renaming a slug can't break it.
   dbRoleName        String?          @unique @map("db_role_name")
+  /// Tenant migrations (lib/tenant-migrations.ts): the latest applied here
+  lastMigration     String?          @map("last_migration")
+  migratedAt        DateTime?        @map("migrated_at")
+  migrationError    String?          @map("migration_error")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 

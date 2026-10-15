@@ -271,10 +271,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Validate OAuth session (in the database of the tenant the state names)
     const slug = tokenSlug(state);
     const stateTenant = slug ? await controlDb.tenant.findUnique({ where: { slug } }) : null;
-    if (!stateTenant || stateTenant.status === 'SUSPENDED') {
+    if (!stateTenant || stateTenant.status === 'SUSPENDED' || stateTenant.provisioningStatus !== 'READY') {
       throw new AppError('Invalid or expired OAuth session', 400);
     }
-    const db = dbForTenant(stateTenant.id);
+    const db = await dbForTenant(stateTenant.id);
     const oauthSession = await db.oAuthSession.findFirst({
       where: { state, tenantId: stateTenant.id },
     });
@@ -402,8 +402,11 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { email, tenantId, password } = loginSchema.parse(request.body);
 
-    const tenantRow = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, status: true } });
-    const db = dbForTenant(tenantId);
+    const tenantRow = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, status: true, slug: true, provisioningStatus: true } });
+    if (!tenantRow || tenantRow.provisioningStatus !== 'READY') {
+      throw new AppError('Invalid credentials', 401);
+    }
+    const db = await dbForTenant(tenantId);
 
     // Check if tenant requires SSO only
     const authConfig = await db.authConfig.findUnique({
@@ -808,7 +811,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Changing an existing password requires the current one, so a stolen
     // session token can't be turned into a permanent account takeover.
     const existing = session.tenantId
-      ? await dbForTenant(session.tenantId).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select: { passwordHash: true } })
+      ? await (await dbForTenant(session.tenantId)).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select: { passwordHash: true } })
       : await controlDb.platformUser.findUnique({ where: { id: session.id }, select: { passwordHash: true } });
     if (!existing) {
       throw new AppError('User not found', 404);
@@ -821,7 +824,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     const passwordHash = await hashPassword(password);
     if (session.tenantId) {
-      await dbForTenant(session.tenantId).user.updateMany({ where: { id: session.id, tenantId: session.tenantId }, data: { passwordHash } });
+      await (await dbForTenant(session.tenantId)).user.updateMany({ where: { id: session.id, tenantId: session.tenantId }, data: { passwordHash } });
     } else {
       await controlDb.platformUser.update({ where: { id: session.id }, data: { passwordHash } });
     }

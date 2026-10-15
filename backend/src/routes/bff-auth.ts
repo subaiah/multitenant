@@ -370,7 +370,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const select = { id: true, email: true, name: true, userType: true } as const;
     const [user, tenant] = session.tenantId
       ? await Promise.all([
-          dbForTenant(session.tenantId).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select }),
+          (await dbForTenant(session.tenantId)).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select }),
           controlDb.tenant.findUnique({ where: { id: session.tenantId }, select: { id: true, name: true, slug: true } }),
         ])
       : [await controlDb.platformUser.findUnique({ where: { id: session.id }, select }), null];
@@ -410,7 +410,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Ends every session, including access tokens already handed out
     if (user.tenantId) {
-      const db = dbForTenant(user.tenantId);
+      const db = await dbForTenant(user.tenantId);
       await db.$transaction(endAllSessions(db, user.id));
     } else {
       await controlDb.$transaction(endAllPlatformSessions(user.id));

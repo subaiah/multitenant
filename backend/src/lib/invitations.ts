@@ -17,7 +17,7 @@ export async function sendInvitation(
 ) {
   const select = { name: true, email: true } as const;
   const inviter =
-    (await dbForTenant(tenant.id).user.findFirst({ where: { id: inviterId, tenantId: tenant.id }, select })) ??
+    (await (await dbForTenant(tenant.id)).user.findFirst({ where: { id: inviterId, tenantId: tenant.id }, select })) ??
     (await controlDb.platformUser.findUnique({ where: { id: inviterId }, select }));
   const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
   const token = await issueUserToken(owner, user.id, 'INVITE', INVITE_TTL_DAYS * 24 * 60 * 60 * 1000, inviterId);

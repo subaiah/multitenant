@@ -5,18 +5,23 @@ import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 
-const updateDatabaseConfigSchema = z.object({
-  strategy: z.enum(['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES']).optional(),
-  provider: z.enum(['POSTGRESQL', 'MYSQL', 'MONGODB', 'SQLSERVER']).optional(),
-  region: z.string().optional(),
-  backupEnabled: z.boolean().optional(),
-  encryptionAtRest: z.boolean().optional(),
-  maxConnections: z.number().min(1).max(1000).optional(),
-  storageLimit: z.string().optional(),
-  connectionString: z.string().optional(),
-  schemaName: z.string().optional(),
-  tenantColumn: z.string().optional(),
-});
+// Where the data lives (isolation mode, role, schema or database, connection
+// string) is set by provisioning and can't change once a tenant has data;
+// only these operational settings can be edited.
+const updateDatabaseConfigSchema = z
+  .object({
+    backupEnabled: z.boolean().optional(),
+    encryptionAtRest: z.boolean().optional(),
+    storageLimit: z.string().max(20).optional(),
+  })
+  .strict();
+const LOCKED = ['strategy', 'provider', 'region', 'connectionString', 'schemaName', 'databaseName', 'tenantColumn', 'dbRoleName', 'maxConnections'];
+
+/** What the API shows: never the connection string (it holds credentials) */
+function present(cfg: NonNullable<Awaited<ReturnType<typeof controlDb.databaseConfig.findUnique>>>) {
+  const { connectionString, ...safe } = cfg;
+  return { ...safe, hasConnectionString: Boolean(connectionString), isolationLocked: true };
+}
 
 export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
   // Get database config for current tenant
@@ -35,9 +40,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Database configuration not found', 404);
     }
 
-    // Never send the connection string (it contains credentials) to the browser
-    const { connectionString, ...safe } = config;
-    return { ...safe, hasConnectionString: Boolean(connectionString) };
+    return present(config);
   });
 
   // Update database config
@@ -49,42 +52,19 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       body: {
         type: 'object',
         properties: {
-          strategy: { type: 'string', enum: ['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES'] },
-          provider: { type: 'string', enum: ['POSTGRESQL', 'MYSQL', 'MONGODB', 'SQLSERVER'] },
-          region: { type: 'string' },
           backupEnabled: { type: 'boolean' },
           encryptionAtRest: { type: 'boolean' },
-          maxConnections: { type: 'number', minimum: 1, maximum: 1000 },
           storageLimit: { type: 'string' },
-          connectionString: { type: 'string' },
-          schemaName: { type: 'string' },
-          tenantColumn: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
 
+    const locked = Object.keys((request.body as object) ?? {}).filter((k) => LOCKED.includes(k));
+    if (locked.length) {
+      throw new AppError(`Where this tenant's data lives is fixed once it's set up (${locked.join(', ')} can't be changed)`, 400);
+    }
     const data = updateDatabaseConfigSchema.parse(request.body);
-
-    // Validate strategy-specific fields against the resulting config, so a save
-    // that doesn't resend the (never returned) connection string still works
-    const current = await controlDb.databaseConfig.findUnique({ where: { tenantId: request.tenant.id } });
-    if (!current) {
-      throw new AppError('Database configuration not found', 404);
-    }
-    const next = { ...current, ...data };
-
-    if (next.strategy === 'DATABASE_PER_TENANT' && !next.connectionString) {
-      throw new AppError('Connection string required for DATABASE_PER_TENANT strategy', 400);
-    }
-
-    if (next.strategy === 'SCHEMA_PER_TENANT' && !next.schemaName) {
-      throw new AppError('Schema name required for SCHEMA_PER_TENANT strategy', 400);
-    }
-
-    if (next.strategy === 'SHARED_TABLES' && !next.tenantColumn) {
-      throw new AppError('Tenant column required for SHARED_TABLES strategy', 400);
-    }
 
     const config = await controlDb.databaseConfig.update({
       where: { tenantId: request.tenant.id },
@@ -98,11 +78,10 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
         action: 'updated database configuration',
         target: 'database',
         type: 'CONFIG',
-        metadata: { strategy: data.strategy },
+        metadata: data,
       });
 
-    const { connectionString, ...safe } = config;
-    return { ...safe, hasConnectionString: Boolean(connectionString) };
+    return present(config);
   });
 
   // Get database strategies info
@@ -117,7 +96,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       {
         id: 'DATABASE_PER_TENANT',
         name: 'Database per Tenant',
-        description: 'Complete data isolation with dedicated database instances per tenant',
+        description: 'A database of its own, reached only by its own database role',
         pros: ['Maximum isolation', 'Independent scaling', 'Custom backups', 'No noisy neighbor'],
         cons: ['Higher cost', 'Complex migrations', 'More infrastructure to manage'],
         bestFor: 'Enterprise, Regulated Industries',
@@ -125,7 +104,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       {
         id: 'SCHEMA_PER_TENANT',
         name: 'Schema per Tenant',
-        description: 'Shared database with isolated schemas per tenant',
+        description: 'A schema of its own in a shared database, reached only by its own database role',
         pros: ['Good isolation', 'Lower cost than dedicated DBs', 'Easier cross-tenant queries', 'Shared infrastructure'],
         cons: ['Schema migrations complexity', 'Connection pooling limits', 'Backup coordination'],
         bestFor: 'Mid-market, SaaS Platforms',
@@ -133,7 +112,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       {
         id: 'SHARED_TABLES',
         name: 'Shared Tables (Row-Level)',
-        description: 'All tenants share the same tables with a tenant_id column and row-level security',
+        description: 'Shared tables; row-level security shows each tenant\'s database role only its own rows',
         pros: ['Lowest cost', 'Simplest operations', 'Easy migrations', 'Efficient resource use'],
         cons: ['Weakest isolation', 'Noisy neighbor risk', 'Complex RLS policies', 'Data leakage risk'],
         bestFor: 'Startups, Free Tiers, High-volume low-value',

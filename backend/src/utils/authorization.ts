@@ -104,7 +104,7 @@ const DEFAULT_TENANT_ROLES: { name: string; description: string; userType: UserT
  * to a regular user grants exactly what a manager has. Existing roles with
  * the same name are left as they are.
  */
-export async function createDefaultTenantRoles(tenantId: string, db: TenantDb = dbForTenant(tenantId)): Promise<void> {
+export async function createDefaultTenantRoles(tenantId: string, db: TenantDb): Promise<void> {
   for (const template of DEFAULT_TENANT_ROLES) {
     const existing = await db.role.findFirst({ where: { tenantId, name: template.name } });
     if (existing) continue;
@@ -189,7 +189,7 @@ export async function getEnhancedUserPermissions(
     };
   }
 
-  const db = dbForTenant(tenantId);
+  const db = await dbForTenant(tenantId);
 
   // 2. Get direct role assignments
   const directAssignments = await db.roleAssignment.findMany({

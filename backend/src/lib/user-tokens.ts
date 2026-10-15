@@ -31,7 +31,7 @@ export async function issueUserToken(owner: TokenOwner, userId: string, type: Us
       controlDb.platformUserToken.create({ data: record }),
     ]);
   } else {
-    const db = dbForTenant(owner.tenantId);
+    const db = await dbForTenant(owner.tenantId);
     await db.$transaction([
       db.userToken.updateMany({ where: { tenantId: owner.tenantId, userId, type, usedAt: null }, data: { usedAt: new Date() } }),
       db.userToken.create({ data: { ...record, tenantId: owner.tenantId } }),
@@ -61,9 +61,9 @@ export async function findValidUserToken(token: string, type: UserTokenType): Pr
     return t ? { id: t.id, userId: t.userId, tenant: null, user: t.user } : null;
   }
 
-  const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, name: true, slug: true, status: true } });
-  if (!tenant || tenant.status === 'SUSPENDED') return null;
-  const db = dbForTenant(tenant.id);
+  const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, name: true, slug: true, status: true, provisioningStatus: true } });
+  if (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY') return null;
+  const db = await dbForTenant(tenant.id);
   const t = await db.userToken.findFirst({ where: { ...where, tenantId: tenant.id }, include: { user: { select: userSelect } } });
   if (!t) return null;
   const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id }, select: { passwordPolicy: true } });
@@ -79,7 +79,7 @@ export async function findValidUserToken(token: string, type: UserTokenType): Pr
 export async function consumeUserToken(t: ValidUserToken): Promise<boolean> {
   const data = { usedAt: new Date() };
   const { count } = t.tenant
-    ? await dbForTenant(t.tenant.id).userToken.updateMany({ where: { id: t.id, tenantId: t.tenant.id, usedAt: null }, data })
+    ? await (await dbForTenant(t.tenant.id)).userToken.updateMany({ where: { id: t.id, tenantId: t.tenant.id, usedAt: null }, data })
     : await controlDb.platformUserToken.updateMany({ where: { id: t.id, usedAt: null }, data });
   return count === 1;
 }

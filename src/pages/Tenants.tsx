@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight, Plus, Loader2, AlertTriangle, RotateCw, Trash2, Database } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
-import { apiPatch, apiPost } from '../lib/api-client';
+import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
 import { Dialog, Field } from '../components/Dialog';
 import {
   Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatRelative, humanize, inputClass, selectClass, primaryButtonClass, secondaryButtonClass,
@@ -20,6 +20,33 @@ interface Tenant {
   createdAt: string;
   lastActiveAt: string | null;
   _count: { users: number; applications: number };
+  usageRefreshedAt: string | null;
+  isolation: Isolation | null;
+  provisioningStatus: 'PENDING' | 'PROVISIONING' | 'READY' | 'FAILED' | 'DEPROVISIONING';
+  provisioningError: string | null;
+  migration: { last: string | null; at: string | null; error: string | null } | null;
+}
+type Isolation = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
+
+const ISOLATION: Record<Isolation, { label: string; description: string }> = {
+  SHARED_TABLES: { label: 'Shared tables', description: 'Rows in the shared database, kept apart by row-level security. Cheapest; fine for most tenants.' },
+  SCHEMA_PER_TENANT: { label: 'Own schema', description: 'Its own schema in the shared database. Stronger separation; easy per-tenant export.' },
+  DATABASE_PER_TENANT: { label: 'Own database', description: 'A database of its own. Strongest separation; for regulated or large customers.' },
+};
+
+/** Provisioning in progress: the card shows it, and the list refreshes until it's done */
+const busy = (t: Tenant) => t.provisioningStatus === 'PENDING' || t.provisioningStatus === 'PROVISIONING' || (t.provisioningStatus === 'DEPROVISIONING' && !t.provisioningError);
+
+function ProvisioningBadge({ tenant }: { tenant: Tenant }) {
+  if (tenant.provisioningStatus === 'READY') return null;
+  if (tenant.provisioningStatus === 'FAILED' || tenant.provisioningError) {
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400"><AlertTriangle size={12} />{tenant.provisioningStatus === 'DEPROVISIONING' ? 'Delete failed' : 'Setup failed'}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+      <Loader2 size={12} className="animate-spin" />{tenant.provisioningStatus === 'DEPROVISIONING' ? 'Deleting…' : 'Setting up…'}
+    </span>
+  );
 }
 interface TenantList {
   data: Tenant[];
@@ -47,6 +74,14 @@ export default function Tenants() {
   if (plan) query.set('plan', plan);
   if (search) query.set('search', search);
   const list = useApi<TenantList>(`/tenants?${query}`);
+
+  // Follow tenants being set up or deleted until they're done
+  const anyBusy = list.data?.data.some(busy) ?? false;
+  useEffect(() => {
+    if (!anyBusy) return;
+    const timer = setInterval(() => void list.reload(), 2000);
+    return () => clearInterval(timer);
+  }, [anyBusy, list.reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -109,9 +144,13 @@ export default function Tenants() {
                         <p className="text-xs text-slate-500">{t.slug}</p>
                       </div>
                     </div>
-                    <div className="flex gap-2 mt-3">
+                    <div className="flex flex-wrap gap-2 mt-3">
                       <Badge value={t.plan} className="!bg-slate-100 dark:!bg-slate-700" />
                       <Badge value={t.status} />
+                      {t.isolation && t.isolation !== 'SHARED_TABLES' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300"><Database size={12} />{ISOLATION[t.isolation].label}</span>
+                      )}
+                      <ProvisioningBadge tenant={t} />
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-4 text-sm text-slate-600 dark:text-slate-300">
                       <span className="flex items-center gap-1.5"><Users size={14} className="text-slate-400" />{t._count.users} users</span>
@@ -138,7 +177,10 @@ export default function Tenants() {
       </DataView>
 
       {selected && (
-        <TenantPanel tenant={selected} onClose={() => setSelected(null)} onSaved={async () => { setSelected(null); await list.reload(); }} />
+        <TenantPanel tenant={list.data?.data.find((t) => t.id === selected.id) ?? selected} onClose={() => setSelected(null)}
+          onSaved={async () => { setSelected(null); await list.reload(); }}
+          onChanged={async (msg) => { setNotice(msg); await list.reload(); }}
+          onDeleted={async (msg) => { setSelected(null); setNotice(msg); await list.reload(); }} />
       )}
       {creating && (
         <NewTenantDialog onClose={() => setCreating(false)} onCreated={async (msg) => { setCreating(false); setNotice(msg); await list.reload(); }} />
@@ -147,14 +189,50 @@ export default function Tenants() {
   );
 }
 
-function TenantPanel({ tenant, onClose, onSaved }: { tenant: Tenant; onClose: () => void; onSaved: () => void }) {
+function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
+  tenant: Tenant;
+  onClose: () => void;
+  onSaved: () => void;
+  onChanged: (message: string) => Promise<void>;
+  onDeleted: (message: string) => Promise<void>;
+}) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('tenants:manage');
   const [plan, setPlan] = useState(tenant.plan);
   const [status, setStatus] = useState(tenant.status);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState<'retry' | 'delete' | null>(null);
   const dirty = plan !== tenant.plan || status !== tenant.status;
+
+  const retry = async () => {
+    setWorking('retry');
+    setError(null);
+    try {
+      await apiPost(`/tenants/${tenant.id}/provision`);
+      await onChanged(`Setting up ${tenant.name} again…`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const remove = async () => {
+    const what = tenant.isolation === 'DATABASE_PER_TENANT' ? 'its database' : tenant.isolation === 'SCHEMA_PER_TENANT' ? 'its schema' : 'all its data';
+    if (prompt(`This deletes ${tenant.name}, ${what} and its database role. It can't be undone.\n\nType the address "${tenant.slug}" to confirm.`) !== tenant.slug) return;
+    setWorking('delete');
+    setError(null);
+    try {
+      await apiDelete(`/tenants/${tenant.id}`);
+      await onDeleted(`${tenant.name} was deleted.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+      await onChanged('');
+    } finally {
+      setWorking(null);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -197,6 +275,20 @@ function TenantPanel({ tenant, onClose, onSaved }: { tenant: Tenant; onClose: ()
           })}
         </dl>
         {tenant.customDomain && <p className="text-sm text-slate-600 dark:text-slate-300">Custom domain: <span className="font-mono">{tenant.customDomain}</span></p>}
+        {tenant.usageRefreshedAt && <p className="-mt-3 text-xs text-slate-400">Counts as of {formatRelative(tenant.usageRefreshedAt).toLowerCase()}</p>}
+
+        <section aria-label="Data isolation" className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 text-sm space-y-1">
+          <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-white"><Database size={14} />{tenant.isolation ? ISOLATION[tenant.isolation].label : '—'}<ProvisioningBadge tenant={tenant} /></p>
+          {tenant.isolation && <p className="text-xs text-slate-500">{ISOLATION[tenant.isolation].description} Fixed once created.</p>}
+          {tenant.migration?.last && <p className="text-xs text-slate-500">Schema version <span className="font-mono">{tenant.migration.last}</span></p>}
+          {tenant.migration?.error && <p className="text-xs text-red-600">Last migration failed: {tenant.migration.error}</p>}
+          {tenant.provisioningError && <p role="alert" className="text-xs text-red-600 break-words">{tenant.provisioningError}</p>}
+          {canManage && tenant.provisioningStatus === 'FAILED' && (
+            <button onClick={retry} disabled={working !== null} className={`${secondaryButtonClass} mt-2`}>
+              <RotateCw size={14} className={working === 'retry' ? 'animate-spin' : ''} />Retry setup
+            </button>
+          )}
+        </section>
 
         <div className="space-y-3">
           <label className="block text-sm">
@@ -220,6 +312,16 @@ function TenantPanel({ tenant, onClose, onSaved }: { tenant: Tenant; onClose: ()
             <button onClick={save} disabled={!dirty || saving} className={primaryButtonClass}>{saving ? 'Saving…' : 'Save changes'}</button>
           )}
         </div>
+
+        {canManage && (
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+            <button onClick={remove} disabled={working !== null || busy(tenant)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+              {working === 'delete' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {tenant.provisioningStatus === 'DEPROVISIONING' ? 'Delete again' : 'Delete tenant'}
+            </button>
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -233,6 +335,7 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   const [slugEdited, setSlugEdited] = useState(false);
   const [plan, setPlan] = useState('FREE');
   const [status, setStatus] = useState('ACTIVE');
+  const [strategy, setStrategy] = useState<Isolation>('SHARED_TABLES');
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [saving, setSaving] = useState(false);
@@ -243,8 +346,8 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     setSaving(true);
     setError(null);
     try {
-      const t = await apiPost<{ name: string; adminInvited: string }>('/tenants', { name, slug, plan, status, adminName, adminEmail });
-      onCreated(`${t.name} created. An invitation was sent to ${t.adminInvited}.`);
+      const t = await apiPost<{ name: string; adminInvited: string }>('/tenants', { name, slug, plan, status, strategy, adminName, adminEmail });
+      onCreated(`${t.name} is being set up. ${t.adminInvited} gets an invitation once it's ready.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the tenant');
       setSaving(false);
@@ -252,7 +355,7 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   };
 
   return (
-    <Dialog title="New tenant" onClose={onClose} onSubmit={submit}>
+    <Dialog title="New tenant" onClose={onClose} onSubmit={submit} wide>
       <Field label="Organization name">
         <input required minLength={2} value={name} autoFocus className={inputClass}
           onChange={(e) => { setName(e.target.value); if (!slugEdited) setSlug(slugify(e.target.value)); }} />
@@ -273,6 +376,21 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
           </select>
         </Field>
       </div>
+      <fieldset>
+        <legend className="text-sm text-slate-600 dark:text-slate-300">Data isolation</legend>
+        <div className="mt-1 space-y-2">
+          {(Object.keys(ISOLATION) as Isolation[]).map((key) => (
+            <label key={key} className={`flex gap-3 p-3 rounded-lg border cursor-pointer ${strategy === key ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-slate-200 dark:border-slate-700'}`}>
+              <input type="radio" name="strategy" value={key} checked={strategy === key} onChange={() => setStrategy(key)} className="mt-1" />
+              <span className="text-sm">
+                <span className="block font-medium text-slate-800 dark:text-white">{ISOLATION[key].label}</span>
+                <span className="block text-xs text-slate-500">{ISOLATION[key].description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">Can't be changed once the tenant has data.</p>
+      </fieldset>
       <p className="pt-2 text-sm font-medium text-slate-700 dark:text-slate-200">First administrator</p>
       <Field label="Name">
         <input required minLength={2} value={adminName} onChange={(e) => setAdminName(e.target.value)} className={inputClass} />

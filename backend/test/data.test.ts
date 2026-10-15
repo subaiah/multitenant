@@ -13,28 +13,24 @@ import {
 let A: TenantSeed;
 let B: TenantSeed;
 let P: PlatformSeed;
-let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
 let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 let appB: string;
 
 before(async () => {
-  ({ tenantDb, controlDb } = await db());
+  ({ controlDb } = await db());
   A = await seedTenant('data-a');
   B = await seedTenant('data-b');
   P = await seedPlatformUsers();
   for (const [t, prefix] of [[A, 'Alpha'], [B, 'Beta']] as const) {
-    await tenantDb.application.createMany({
+    await t.db.application.createMany({
       data: [
         { tenantId: t.tenantId, name: `${prefix} Web`, status: 'RUNNING', version: '1.0.0', environment: 'PRODUCTION', url: 'https://x.test', cpu: 40, memory: 50, requests: 100 },
         { tenantId: t.tenantId, name: `${prefix} Worker`, status: 'ERROR', version: '1.0.1', environment: 'STAGING', url: 'https://y.test', cpu: 90, memory: 95, requests: 5 },
       ],
     });
-    await controlDb.databaseConfig.create({
-      data: { tenantId: t.tenantId, strategy: 'DATABASE_PER_TENANT', provider: 'POSTGRESQL', region: 'eu', storageLimit: '10 GB', connectionString: 'postgresql://secret-user:secret-pass@db/x' },
-    });
-    await tenantDb.activity.create({ data: { tenantId: t.tenantId, action: 'deployed', target: `${prefix} Web`, type: 'DEPLOY' } });
+    await t.db.activity.create({ data: { tenantId: t.tenantId, action: 'deployed', target: `${prefix} Web`, type: 'DEPLOY' } });
   }
-  appB = (await tenantDb.application.findFirstOrThrow({ where: { tenantId: B.tenantId } })).id;
+  appB = (await B.db.application.findFirstOrThrow({ where: { tenantId: B.tenantId } })).id;
   await startServer();
 });
 
@@ -63,13 +59,28 @@ test('platform users list contains only tenant-less users and no password hashes
   assert.ok(!JSON.stringify(res.json).includes('passwordHash'));
 });
 
-test('tenant list includes status counts and last activity', async () => {
+test('tenant list includes status counts and usage from the periodic snapshot', async () => {
   const { cookie } = await loginSession('platform', P.adminEmail);
+  const before = (await api('GET', `/tenants?search=${A.slug}`, { cookie })).json.data[0];
+  assert.equal(before._count.applications, 0, 'snapshot taken when provisioned, before the apps were added');
+
+  // What the background job does every few minutes
+  const { refreshTenantUsage } = await import('../src/lib/tenant-usage.js');
+  await refreshTenantUsage([A.tenantId, B.tenantId]);
+
   const res = await api('GET', `/tenants?search=${A.slug}`, { cookie });
   assert.equal(res.status, 200);
   assert.equal(res.json.data.length, 1);
   assert.equal(res.json.statusCounts.ACTIVE, 1);
-  assert.ok(res.json.data[0].lastActiveAt, 'lastActiveAt from activity');
+  const a = res.json.data[0];
+  assert.ok(a.lastActiveAt, 'lastActiveAt from activity');
+  assert.deepEqual(a._count, { users: 3, applications: 2 });
+  assert.ok(a.usageRefreshedAt);
+
+  // The platform dashboard adds the snapshots up
+  const stats = (await api('GET', '/platform/stats', { cookie })).json;
+  assert.ok(stats.applications.byStatus.ERROR >= 2, 'both tenants have an app in error');
+  assert.ok(stats.recentActivity.some((r: { tenant: string; target: string }) => r.tenant === 'Test data-b' && r.target === 'Beta Web'));
 });
 
 test('deployed apps are scoped to the tenant, filterable and counted', async () => {
@@ -123,16 +134,28 @@ test('tenant admins can edit their branding; others cannot; bad input is rejecte
   assert.equal((await api('PATCH', `/tenants/${A.tenantId}`, { cookie: user.cookie, body: { loginTitle: 'x' } })).status, 403);
 });
 
-test('database connection strings are never returned, and saving works without resending one', async () => {
+test("the tenant role's connection string is never returned; where data lives can't be changed", async () => {
   const { cookie } = await loginSession(A.slug, A.adminEmail);
+  const { decryptSecret } = await import('../src/lib/secrets.js');
+  const cfg = await controlDb.databaseConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
+  const password = new URL(decryptSecret(cfg.connectionString!, 'database_configs.connection_string')).password;
+
   const get = await api('GET', '/database', { cookie });
   assert.equal(get.status, 200);
   assert.equal(get.json.hasConnectionString, true);
-  assert.ok(!JSON.stringify(get.json).includes('secret-pass'));
+  assert.equal(get.json.strategy, A.strategy);
+  assert.ok(!JSON.stringify(get.json).includes(password));
 
-  const patch = await api('PATCH', '/database', { cookie, body: { strategy: 'DATABASE_PER_TENANT', backupEnabled: true } });
+  const patch = await api('PATCH', '/database', { cookie, body: { backupEnabled: true } });
   assert.equal(patch.status, 200, JSON.stringify(patch.json));
-  assert.ok(!JSON.stringify(patch.json).includes('secret-pass'));
+  assert.ok(!JSON.stringify(patch.json).includes(password));
+
+  for (const body of [{ strategy: 'SHARED_TABLES' }, { connectionString: 'postgresql://x:y@evil/db' }, { schemaName: 'public' }]) {
+    const res = await api('PATCH', '/database', { cookie, body });
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(res.json.message, /fixed once/);
+  }
+  assert.equal((await controlDb.databaseConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } })).connectionString, cfg.connectionString);
 });
 
 test('OAuth client secrets are write-only and never logged', async () => {
@@ -145,12 +168,12 @@ test('OAuth client secrets are write-only and never logged', async () => {
   assert.equal(updated.status, 200);
   assert.ok(!JSON.stringify(updated.json).includes('okta-SECRET-2'));
 
-  const stored = await tenantDb.authProvider.findUniqueOrThrow({ where: { id: created.json.id } });
+  const stored = await A.db.authProvider.findUniqueOrThrow({ where: { id: created.json.id } });
   const { decryptSecret, isEncrypted } = await import('../src/lib/secrets.js');
   assert.ok(isEncrypted(stored.clientSecret!), 'secret is stored encrypted');
   assert.equal(decryptSecret(stored.clientSecret!, 'auth_providers.client_secret'), 'okta-SECRET-2', 'secret was saved');
 
-  const logs = await tenantDb.activity.findMany({ where: { tenantId: A.tenantId } });
+  const logs = await A.db.activity.findMany({ where: { tenantId: A.tenantId } });
   assert.ok(!JSON.stringify(logs).includes('okta-SECRET'), 'secret not in the activity log');
 
   const config = await api('GET', '/auth-config', { cookie });

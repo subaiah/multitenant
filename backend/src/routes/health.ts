@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
-import { controlDb, tenantDb } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { platformDb } from '../lib/tenant-targets.js';
 
 export const healthRoutes: FastifyPluginAsync = async (fastify) => {
   // Basic health check
@@ -35,7 +36,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
       }
     };
     // The control plane and the shared tenant database
-    const [control, tenant] = await Promise.all([ping(controlDb), ping(tenantDb)]);
+    const [control, tenant] = await Promise.all([ping(controlDb), ping(platformDb({ kind: 'shared' }))]);
     const healthy = control.status === 'healthy' && tenant.status === 'healthy';
 
     return {

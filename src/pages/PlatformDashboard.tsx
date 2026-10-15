@@ -6,12 +6,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { Badge, Card, CHART_TOOLTIP, DataView, EmptyState, PageHeader, StatCard, formatRelative, humanize } from '../components/ui';
 
 interface PlatformStats {
-  tenants: { total: number; byStatus: Record<string, number>; byPlan: Record<string, number> };
+  tenants: { total: number; byStatus: Record<string, number>; byPlan: Record<string, number>; byProvisioning: Record<string, number> };
   users: { tenant: number; platform: number };
   applications: { total: number; byStatus: Record<string, number> };
   activityByDay: { date: string; count: number }[];
   recentActivity: { id: string; action: string; target: string; type: string; tenant: string; user: string; timestamp: string }[];
   topTenants: { id: string; name: string; slug: string; plan: string; status: string; users: number; applications: number }[];
+  /** Tenant figures come from periodic snapshots; this is the oldest one */
+  usageAsOf: string | null;
 }
 
 const PLANS = ['ENTERPRISE', 'PROFESSIONAL', 'STARTER', 'FREE'];
@@ -25,7 +27,7 @@ export default function PlatformDashboard() {
     <div className="p-6 space-y-6">
       <PageHeader
         title={`Welcome back${user?.name ? `, ${user.name}` : ''}`}
-        description="Live overview of every tenant on the platform"
+        description="Overview of every tenant on the platform"
       />
       <DataView {...stats}>
         {(s) => {
@@ -33,8 +35,15 @@ export default function PlatformDashboard() {
           const running = s.applications.byStatus.RUNNING ?? 0;
           const failing = s.applications.byStatus.ERROR ?? 0;
           const days = s.activityByDay.map((d) => ({ ...d, label: d.date.slice(5) }));
+          const settingUp = (s.tenants.byProvisioning.PENDING ?? 0) + (s.tenants.byProvisioning.PROVISIONING ?? 0);
+          const failedSetup = s.tenants.byProvisioning.FAILED ?? 0;
           return (
             <>
+              <p className="-mt-3 text-xs text-slate-500">
+                Tenant figures as of {s.usageAsOf ? formatRelative(s.usageAsOf).toLowerCase() : 'the next refresh'} (refreshed every few minutes)
+                {settingUp > 0 && <> · {settingUp} being set up</>}
+                {failedSetup > 0 && <> · <Link to="/platform/tenants" className="text-red-600 hover:underline">{failedSetup} failed to set up</Link></>}
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard label="Tenants" value={s.tenants.total} icon={Building2} tone="blue"
                   hint={`${s.tenants.byStatus.ACTIVE ?? 0} active · ${s.tenants.byStatus.TRIAL ?? 0} trial`} />

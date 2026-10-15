@@ -16,7 +16,6 @@ import {
 import { config } from '../src/config/env.js';
 
 let A: TenantSeed;
-let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
 let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 const key = () => crypto.randomBytes(32);
 const CONN = 'database_configs.connection_string';
@@ -24,17 +23,15 @@ const SSO = 'auth_providers.client_secret';
 
 /** Read a column straight from Postgres, bypassing the Prisma client and its extension. */
 async function raw(table: string, column: string, id: string): Promise<string | null> {
-  const client = table === 'database_configs' ? controlDb : tenantDb; // control plane vs tenant plane
-  const rows = await client.$queryRawUnsafe<{ v: string | null }[]>(`SELECT ${column} AS v FROM ${table} WHERE id = $1`, id);
+  // Control plane, or the tenant's own schema on its target
+  const [client, qualified] = table === 'database_configs' ? [controlDb, table] : [A.db, `"${A.schema}".${table}`];
+  const rows = await client.$queryRawUnsafe<{ v: string | null }[]>(`SELECT ${column} AS v FROM ${qualified} WHERE id = $1`, id);
   return rows[0]?.v ?? null;
 }
 
 before(async () => {
-  ({ tenantDb, controlDb } = await db());
+  ({ controlDb } = await db());
   A = await seedTenant('sec');
-  await controlDb.databaseConfig.create({
-    data: { tenantId: A.tenantId, strategy: 'SHARED_TABLES', provider: 'POSTGRESQL', region: 'ap-south-1', storageLimit: '10GB', tenantColumn: 'tenant_id' },
-  });
   await startServer();
 });
 
@@ -90,30 +87,26 @@ test('SECRET_FIELDS matches the schema: each field belongs to one model and the 
   }
 });
 
-test('saving a connection string through the API stores it encrypted and never returns it', async () => {
+test("provisioning stores the tenant role's connection string encrypted, and the API never returns it", async () => {
   const { cookie } = await loginSession(A.slug, A.adminEmail);
-  const conn = 'postgresql://tenant:hunter2@db.internal:5432/acme';
-  const res = await api('PATCH', '/database', { cookie, body: { strategy: 'DATABASE_PER_TENANT', connectionString: conn } });
-  assert.equal(res.status, 200, JSON.stringify(res.json));
-  assert.equal(res.json.hasConnectionString, true);
-  assert.ok(!JSON.stringify(res.json).includes('hunter2'));
-  assert.ok(!JSON.stringify((await api('GET', '/database', { cookie })).json).includes('hunter2'));
-
   const cfg = await controlDb.databaseConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
   const stored = await raw('database_configs', 'connection_string', cfg.id);
   assert.ok(stored && isEncrypted(stored), 'encrypted in the database');
-  assert.ok(!stored!.includes('hunter2'));
-  assert.equal(decryptSecret(stored!, CONN), conn);
+  const url = new URL(decryptSecret(stored!, CONN));
+  assert.equal(url.username, cfg.dbRoleName, "connects as the tenant's own role");
+  assert.ok(url.password.length >= 40, 'a generated password');
+  assert.ok(!stored!.includes(url.password));
+  assert.ok(!JSON.stringify((await api('GET', '/database', { cookie })).json).includes(url.password));
 
-  // A save that doesn't resend it keeps it
+  // A save of other settings keeps it
   assert.equal((await api('PATCH', '/database', { cookie, body: { backupEnabled: true } })).status, 200);
-  assert.equal(decryptSecret((await raw('database_configs', 'connection_string', cfg.id))!, CONN), conn);
+  assert.equal(decryptSecret((await raw('database_configs', 'connection_string', cfg.id))!, CONN), url.toString());
 });
 
 test('every write path encrypts: nested creates, upsert, updateMany with { set }', async () => {
-  const authConfig = await tenantDb.authConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
+  const authConfig = await A.db.authConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
   // Nested relation write
-  const updated = await tenantDb.authConfig.update({
+  const updated = await A.db.authConfig.update({
     where: { id: authConfig.id },
     data: { providers: { create: { tenantId: A.tenantId, provider: 'GITHUB', clientId: 'gh', clientSecret: 'gh-nested-secret', scopes: [] } } },
     include: { providers: true },
@@ -122,13 +115,13 @@ test('every write path encrypts: nested creates, upsert, updateMany with { set }
   assert.equal(decryptSecret((await raw('auth_providers', 'client_secret', gh.id))!, SSO), 'gh-nested-secret');
 
   // updateMany with the { set } form
-  await tenantDb.authProvider.updateMany({ where: { id: gh.id }, data: { clientSecret: { set: 'gh-set-secret' } } });
+  await A.db.authProvider.updateMany({ where: { id: gh.id }, data: { clientSecret: { set: 'gh-set-secret' } } });
   const viaSet = await raw('auth_providers', 'client_secret', gh.id);
   assert.ok(isEncrypted(viaSet!));
   assert.equal(decryptSecret(viaSet!, SSO), 'gh-set-secret');
 
   // upsert (update branch)
-  await tenantDb.authProvider.upsert({
+  await A.db.authProvider.upsert({
     where: { id: gh.id },
     create: { tenantId: A.tenantId, authConfigId: authConfig.id, provider: 'GITHUB', clientSecret: 'never-used', scopes: [] },
     update: { clientSecret: 'gh-upsert-secret' },
@@ -143,10 +136,10 @@ test('every write path encrypts: nested creates, upsert, updateMany with { set }
 
 test('the encrypt script converts plain text, re-keys old values, and is safe to rerun', async () => {
   const { encryptStoredSecrets } = await import('../prisma/encrypt-secrets.js');
-  const authConfig = await tenantDb.authConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
-  const p = await tenantDb.authProvider.create({ data: { tenantId: A.tenantId, authConfigId: authConfig.id, provider: 'AUTH0', clientId: 'a0', scopes: [] } });
+  const authConfig = await A.db.authConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
+  const p = await A.db.authProvider.create({ data: { tenantId: A.tenantId, authConfigId: authConfig.id, provider: 'AUTH0', clientId: 'a0', scopes: [] } });
   // Plain text written before encryption existed (bypassing the extension)
-  await tenantDb.$executeRawUnsafe(`UPDATE auth_providers SET client_secret = $1 WHERE id = $2`, 'legacy-plain', p.id);
+  await A.db.$executeRawUnsafe(`UPDATE "${A.schema}".auth_providers SET client_secret = $1 WHERE id = $2`, 'legacy-plain', p.id);
   const only = { clientSecret: [p.id] };
 
   const check = await encryptStoredSecrets({ check: true, only });
@@ -173,7 +166,7 @@ test('the encrypt script converts plain text, re-keys old values, and is safe to
     assert.equal(decryptSecret(rekeyed!, SSO), 'legacy-plain');
   } finally {
     config.secretKeys.delete(before + 1);
-    await tenantDb.authProvider.delete({ where: { id: p.id } });
+    await A.db.authProvider.delete({ where: { id: p.id } });
   }
 });
 
@@ -184,6 +177,8 @@ test('production refuses to start without a valid key', () => {
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://x:y@localhost:5432/z',
       TENANT_DATABASE_URL: 'postgresql://x:y@localhost:5432/z_tenant',
+      TENANT_PROVISIONER_URL: 'postgresql://p:y@localhost:5432/postgres',
+      TENANT_PLATFORM_URL: 'postgresql://q:y@localhost:5432/z_tenant',
       JWT_SECRET: 'x'.repeat(40),
       COOKIE_SECRET: 'y'.repeat(40),
       ...extra,

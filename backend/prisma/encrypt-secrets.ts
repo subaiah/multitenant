@@ -9,16 +9,20 @@
  * Rotating a key: add SECRETS_KEY_V2 next to V1, deploy, run this script, then
  * remove V1 once `--check` reports nothing left on it.
  */
-import { controlDb, tenantDb, disconnectDatabases } from '../src/lib/prisma.js';
+import { controlDb, disconnectDatabases } from '../src/lib/prisma.js';
+import { listTargets } from '../src/lib/tenant-migrations.js';
+import { platformDb } from '../src/lib/tenant-targets.js';
 import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretContext, secretKeyVersion, type SecretField } from '../src/lib/secrets.js';
 
-// Prisma delegate for each secret field's model. SSO secrets are tenant data:
-// this covers the shared tenant database; tenants with their own schema or
-// database are covered when those modes land (the tenant migration runner).
-const delegates: Record<SecretField, { findMany: Function; update: Function }> = {
-  connectionString: controlDb.databaseConfig,
-  clientSecret: tenantDb.authProvider,
-};
+type Delegate = { findMany: Function; update: Function };
+
+// Prisma delegates holding each secret field: connection strings in the
+// control plane; SSO secrets in every tenant target (as the platform role,
+// which sees every tenant's rows)
+async function delegatesFor(field: SecretField): Promise<Delegate[]> {
+  if (field === 'connectionString') return [controlDb.databaseConfig];
+  return (await listTargets()).map(({ target }) => platformDb(target).authProvider);
+}
 
 /** `only` limits the run to the given row ids per field (used by tests, which share a database). */
 export async function encryptStoredSecrets({ check = false, only }: { check?: boolean; only?: Partial<Record<SecretField, string[]>> } = {}) {
@@ -27,25 +31,27 @@ export async function encryptStoredSecrets({ check = false, only }: { check?: bo
 
   for (const field of Object.keys(SECRET_FIELDS) as SecretField[]) {
     const counts = { plain: 0, oldKey: 0, current: 0, fixed: 0 };
-    const rows: { id: string; [k: string]: string | null }[] = await delegates[field].findMany({
-      where: { [field]: { not: null }, ...(only && { id: { in: only[field] ?? [] } }) },
-      select: { id: true, [field]: true },
-    });
-    for (const row of rows) {
-      const value = row[field];
-      if (!value) continue;
-      const version = secretKeyVersion(value);
-      if (!isEncrypted(value)) counts.plain++;
-      else if (version !== active) counts.oldKey++;
-      else {
-        counts.current++;
-        continue;
+    for (const delegate of await delegatesFor(field)) {
+      const rows: { id: string; [k: string]: string | null }[] = await delegate.findMany({
+        where: { [field]: { not: null }, ...(only && { id: { in: only[field] ?? [] } }) },
+        select: { id: true, [field]: true },
+      });
+      for (const row of rows) {
+        const value = row[field];
+        if (!value) continue;
+        const version = secretKeyVersion(value);
+        if (!isEncrypted(value)) counts.plain++;
+        else if (version !== active) counts.oldKey++;
+        else {
+          counts.current++;
+          continue;
+        }
+        if (check) continue;
+        // Writing the plaintext back lets the Prisma extension encrypt it with the active key
+        const plaintext = decryptSecret(value, secretContext(field));
+        await delegate.update({ where: { id: row.id }, data: { [field]: plaintext } });
+        counts.fixed++;
       }
-      if (check) continue;
-      // Writing the plaintext back lets the Prisma extension encrypt it with the active key
-      const plaintext = decryptSecret(value, secretContext(field));
-      await delegates[field].update({ where: { id: row.id }, data: { [field]: plaintext } });
-      counts.fixed++;
     }
     report[`${SECRET_FIELDS[field].table}.${SECRET_FIELDS[field].column}`] = counts;
   }

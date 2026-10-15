@@ -13,7 +13,6 @@ import {
 let A: TenantSeed;
 let B: TenantSeed;
 let P: PlatformSeed;
-let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
 let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 let viewerEmail: string;
 let viewerId: string;
@@ -39,13 +38,13 @@ async function assign(roleId: string, principal: { userId?: string; groupId?: st
 }
 
 before(async () => {
-  ({ tenantDb, controlDb } = await db());
+  ({ controlDb } = await db());
   A = await seedTenant('authz-a');
   B = await seedTenant('authz-b');
   P = await seedPlatformUsers();
   const { hashPassword } = await import('../src/utils/auth.js');
   viewerEmail = `viewer-authz-${A.slug}@test.local`;
-  viewerId = (await tenantDb.user.create({
+  viewerId = (await A.db.user.create({
     data: { tenantId: A.tenantId, email: viewerEmail, name: 'Viewer', userType: 'TENANT_VIEWER', passwordHash: await hashPassword(PASSWORD) },
   })).id;
   await startServer();
@@ -100,14 +99,14 @@ test('tenant roles cannot grant platform permissions, even with wildcards', asyn
   const refused = await api('POST', '/roles', { cookie: adminCookie, body: { name: 'Sneaky', permissions: sneaky } });
   assert.equal(refused.status, 400);
   // ...and one that already exists in the database (older data) still grants nothing
-  const { id: roleId } = await tenantDb.role.create({
+  const { id: roleId } = await A.db.role.create({
     data: { tenantId: A.tenantId, name: 'Sneaky', permissions: { create: sneaky.map((permission) => ({ tenantId: A.tenantId, permission })) } },
   });
-  const adminId = (await tenantDb.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id;
+  const adminId = (await A.db.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id;
   // Nobody can assign it through the API either (the admin doesn't hold these)
   const assignRes = await api('POST', '/roles/assign', { cookie: adminCookie, body: { roleId, principalType: 'USER', userId: adminId } });
   assert.equal(assignRes.status, 403);
-  await tenantDb.roleAssignment.create({ data: { tenantId: A.tenantId, roleId, principalType: 'USER', userId: adminId, scopeType: 'TENANT', scopeId: A.tenantId } });
+  await A.db.roleAssignment.create({ data: { tenantId: A.tenantId, roleId, principalType: 'USER', userId: adminId, scopeType: 'TENANT', scopeId: A.tenantId } });
 
   const admin = await cookieFor(A.adminEmail);
   assert.equal((await api('GET', '/tenants', { cookie: admin })).status, 403);
@@ -129,8 +128,8 @@ test('read-only users are refused writes with the missing permission named', asy
 
 test('self-service routes: your own records, others need permission', async () => {
   const viewer = await cookieFor(viewerEmail);
-  const adminId = (await tenantDb.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id;
-  const otherTenantUser = (await tenantDb.user.findFirstOrThrow({ where: { email: B.userEmail } })).id;
+  const adminId = (await A.db.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id;
+  const otherTenantUser = (await B.db.user.findFirstOrThrow({ where: { email: B.userEmail } })).id;
 
   assert.equal((await api('GET', `/users/${viewerId}`, { cookie: viewer })).status, 200, 'own user record');
   assert.equal((await api('GET', `/users/${adminId}`, { cookie: viewer })).status, 403, "someone else's record");
