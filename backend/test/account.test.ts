@@ -129,6 +129,7 @@ test('forgot password → email → reset signs out existing sessions', async ()
   assert.equal((await api('POST', '/bff/auth/login', { body: { email: A.managerEmail, tenantSlug: A.slug, password: PASSWORD } })).status, 401, 'old password');
   assert.equal((await api('POST', '/bff/auth/login', { body: { email: A.managerEmail, tenantSlug: A.slug, password: 'brand-new-pass' } })).status, 200);
   assert.equal((await api('POST', '/bff/auth/refresh', { cookie: session.cookie })).status, 401, 'existing sessions revoked');
+  assert.equal((await api('GET', '/auth/permissions', { token: session.token })).status, 401, 'access tokens already issued stop working too');
 });
 
 test("the tenant's password policy applies to resets", async () => {

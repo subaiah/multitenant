@@ -76,6 +76,16 @@ async function registerPlugins() {
     },
   });
 
+  // Stamp user tokens with a millisecond issue time. The standard `iat` is in
+  // whole seconds, which isn't precise enough to tell a token issued just
+  // before "sign out everywhere" from one issued just after (lib/sessions.ts).
+  const signJwt = fastify.jwt.sign.bind(fastify.jwt);
+  fastify.jwt.sign = ((payload: unknown, options?: unknown) =>
+    signJwt(
+      payload && typeof payload === 'object' && 'userId' in payload ? { ...payload, iatMs: Date.now() } : (payload as object),
+      options as never,
+    )) as typeof fastify.jwt.sign;
+
   // Cookie support for BFF
   await fastify.register(cookie, {
     secret: config.cookieSecret,

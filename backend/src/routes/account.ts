@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { endAllSessions } from '../lib/sessions.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
 import { sendMail } from '../lib/mailer.js';
@@ -136,8 +137,9 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     await prisma.$transaction([
       prisma.user.update({ where: { id: reset.userId }, data: { passwordHash: await hashPassword(password) } }),
-      // Sign out everywhere: a reset usually means the old password can't be trusted
-      prisma.refreshToken.updateMany({ where: { userId: reset.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+      // Sign out everywhere, including access tokens already issued: a reset
+      // usually means the old password can't be trusted
+      ...endAllSessions(reset.userId),
     ]);
     if (reset.user.tenantId) {
       await prisma.activity.create({

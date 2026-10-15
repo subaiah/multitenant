@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
+import { verifySession } from '../lib/sessions.js';
 import { AppError } from '../middleware/error-handler.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
@@ -922,7 +923,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    await request.jwtVerify();
+    await verifySession(request);
 
     const { password, currentPassword } = request.body as { password: string; currentPassword?: string };
     const userId = request.user.userId;
@@ -1135,12 +1136,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       security: [{ bearerAuth: [] }],
     },
   }, async (request, reply) => {
-    try {
-      await request.jwtVerify();
-      return { valid: true, user: request.user };
-    } catch (err) {
-      throw new AppError('Invalid token', 401);
-    }
+    await verifySession(request);
+    return { valid: true, user: request.user };
   });
 
   // Get user permissions (enhanced)
@@ -1181,20 +1178,9 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    try {
-      await request.jwtVerify();
-      const userId = (request.user as any).userId;
-      const tenantId = (request.user as any).tenantId;
-      const userType = (request.user as any).userType;
-
-      // Import the enhanced permission function
-      const { getEnhancedUserPermissions } = await import('../utils/authorization.js');
-      
-      const permissionData = await getEnhancedUserPermissions(userId, tenantId, userType);
-
-      return permissionData;
-    } catch (err) {
-      throw new AppError('Failed to fetch permissions', 500);
-    }
+    // Current type and tenant from the database, not the token
+    const user = await verifySession(request);
+    const { getEnhancedUserPermissions } = await import('../utils/authorization.js');
+    return getEnhancedUserPermissions(user.id, user.tenantId ?? undefined, user.userType);
   });
 };

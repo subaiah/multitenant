@@ -151,8 +151,9 @@ export default function Users() {
                               )}
                               {u.status !== 'PENDING' && canUpdate && manageable && (
                                 <button className={secondaryButtonClass}
-                                  onClick={() => act(() => apiPatch(`/users/${u.id}`, { status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }),
-                                    `${u.email} ${u.status === 'ACTIVE' ? 'deactivated' : 'reactivated'}`)}>
+                                  onClick={() => (u.status !== 'ACTIVE' || confirm(`Deactivate ${u.email}? They'll be signed out everywhere right away.`))
+                                    && act(() => apiPatch(`/users/${u.id}`, { status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }),
+                                      `${u.email} ${u.status === 'ACTIVE' ? 'deactivated and signed out' : 'reactivated'}`)}>
                                   {u.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
                                 </button>
                               )}

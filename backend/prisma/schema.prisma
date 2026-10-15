@@ -79,6 +79,8 @@ model User {
   userType        UserType   @default(TENANT_USER) @map("user_type")
   status          UserStatus @default(ACTIVE)
   lastLoginAt     DateTime?  @map("last_login_at")
+  /// Access tokens issued before this are refused ("sign out everywhere")
+  sessionsValidAfter DateTime? @map("sessions_valid_after")
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
   
