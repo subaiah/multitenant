@@ -145,7 +145,9 @@ test('OAuth client secrets are write-only and never logged', async () => {
   assert.ok(!JSON.stringify(updated.json).includes('okta-SECRET-2'));
 
   const stored = await prisma.authProvider.findUniqueOrThrow({ where: { id: created.json.id } });
-  assert.equal(stored.clientSecret, 'okta-SECRET-2', 'secret was saved');
+  const { decryptSecret, isEncrypted } = await import('../src/lib/secrets.js');
+  assert.ok(isEncrypted(stored.clientSecret!), 'secret is stored encrypted');
+  assert.equal(decryptSecret(stored.clientSecret!, 'auth_providers.client_secret'), 'okta-SECRET-2', 'secret was saved');
 
   const logs = await prisma.activity.findMany({ where: { tenantId: A.tenantId } });
   assert.ok(!JSON.stringify(logs).includes('okta-SECRET'), 'secret not in the activity log');

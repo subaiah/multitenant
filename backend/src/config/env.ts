@@ -59,6 +59,34 @@ const envSchema = z.object({
   }
 });
 
+/**
+ * Keys for encrypting stored secrets (lib/secrets.ts): SECRETS_KEY_V1,
+ * SECRETS_KEY_V2, ... each 32 random bytes, base64. The highest version
+ * encrypts new values; older ones stay to read what they encrypted until a
+ * re-encrypt run has moved everything on. Generate one with:
+ *   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ */
+function readSecretKeys(nodeEnv: string): Map<number, Buffer> {
+  const keys = new Map<number, Buffer>();
+  for (const [name, value] of Object.entries(process.env)) {
+    const m = /^SECRETS_KEY_V([1-9]\d{0,3})$/.exec(name);
+    if (!m || !value) continue;
+    const key = Buffer.from(value, 'base64');
+    if (key.length !== 32) {
+      throw new Error(`${name} must be 32 bytes, base64-encoded (got ${key.length} bytes)`);
+    }
+    keys.set(Number(m[1]), key);
+  }
+  if (keys.size === 0) {
+    if (nodeEnv === 'production') {
+      throw new Error('SECRETS_KEY_V1 is required in production (32 random bytes, base64)');
+    }
+    // Development and tests only: a fixed, public key so local data stays readable
+    keys.set(1, Buffer.from('ZGV2LW9ubHktc2VjcmV0cy1rZXktZG8tbm90LXVzZSE=', 'base64'));
+  }
+  return keys;
+}
+
 // Parse and validate environment variables
 const env = envSchema.parse(process.env);
 
@@ -105,6 +133,9 @@ export const config = {
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
+
+  /** Encryption keys for stored secrets, by version; see readSecretKeys */
+  secretKeys: readSecretKeys(env.NODE_ENV),
 } as const;
 
 export type Config = typeof config;
