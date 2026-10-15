@@ -76,7 +76,11 @@ jobs:
           -v shared_db=ci_tenant -v owner_password=owner -v provisioner_password=prov -v platform_password=plat
           -f prisma/tenant/setup-roles.sql
       - name: PROBE generate a committed tenant baseline
-        run: npm run tenant:baseline && ls prisma/tenant/migrations/*/
+        run: |
+          npm run tenant:baseline && ls prisma/tenant/migrations/*/
+          # ...then change a tenant model without a migration
+          sed -i 's/^model Application {/model Application {\n  probeField String? @map("probe_field")/' prisma/tenant/kit/workspace.prisma
+          grep -n probe prisma/tenant/kit/workspace.prisma
       - name: Committed migrations match the schema files
         # Skipped while a plane has no committed migrations
         env:
