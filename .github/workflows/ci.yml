@@ -79,7 +79,14 @@ jobs:
         run: npm run db:push
       - name: Tenant migrations (a throwaway baseline when none are committed)
         run: npm run tenant:baseline && npm run tenant:migrate
-      - run: npm test
+      - name: Test
+        run: npm test 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failing tests as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E '^not ok|^\s+error:|^\s+(expected|actual):' test-output.txt | head -30 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
   frontend:
     runs-on: ubuntu-latest
