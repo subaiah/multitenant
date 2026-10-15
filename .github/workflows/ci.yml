@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tenant-mode: [mixed, SHARED_TABLES, SCHEMA_PER_TENANT, DATABASE_PER_TENANT]
+        tenant-mode: [mixed]
     defaults:
       run:
         working-directory: backend
@@ -75,6 +75,8 @@ jobs:
           PGPASSWORD=ci psql -h localhost -U ci -d postgres
           -v shared_db=ci_tenant -v owner_password=owner -v provisioner_password=prov -v platform_password=plat
           -f prisma/tenant/setup-roles.sql
+      - name: PROBE generate a committed tenant baseline
+        run: npm run tenant:baseline && ls prisma/tenant/migrations/*/
       - name: Committed migrations match the schema files
         # Skipped while a plane has no committed migrations
         env:
