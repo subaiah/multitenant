@@ -26,7 +26,8 @@ export async function tenantForSignIn(slug: string): Promise<TenantContext> {
   const tenant = await controlDb.tenant.findUnique({ where: { slug } });
   if (!tenant) throw new AppError('Tenant not found', 404);
   if (tenant.status === 'SUSPENDED') throw new AppError('Tenant is suspended', 403);
-  return { tenant, db: dbForTenant(tenant.id) };
+  if (tenant.provisioningStatus !== 'READY') throw new AppError('This organization is still being set up. Try again in a moment.', 409);
+  return { tenant, db: await dbForTenant(tenant.id) };
 }
 
 /** `<slug>.<random>` */
@@ -64,7 +65,7 @@ export async function issueRefreshToken(
   if (owner === 'platform') {
     await controlDb.platformRefreshToken.create({ data });
   } else {
-    await dbForTenant(owner.tenantId).refreshToken.create({ data: { ...data, tenantId: owner.tenantId } });
+    await (await dbForTenant(owner.tenantId)).refreshToken.create({ data: { ...data, tenantId: owner.tenantId } });
   }
   return token;
 }
@@ -93,9 +94,9 @@ export async function findRefreshToken(value: string): Promise<StoredRefreshToke
     return { ...pick(t), owner: 'platform', user };
   }
 
-  const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, slug: true, status: true } });
-  if (!tenant || tenant.status === 'SUSPENDED') return null;
-  const db = dbForTenant(tenant.id);
+  const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, slug: true, status: true, provisioningStatus: true } });
+  if (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY') return null;
+  const db = await dbForTenant(tenant.id);
   const t = await db.refreshToken.findFirst({ where: { token: value, tenantId: tenant.id } });
   if (!t) return null;
   const user = await db.user.findFirst({ where: { id: t.userId, tenantId: tenant.id }, select: userSelect });
@@ -113,7 +114,7 @@ export async function revokeRefreshToken(t: StoredRefreshToken, scope: 'token' |
   if (t.owner === 'platform') {
     await controlDb.platformRefreshToken.updateMany({ where, data });
   } else {
-    await dbForTenant(t.owner.tenantId).refreshToken.updateMany({ where: { ...where, tenantId: t.owner.tenantId }, data });
+    await (await dbForTenant(t.owner.tenantId)).refreshToken.updateMany({ where: { ...where, tenantId: t.owner.tenantId }, data });
   }
 }
 
@@ -129,6 +130,6 @@ export async function activeSessions(user: { id: string; tenantId: string | null
   const select = { id: true, userAgent: true, ipAddress: true, createdAt: true, expiresAt: true } as const;
   const orderBy = { createdAt: 'desc' } as const;
   return user.tenantId
-    ? dbForTenant(user.tenantId).refreshToken.findMany({ where: { ...where, tenantId: user.tenantId }, select, orderBy })
+    ? (await dbForTenant(user.tenantId)).refreshToken.findMany({ where: { ...where, tenantId: user.tenantId }, select, orderBy })
     : controlDb.platformRefreshToken.findMany({ where, select, orderBy });
 }

@@ -1,9 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
-import { dbForTenant } from '../lib/tenant-db.js';
-import { countTenantData, createTenantDefaults, deleteTenantData } from '../lib/tenant-data.js';
-import { sendInvitation } from '../lib/invitations.js';
+import { config } from '../config/env.js';
+import { deprovisionTenant, startProvisioning } from '../lib/provisioning.js';
+import { RESERVED_ROLE_SLUGS, roleNameFor } from '../lib/tenant-targets.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { AppError } from '../middleware/error-handler.js';
 import { countBy } from '../lib/stats.js';
@@ -35,6 +35,8 @@ const createTenantSchema = z.object({
     .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/, 'Use 2-50 lowercase letters, digits and hyphens'),
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('FREE'),
   status: z.enum(['ACTIVE', 'TRIAL']).default('ACTIVE'),
+  // Where its data lives; fixed once created
+  strategy: z.enum(['SHARED_TABLES', 'SCHEMA_PER_TENANT', 'DATABASE_PER_TENANT']).default(config.defaultTenantStrategy),
   adminEmail: z.string().trim().toLowerCase().email(),
   adminName: z.string().trim().min(2).max(100),
 });
@@ -47,10 +49,25 @@ const querySchema = z.object({
   search: z.string().optional(),
 });
 
-async function withCounts<T extends { id: string }>(tenant: T | null) {
-  if (!tenant) return tenant;
-  const c = (await countTenantData([tenant.id])).get(tenant.id)!;
-  return { ...tenant, _count: { users: c.users, applications: c.applications } };
+/** Control-plane rows for a tenant as the API returns them: usage snapshot and where its data lives. */
+const tenantInclude = {
+  usage: { select: { users: true, applications: true, lastActiveAt: true, refreshedAt: true } },
+  databaseConfig: { select: { strategy: true, lastMigration: true, migratedAt: true, migrationError: true } },
+} as const;
+
+type TenantRow = Awaited<ReturnType<typeof controlDb.tenant.findMany<{ include: typeof tenantInclude }>>>[number];
+
+function present(t: TenantRow) {
+  const { usage, databaseConfig, initialAdminEmail, initialAdminName, ...tenant } = t;
+  return {
+    ...tenant,
+    isolation: databaseConfig?.strategy ?? null,
+    migration: databaseConfig ? { last: databaseConfig.lastMigration, at: databaseConfig.migratedAt, error: databaseConfig.migrationError } : null,
+    // Snapshot from the periodic usage job (lib/tenant-usage.ts); may lag a few minutes
+    _count: { users: usage?.users ?? 0, applications: usage?.applications ?? 0 },
+    lastActiveAt: usage?.lastActiveAt ?? null,
+    usageRefreshedAt: usage?.refreshedAt ?? null,
+  };
 }
 
 export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
@@ -68,6 +85,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
           slug: { type: 'string' },
           plan: { type: 'string', enum: ['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'] },
           status: { type: 'string', enum: ['ACTIVE', 'TRIAL'] },
+          strategy: { type: 'string', enum: ['SHARED_TABLES', 'SCHEMA_PER_TENANT', 'DATABASE_PER_TENANT'] },
           adminEmail: { type: 'string' },
           adminName: { type: 'string' },
         },
@@ -75,10 +93,15 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const data = createTenantSchema.parse(request.body);
-    if (isPlatformSlug(data.slug)) {
+    if (isPlatformSlug(data.slug) || RESERVED_ROLE_SLUGS.includes(data.slug)) {
       throw new AppError('That address is reserved', 409);
     }
     if (await controlDb.tenant.findUnique({ where: { slug: data.slug } })) {
+      throw new AppError(`The address "${data.slug}" is already taken`, 409);
+    }
+
+    // The tenant's database role (and its schema or database) is named from the slug
+    if (await controlDb.databaseConfig.findUnique({ where: { dbRoleName: roleNameFor(data.slug) } })) {
       throw new AppError(`The address "${data.slug}" is already taken`, 409);
     }
 
@@ -90,45 +113,50 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         status: data.status,
         loginTitle: `Welcome to ${data.name}`,
         loginSubtitle: 'Sign in to your account',
+        provisioningStatus: 'PENDING',
+        initialAdminEmail: data.adminEmail,
+        initialAdminName: data.adminName,
+        createdById: request.user.userId,
         databaseConfig: {
-          create: { strategy: 'SHARED_TABLES', provider: 'POSTGRESQL', region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
+          create: { strategy: data.strategy, provider: 'POSTGRESQL', region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
         },
       },
+      include: tenantInclude,
     });
-
-    // Tenant-plane defaults and the first admin. There's no transaction across
-    // the two planes, so undo the tenant if this part fails.
-    let admin: { id: string; email: string };
-    try {
-      const db = dbForTenant(tenant.id);
-      await createTenantDefaults(tenant.id, db);
-      admin = await db.user.create({
-        data: { tenantId: tenant.id, email: data.adminEmail, name: data.adminName, userType: 'TENANT_ADMIN', status: 'PENDING' },
-        select: { id: true, email: true },
-      });
-    } catch (err) {
-      await deleteTenantData(tenant.id).catch(() => undefined);
-      await controlDb.tenant.delete({ where: { id: tenant.id } }).catch(() => undefined);
-      throw err;
-    }
-
-    await sendInvitation(tenant, admin, request.user.userId);
     await logPlatformActivity({
       tenantId: tenant.id,
       userId: request.user.userId,
       action: 'created tenant',
       target: `${tenant.name} (${tenant.slug})`,
       type: 'CONFIG',
-    });
-    await logActivity({
-      tenantId: tenant.id,
-      userId: request.user.userId,
-      action: 'invited first administrator',
-      target: admin.email,
-      type: 'USER',
+      metadata: { isolation: data.strategy, firstAdmin: data.adminEmail },
     });
 
-    return reply.status(201).send({ ...tenant, adminInvited: admin.email });
+    // Provisioning runs in the background: database role, schema or database,
+    // tables, row-level security, defaults, then the first admin's invitation.
+    // The Tenants page follows its progress.
+    void startProvisioning(tenant.id);
+
+    return reply.status(202).send({ ...present(tenant), adminInvited: data.adminEmail });
+  });
+
+  // Retry provisioning a tenant that failed
+  fastify.post('/:id/provision', {
+    config: { permission: 'tenants:manage' },
+    schema: {
+      tags: ['tenants'],
+      summary: 'Retry provisioning a tenant',
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tenant = await controlDb.tenant.findUnique({ where: { id } });
+    if (!tenant) throw new AppError('Tenant not found', 404);
+    if (tenant.provisioningStatus === 'READY') throw new AppError('This tenant is already set up', 409);
+    if (tenant.provisioningStatus === 'DEPROVISIONING') throw new AppError('This tenant is being deleted', 409);
+    await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'retried provisioning', target: tenant.slug, type: 'CONFIG' });
+    void startProvisioning(id);
+    return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
   });
 
   // List tenants (admin only)
@@ -177,20 +205,15 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: tenantInclude,
       }),
       controlDb.tenant.count({ where }),
       // Counts for the status tabs: same plan/search filters, any status
       controlDb.tenant.groupBy({ by: ['status'], where: { AND: [plan ? { plan } : {}, searchFilter] }, _count: true }),
     ]);
 
-    // Users, apps and last activity live in the tenant plane
-    const counts = await countTenantData(tenants.map((t) => t.id));
-
     return {
-      data: tenants.map((t) => {
-        const c = counts.get(t.id)!;
-        return { ...t, _count: { users: c.users, applications: c.applications }, lastActiveAt: c.lastActiveAt };
-      }),
+      data: tenants.map(present),
       statusCounts: countBy(statusCounts, 'status'),
       pagination: {
         page,
@@ -213,7 +236,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('No tenant selected', 400);
     }
 
-    return withCounts(await controlDb.tenant.findUnique({ where: { id: request.tenant.id } }));
+    return present(await controlDb.tenant.findUniqueOrThrow({ where: { id: request.tenant.id }, include: tenantInclude }));
   });
 
   // Get tenant by ID
@@ -238,12 +261,12 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Access denied', 403);
     }
 
-    const tenant = await controlDb.tenant.findUnique({ where: { id } });
+    const tenant = await controlDb.tenant.findUnique({ where: { id }, include: tenantInclude });
     if (!tenant) {
       throw new AppError('Tenant not found', 404);
     }
 
-    return withCounts(tenant);
+    return present(tenant);
   });
 
   // Update tenant
@@ -293,15 +316,9 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       data,
     });
 
-    // Log activity
-    await logActivity({
-        tenantId: id,
-        userId: request.user.userId,
-        action: 'updated tenant',
-        target: tenant.name,
-        type: 'CONFIG',
-        metadata: data,
-      });
+    // In the tenant's own log once it has one; the platform log before that
+    const entry = { tenantId: id, userId: request.user.userId, action: 'updated tenant', target: tenant.name, type: 'CONFIG' as const, metadata: data };
+    await (tenant.provisioningStatus === 'READY' ? logActivity(entry) : logPlatformActivity(entry));
 
     return tenant;
   });
@@ -328,23 +345,14 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Tenant not found', 404);
     }
 
-    // The tenant plane has no foreign keys to tenants: delete its data first,
-    // then the tenant's control-plane rows (explicitly, not relying on cascades)
-    await deleteTenantData(id);
-    await controlDb.$transaction([
-      controlDb.supportSession.deleteMany({ where: { tenantId: id } }),
-      controlDb.tenantApplication.deleteMany({ where: { tenantId: id } }),
-      controlDb.databaseConfig.deleteMany({ where: { tenantId: id } }),
-      controlDb.tenant.delete({ where: { id } }),
-    ]);
-
-    await logPlatformActivity({
-      tenantId: id,
-      userId: request.user.userId,
-      action: 'deleted tenant',
-      target: `${tenant.name} (${tenant.slug})`,
-      type: 'CONFIG',
-    });
+    // Drops its schema or database (or deletes its rows from the shared
+    // tables) and its database role, then its control-plane rows
+    try {
+      await deprovisionTenant(id, request.user.userId);
+    } catch (err) {
+      request.log.error({ err, tenantId: id }, 'Deleting tenant failed');
+      throw new AppError('Deleting the tenant failed. The error is shown on the tenant; deleting again retries.', 500);
+    }
 
     return reply.status(204).send();
   });

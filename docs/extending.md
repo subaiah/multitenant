@@ -32,14 +32,14 @@ There are two databases, each with its own Prisma schema and client.
 
 A product never adds tables here.
 
-**The tenant plane** (`prisma/tenant`, `TENANT_DATABASE_URL` for tenants on shared tables) holds everything a tenant owns:
+**The tenant plane** (`prisma/tenant`) holds everything a tenant owns:
 
 - the kit's tables in `kit/`
 - your tables in `product/`
 
-The same schema is used whether a tenant has shared tables, its own schema or its own database. Tenant migrations run against every tenant location.
+The same schema is used whether a tenant has shared tables, its own schema or its own database. Tenant migrations run against every tenant location. See [tenant-isolation.md](tenant-isolation.md).
 
-In a route, always use `request.db`. It is the current tenant's database client. Never import the shared client directly: when a tenant moves to its own schema or database, `request.db` follows and a direct import does not.
+In a route, always use `request.db`. It is the current tenant's client, connected as the tenant's own database role, so row-level security limits it to that tenant's rows. Outside a request, get a tenant's client with `await dbForTenant(tenantId)`.
 
 ## Rules for product tables
 
@@ -49,6 +49,9 @@ Every model in `prisma/tenant/product/` must follow these rules:
 - **No relations to control-plane models** (tenants, platform users). Store plain ids.
 - **`tenantId` in every unique constraint on a value people choose**, such as `@@unique([tenantId, number])`. Random values (tokens, uuids) can stay globally unique.
 - **Filter every query by `tenantId`**, even though the database also enforces it.
+- **Raw SQL names no schema.** A schema-mode tenant's tables live in its own schema, and its role's default `search_path` finds them. Use unqualified table names in `request.db.$queryRaw`, and the same SQL works in every mode.
+
+Row-level security is added for you. Once your migration is applied, `npm run tenant:migrate` enables and forces it on every table with a `tenant_id` column, and adds the policy. `test/isolation.test.ts` fails if any tenant table lacks it.
 
 ## Example: invoices
 

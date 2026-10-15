@@ -1,4 +1,3 @@
-import { Prisma } from '../generated/tenant/index.js';
 import type { TenantDb } from './tenant-db.js';
 
 export interface DayCount {
@@ -7,24 +6,22 @@ export interface DayCount {
 }
 
 /**
- * Activity counts per UTC day for the last `days` days, oldest first,
- * with zero-filled gaps. Scoped to one tenant, or every tenant in `db` when omitted.
+ * Activity counts per UTC day for the last `days` days, oldest first, with
+ * zero-filled gaps, for one tenant or (platform role) several. Counted in
+ * code rather than SQL so it works the same on every target.
  */
-export async function activityByDay(db: TenantDb, tenantId: string | undefined, days = 14): Promise<DayCount[]> {
+export async function activityByDay(db: TenantDb, tenantIds: string | string[], days = 14): Promise<DayCount[]> {
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
   start.setUTCDate(start.getUTCDate() - (days - 1));
 
-  // Prisma stores UTC in timestamp columns; format in SQL so the server's
-  // local timezone can't shift days when parsing.
-  const rows = await db.$queryRaw<{ day: string; count: bigint }[]>`
-    SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, count(*) AS count
-    FROM activities
-    WHERE created_at >= ${start}
-      ${tenantId ? Prisma.sql`AND tenant_id = ${tenantId}` : Prisma.empty}
-    GROUP BY 1
-  `;
-  const byDay = new Map(rows.map((r) => [r.day, Number(r.count)]));
+  const ids = Array.isArray(tenantIds) ? tenantIds : [tenantIds];
+  const rows = await db.activity.findMany({ where: { tenantId: { in: ids }, createdAt: { gte: start } }, select: { createdAt: true } });
+  const byDay = new Map<string, number>();
+  for (const r of rows) {
+    const day = r.createdAt.toISOString().slice(0, 10);
+    byDay.set(day, (byDay.get(day) ?? 0) + 1);
+  }
 
   return Array.from({ length: days }, (_, i) => {
     const d = new Date(start);

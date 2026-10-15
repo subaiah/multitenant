@@ -34,7 +34,7 @@ export function endAllPlatformSessions(userId: string, at = new Date()) {
 export async function findSessionAccount(token: { userId: string; tenantId?: string }) {
   const select = { id: true, status: true, userType: true, sessionsValidAfter: true } as const;
   if (token.tenantId) {
-    const user = await dbForTenant(token.tenantId).user.findFirst({ where: { id: token.userId, tenantId: token.tenantId }, select });
+    const user = await (await dbForTenant(token.tenantId)).user.findFirst({ where: { id: token.userId, tenantId: token.tenantId }, select });
     return user ? { ...user, tenantId: token.tenantId as string | null } : null;
   }
   const user = await controlDb.platformUser.findUnique({ where: { id: token.userId }, select });

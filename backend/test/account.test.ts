@@ -18,7 +18,6 @@ type TenantSeed = Awaited<ReturnType<typeof seedTenant>>;
 
 let A: TenantSeed;
 let platformAdmin: string;
-let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
 let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 
 interface Mail { to: string; subject: string; text: string; html: string }
@@ -34,7 +33,7 @@ const tokenFrom = (mail: Mail | undefined) => {
 };
 
 before(async () => {
-  ({ tenantDb, controlDb } = await db());
+  ({ controlDb } = await db());
   A = await seedTenant('acct');
   platformAdmin = (await seedPlatformUsers()).adminEmail;
   await startServer();
@@ -89,7 +88,7 @@ test('invite → email → accept → sign in', async () => {
   assert.equal((await api('POST', '/bff/account/invitations/accept', { body: { token, password: 'another-password' } })).status, 404, 'single use');
   const login = await api('POST', '/bff/auth/login', { body: { email, tenantSlug: A.slug, password: 'a-good-password' } });
   assert.equal(login.status, 200);
-  assert.equal((await tenantDb.user.findFirstOrThrow({ where: { email } })).name, 'Renamed Person');
+  assert.equal((await A.db.user.findFirstOrThrow({ where: { email } })).name, 'Renamed Person');
 });
 
 test('resending an invitation invalidates the previous link', async () => {
@@ -106,7 +105,7 @@ test('resending an invitation invalidates the previous link', async () => {
 
   const user = await loginSession(A.slug, A.userEmail);
   assert.equal((await api('POST', `/users/${created.json.id}/resend-invite`, { cookie: user.cookie, body: {} })).status, 403, 'needs users:create');
-  const active = await tenantDb.user.findFirstOrThrow({ where: { email: A.userEmail } });
+  const active = await A.db.user.findFirstOrThrow({ where: { email: A.userEmail } });
   assert.equal((await api('POST', `/users/${active.id}/resend-invite`, { cookie: admin.cookie, body: {} })).status, 409, 'already active');
 });
 
@@ -134,26 +133,26 @@ test('forgot password → email → reset signs out existing sessions', async ()
 });
 
 test("the tenant's password policy applies to resets", async () => {
-  await tenantDb.authConfig.update({ where: { tenantId: A.tenantId }, data: { passwordPolicy: 'STRONG' } });
+  await A.db.authConfig.update({ where: { tenantId: A.tenantId }, data: { passwordPolicy: 'STRONG' } });
   await api('POST', '/bff/account/password/forgot', { body: { email: A.userEmail, tenantSlug: A.slug } });
   const token = tokenFrom(lastMail(A.userEmail));
   const weak = await api('POST', '/bff/account/password/reset', { body: { token, password: 'alllowercase1' } });
   assert.equal(weak.status, 400);
   assert.match(weak.json.message, /upper- and lower-case/);
   assert.equal((await api('POST', '/bff/account/password/reset', { body: { token, password: 'Mixed-Case-123' } })).status, 200);
-  await tenantDb.authConfig.update({ where: { tenantId: A.tenantId }, data: { passwordPolicy: 'STANDARD' } });
+  await A.db.authConfig.update({ where: { tenantId: A.tenantId }, data: { passwordPolicy: 'STANDARD' } });
 });
 
 test('expired links are refused', async () => {
   await api('POST', '/bff/account/password/forgot', { body: { email: A.adminEmail, tenantSlug: A.slug } });
   const token = tokenFrom(lastMail(A.adminEmail));
-  const admin = await tenantDb.user.findFirstOrThrow({ where: { email: A.adminEmail } });
-  await tenantDb.userToken.updateMany({ where: { userId: admin.id, type: 'PASSWORD_RESET', usedAt: null }, data: { expiresAt: new Date(Date.now() - 1000) } });
+  const admin = await A.db.user.findFirstOrThrow({ where: { email: A.adminEmail } });
+  await A.db.userToken.updateMany({ where: { userId: admin.id, type: 'PASSWORD_RESET', usedAt: null }, data: { expiresAt: new Date(Date.now() - 1000) } });
   assert.equal((await api('POST', '/bff/account/password/reset', { body: { token, password: 'whatever-pass' } })).status, 404);
 });
 
 test('tokens are stored hashed, never in plain text', async () => {
-  const rows = await tenantDb.userToken.findMany({ take: 50, orderBy: { createdAt: 'desc' } });
+  const rows = await A.db.userToken.findMany({ take: 50, orderBy: { createdAt: 'desc' } });
   const mails = readFileSync(outbox, 'utf8');
   for (const r of rows) assert.ok(!mails.includes(r.tokenHash), 'stored value is not the emailed token');
 });

@@ -22,7 +22,7 @@ export interface ActivityEntry {
 export async function logActivity(entry: ActivityEntry): Promise<void> {
   const { tenantId, ...rest } = entry;
   if (tenantId) {
-    await dbForTenant(tenantId).activity.create({ data: { tenantId, ...rest } });
+    await (await dbForTenant(tenantId)).activity.create({ data: { tenantId, ...rest } });
   } else {
     await controlDb.platformActivity.create({ data: rest });
   }

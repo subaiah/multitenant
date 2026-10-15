@@ -29,6 +29,12 @@ jobs:
 
   backend-tests:
     runs-on: ubuntu-latest
+    # Tenants seeded by the tests rotate through all three isolation modes
+    # ("mixed"); the other runs put every tenant in one mode
+    strategy:
+      fail-fast: false
+      matrix:
+        tenant-mode: [mixed, SHARED_TABLES, SCHEMA_PER_TENANT, DATABASE_PER_TENANT]
     defaults:
       run:
         working-directory: backend
@@ -46,9 +52,17 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # Control plane and the shared tenant database
+      # Control plane (the app's own account), and the tenant server's three
+      # roles from prisma/tenant/setup-roles.sql: none is a superuser, so row-
+      # level security is tested for real
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
-      TENANT_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_tenant
+      TENANT_DATABASE_URL: postgresql://tenant_owner:owner@localhost:5432/ci_tenant
+      TENANT_PROVISIONER_URL: postgresql://tenant_provisioner:prov@localhost:5432/postgres
+      TENANT_PLATFORM_URL: postgresql://tenant_platform:plat@localhost:5432/ci_tenant
+      TEST_TENANT_MODE: ${{ matrix.tenant-mode }}
+      # Scripts read the same config as the server, which defaults to production
+      NODE_ENV: test
+      JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,10 +70,23 @@ jobs:
           node-version: 24
       - run: npm install --no-audit --no-fund
       - run: npm run prisma:generate
-      - name: Create the tenant database
-        run: PGPASSWORD=ci psql -h localhost -U ci -d ci -c 'CREATE DATABASE ci_tenant'
-      - run: npm run db:push
-      - run: npm test
+      - name: Set up the tenant database server (roles and shared tenant database)
+        run: >-
+          PGPASSWORD=ci psql -h localhost -U ci -d postgres
+          -v shared_db=ci_tenant -v owner_password=owner -v provisioner_password=prov -v platform_password=plat
+          -f prisma/tenant/setup-roles.sql
+      - name: Control plane schema
+        run: npm run db:push
+      - name: Tenant migrations (a throwaway baseline when none are committed)
+        run: npm run tenant:baseline && npm run tenant:migrate
+      - name: Test
+        run: npx tsx --test --test-reporter=tap test/*.test.ts 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failing tests as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -A3 -E '^\s*not ok|^\s+error:' test-output.txt | grep -vE '^--$|duration_ms|^\s+---$|type:|location:' | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
   frontend:
     runs-on: ubuntu-latest

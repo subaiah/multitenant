@@ -164,7 +164,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(403).send({ error: 'Admin access required' });
     }
 
-    const tenantDb = dbForTenant(tenantId);
+    const tenantDb = await dbForTenant(tenantId);
 
     // Aggregate data from multiple sources
     const [tenant, applications, users, activities, dbConfig, authConfig, apiConfig] = await Promise.all([

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Database, ShieldCheck, HardDrive, Plug } from 'lucide-react';
+import { Database, ShieldCheck, HardDrive, Plug, Lock } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPatch } from '../lib/api-client';
-import { Card, DataView, PageHeader, StatCard, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { Card, DataView, PageHeader, StatCard, formatRelative, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
 interface DatabaseConfig {
   strategy: string;
@@ -13,7 +13,12 @@ interface DatabaseConfig {
   maxConnections: number;
   storageLimit: string;
   schemaName: string | null;
+  databaseName: string | null;
   tenantColumn: string | null;
+  dbRoleName: string | null;
+  lastMigration: string | null;
+  migratedAt: string | null;
+  migrationError: string | null;
   hasConnectionString: boolean;
   updatedAt: string;
 }
@@ -26,7 +31,6 @@ interface Strategy {
   bestFor: string;
 }
 
-const PROVIDERS = ['POSTGRESQL', 'MYSQL', 'MONGODB', 'SQLSERVER'];
 const PROVIDER_NAMES: Record<string, string> = { POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', MONGODB: 'MongoDB', SQLSERVER: 'SQL Server' };
 
 export default function DataIsolation() {
@@ -42,7 +46,7 @@ export default function DataIsolation() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Isolation strategy" value={strategies.data?.find((s) => s.id === c.strategy)?.name ?? humanize(c.strategy)} icon={Database} tone="blue" />
               <StatCard label="Database" value={PROVIDER_NAMES[c.provider] ?? c.provider} icon={Plug} tone="purple" hint={c.region} />
-              <StatCard label="Storage limit" value={c.storageLimit} icon={HardDrive} tone="amber" hint={`${c.maxConnections} connections`} />
+              <StatCard label="Storage limit" value={c.storageLimit} icon={HardDrive} tone="amber" />
               <StatCard label="Protection" value={[c.backupEnabled && 'Backups', c.encryptionAtRest && 'Encrypted'].filter(Boolean).join(' · ') || 'None'}
                 icon={ShieldCheck} tone={c.backupEnabled && c.encryptionAtRest ? 'green' : 'red'} />
             </div>
@@ -54,18 +58,47 @@ export default function DataIsolation() {
   );
 }
 
+/** Where the data lives: chosen when the tenant was created and fixed after that */
+function Placement({ config, strategy }: { config: DatabaseConfig; strategy?: Strategy }) {
+  const where =
+    config.strategy === 'DATABASE_PER_TENANT' ? ['Database', config.databaseName]
+    : config.strategy === 'SCHEMA_PER_TENANT' ? ['Schema', config.schemaName]
+    : ['Shared tables, separated by column', config.tenantColumn ?? 'tenant_id'];
+  const rows: [string, React.ReactNode][] = [
+    [where[0] as string, <code className="font-mono">{where[1]}</code>],
+    ['Database role', <code className="font-mono">{config.dbRoleName ?? '—'}</code>],
+    ['Row-level security', <span className="text-green-700 dark:text-green-400">On for every table: this organization's role only sees its own rows</span>],
+    ['Schema version', config.migrationError
+      ? <span className="text-red-600">Last update failed: {config.migrationError}</span>
+      : <span>{config.lastMigration ?? '—'}{config.migratedAt && <span className="text-slate-500"> · updated {formatRelative(config.migratedAt).toLowerCase()}</span>}</span>],
+  ];
+  return (
+    <Card title="Where your data lives">
+      <div className="flex items-start gap-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900">
+        <Lock size={18} className="mt-0.5 text-slate-400 shrink-0" />
+        <div className="text-sm">
+          <p className="font-medium text-slate-800 dark:text-white">{strategy?.name ?? humanize(config.strategy)}</p>
+          {strategy && <p className="text-slate-500 mt-1">{strategy.description}</p>}
+          <p className="text-slate-500 mt-2">Chosen when your organization was set up. It can't be changed here, because moving existing data between modes needs a dedicated migration.</p>
+        </div>
+      </div>
+      <dl className="mt-4 divide-y divide-slate-100 dark:divide-slate-700 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex flex-col sm:flex-row sm:gap-4 py-2">
+            <dt className="sm:w-56 shrink-0 text-slate-500">{label}</dt>
+            <dd className="text-slate-800 dark:text-slate-200 break-all">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
 function DatabaseForm({ config, strategies, onSaved }: { config: DatabaseConfig; strategies: Strategy[]; onSaved: () => Promise<void> }) {
   const initial = {
-    strategy: config.strategy,
-    provider: config.provider,
-    region: config.region,
     backupEnabled: config.backupEnabled,
     encryptionAtRest: config.encryptionAtRest,
-    maxConnections: config.maxConnections,
     storageLimit: config.storageLimit,
-    schemaName: config.schemaName ?? '',
-    tenantColumn: config.tenantColumn ?? '',
-    connectionString: '',
   };
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -77,13 +110,7 @@ function DatabaseForm({ config, strategies, onSaved }: { config: DatabaseConfig;
     setSaving(true);
     setError(null);
     try {
-      const { connectionString, schemaName, tenantColumn, ...rest } = form;
-      await apiPatch('/database', {
-        ...rest,
-        ...(schemaName && { schemaName }),
-        ...(tenantColumn && { tenantColumn }),
-        ...(connectionString && { connectionString }),
-      });
+      await apiPatch('/database', form);
       await onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -94,51 +121,13 @@ function DatabaseForm({ config, strategies, onSaved }: { config: DatabaseConfig;
 
   return (
     <>
-      <Card title="Isolation strategy" description="Changing this updates the configuration only. Moving existing data is a separate migration.">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {strategies.map((s) => (
-            <label key={s.id} className={`block p-4 rounded-lg border-2 cursor-pointer ${form.strategy === s.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-slate-200 dark:border-slate-700'}`}>
-              <span className="flex items-center gap-2">
-                <input type="radio" name="strategy" checked={form.strategy === s.id} onChange={() => setForm({ ...form, strategy: s.id })} />
-                <span className="font-medium text-slate-800 dark:text-white">{s.name}</span>
-              </span>
-              <span className="block text-xs text-slate-500 mt-2">{s.description}</span>
-              <span className="block text-xs text-slate-500 mt-2"><span className="font-medium">Best for:</span> {s.bestFor}</span>
-              <span className="block text-xs text-green-700 dark:text-green-400 mt-2">+ {s.pros.slice(0, 2).join(', ')}</span>
-              <span className="block text-xs text-red-700 dark:text-red-400">− {s.cons.slice(0, 2).join(', ')}</span>
-            </label>
-          ))}
-        </div>
-        {form.strategy === 'DATABASE_PER_TENANT' && (
-          <label className="block text-sm mt-4">
-            <span className="text-slate-600 dark:text-slate-300">Connection string</span>
-            <input type="password" autoComplete="off" value={form.connectionString} onChange={(e) => setForm({ ...form, connectionString: e.target.value })}
-              placeholder={config.hasConnectionString ? 'Set (leave blank to keep)' : 'postgresql://user:password@host:5432/db'} className={`${inputClass} mt-1 font-mono`} />
-            <span className="block text-xs text-slate-500 mt-1">Stored server-side and never shown again.</span>
-          </label>
-        )}
-        {form.strategy === 'SCHEMA_PER_TENANT' && (
-          <label className="block text-sm mt-4"><span className="text-slate-600 dark:text-slate-300">Schema name</span>
-            <input value={form.schemaName} onChange={(e) => setForm({ ...form, schemaName: e.target.value })} className={`${inputClass} mt-1 font-mono`} /></label>
-        )}
-        {form.strategy === 'SHARED_TABLES' && (
-          <label className="block text-sm mt-4"><span className="text-slate-600 dark:text-slate-300">Tenant column</span>
-            <input value={form.tenantColumn} onChange={(e) => setForm({ ...form, tenantColumn: e.target.value })} placeholder="tenant_id" className={`${inputClass} mt-1 font-mono`} /></label>
-        )}
-      </Card>
+      <Placement config={config} strategy={strategies.find((s) => s.id === config.strategy)} />
 
-      <Card title="Database settings">
+      <Card title="Settings">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Database engine</span>
-            <select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} className={`${inputClass} mt-1`}>
-              {PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_NAMES[p]}</option>)}
-            </select></label>
-          <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Region</span>
-            <input value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} className={`${inputClass} mt-1`} /></label>
-          <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Max connections</span>
-            <input type="number" min={1} max={1000} value={form.maxConnections} onChange={(e) => setForm({ ...form, maxConnections: Number(e.target.value) })} className={`${inputClass} mt-1`} /></label>
           <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Storage limit</span>
             <input value={form.storageLimit} onChange={(e) => setForm({ ...form, storageLimit: e.target.value })} placeholder="50 GB" className={`${inputClass} mt-1`} /></label>
+          <div />
           <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.backupEnabled} onChange={(e) => setForm({ ...form, backupEnabled: e.target.checked })} /> Automated backups</label>
           <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.encryptionAtRest} onChange={(e) => setForm({ ...form, encryptionAtRest: e.target.checked })} /> Encryption at rest</label>
         </div>

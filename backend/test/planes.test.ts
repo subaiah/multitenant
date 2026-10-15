@@ -1,7 +1,7 @@
 /**
  * Control-plane and tenant-plane data never mix: control models are only
  * reached through controlDb, tenant models only through a tenant client
- * (request.db, dbForTenant(...), tenantDb). The two Prisma clients already
+ * (request.db, dbForTenant(...), platformDb(...)). The two Prisma clients already
  * refuse unknown models at compile time; this test also covers the rules the
  * type checker can't see (tenant-schema conventions).
  * Pure file checks: no database needed.
@@ -72,7 +72,7 @@ test('source files reach each model through the right client', () => {
     for (const [, model] of src.matchAll(/\bcontrolDb\.(\w+)\./g)) {
       if (tenantModels.has(model)) problems.push(`${file}: controlDb.${model} (tenant model)`);
     }
-    for (const [, client, model] of src.matchAll(/\b(tenantDb|request\.db|dbForTenant\([^)]*\))\.(\w+)\./g)) {
+    for (const [, client, model] of src.matchAll(/(request\.db|platformDb\([^)]*\)|\(await dbForTenant\([^)]*\)\))\.(\w+)\./g)) {
       if (controlModels.has(model)) problems.push(`${file}: ${client}.${model} (control model)`);
     }
   }

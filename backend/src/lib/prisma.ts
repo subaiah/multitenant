@@ -1,16 +1,16 @@
 /**
- * Database clients, one per plane (see the tenant isolation design):
+ * Database clients (see the tenant isolation design).
  *
- * - controlDb: the control plane (prisma/control): platform users, tenants and
- *   how to reach their data, the app catalogue, menus, support sessions.
- * - tenantDb: the tenant plane (prisma/tenant): everything a tenant owns.
- *   Today every tenant is on the shared tenant database (SHARED_TABLES); per-
- *   tenant schemas and databases come later and will be resolved per request.
- *   Route handlers use `request.db` (set by authenticate) for tenant data, not
- *   tenantDb directly, so that change stays in one place.
+ * - controlDb: the control plane (prisma/control), the app's own account:
+ *   platform users, tenants and how to reach their data, the app catalogue,
+ *   menus, support sessions.
+ * - tenant clients (prisma/tenant): one per Postgres role and target, created
+ *   on demand by tenantClient() and kept in a capped least-recently-used cache.
+ *   Tenant requests get theirs from dbForTenant() (lib/tenant-db.ts), which
+ *   connects as the tenant's own role, so row-level security applies.
  *
- * test/plane-guard.test.ts fails the build if a control model is used through
- * tenantDb or the reverse.
+ * test/planes.test.ts fails the build if a control model is used through a
+ * tenant client or the reverse.
  */
 import { PrismaClient as ControlClient } from '../generated/control/index.js';
 import { PrismaClient as TenantClient } from '../generated/tenant/index.js';
@@ -46,30 +46,85 @@ const log = config.nodeEnv === 'development' ? (['query', 'error', 'warn'] as co
 function createControl(pool: pg.Pool) {
   return new ControlClient({ adapter: new PrismaPg(pool), log: [...log] }).$extends(encryptSecrets);
 }
-function createTenant(pool: pg.Pool) {
-  return new TenantClient({ adapter: new PrismaPg(pool), log: [...log] }).$extends(encryptSecrets);
+function createTenant(pool: pg.Pool, schema: string) {
+  // The adapter's schema names the tables in every generated query, so a
+  // schema-per-tenant client can only ever address its own schema
+  return new TenantClient({ adapter: new PrismaPg(pool, { schema }), log: [...log] }).$extends(encryptSecrets);
 }
 
 export type ControlDb = ReturnType<typeof createControl>;
 export type TenantDb = ReturnType<typeof createTenant>;
 
+interface CachedClient {
+  db: TenantDb;
+  pool: pg.Pool;
+}
+
 const g = globalThis as unknown as {
-  planes?: { controlPool: pg.Pool; tenantPool: pg.Pool; controlDb: ControlDb; tenantDb: TenantDb };
+  planes?: { controlPool: pg.Pool; controlDb: ControlDb; tenants: Map<string, CachedClient> };
 };
 
 if (!g.planes) {
   const controlPool = new pg.Pool({ connectionString: config.databaseUrl });
-  const tenantPool = new pg.Pool({ connectionString: config.tenantDatabaseUrl });
-  g.planes = { controlPool, tenantPool, controlDb: createControl(controlPool), tenantDb: createTenant(tenantPool) };
+  g.planes = { controlPool, controlDb: createControl(controlPool), tenants: new Map() };
 }
 
 export const controlDb: ControlDb = g.planes.controlDb;
-export const tenantDb: TenantDb = g.planes.tenantDb;
 
-/** Close both planes (scripts and tests). */
+/**
+ * A tenant-plane client for a connection string (a tenant role, or the
+ * platform role on some target) and schema. Clients are cached; the least
+ * recently used is closed once more than TENANT_CLIENT_CACHE_MAX are open.
+ */
+export function tenantClient(connectionString: string, schema = 'public'): TenantDb {
+  const tenants = g.planes!.tenants;
+  const key = `${schema}\u0000${connectionString}`;
+  const hit = tenants.get(key);
+  if (hit) {
+    // Map keeps insertion order: re-insert to mark as most recently used
+    tenants.delete(key);
+    tenants.set(key, hit);
+    return hit.db;
+  }
+  const pool = new pg.Pool({ connectionString, max: config.tenantPoolMax, idleTimeoutMillis: 30_000 });
+  // A tenant database going away must not crash the server
+  pool.on('error', () => {});
+  const entry = { db: createTenant(pool, schema), pool };
+  tenants.set(key, entry);
+  while (tenants.size > config.tenantClientCacheMax) {
+    const [oldestKey, oldest] = tenants.entries().next().value!;
+    tenants.delete(oldestKey);
+    void close(oldest);
+  }
+  return entry.db;
+}
+
+async function close(c: CachedClient) {
+  await c.db.$disconnect().catch(() => {});
+  await c.pool.end().catch(() => {});
+}
+
+/** Close cached clients matching a predicate on their connection string (e.g. before dropping a database or role). */
+export async function closeTenantClients(match: (connectionString: string, schema: string) => boolean) {
+  const tenants = g.planes!.tenants;
+  const closing: Promise<void>[] = [];
+  for (const [key, entry] of tenants) {
+    const [schema, url] = key.split('\u0000');
+    if (match(url, schema)) {
+      tenants.delete(key);
+      closing.push(close(entry));
+    }
+  }
+  await Promise.all(closing);
+}
+
+/** Close every connection (scripts and tests). */
 export async function disconnectDatabases() {
-  const planes = g.planes!;
-  await Promise.all([planes.controlDb.$disconnect(), planes.tenantDb.$disconnect()]);
-  await Promise.all([planes.controlPool.end(), planes.tenantPool.end()]);
+  const planes = g.planes;
+  if (!planes) return;
+  await Promise.all([...planes.tenants.values()].map(close));
+  planes.tenants.clear();
+  await planes.controlDb.$disconnect();
+  await planes.controlPool.end();
   g.planes = undefined;
 }

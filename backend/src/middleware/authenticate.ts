@@ -1,7 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant, type TenantDb } from '../lib/tenant-db.js';
-import { tenantDb } from '../lib/prisma.js';
+import { AppError } from './error-handler.js';
 import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
@@ -19,8 +19,9 @@ declare module 'fastify' {
     /**
      * The tenant plane client for this request's tenant. Use it for every
      * tenant-owned model; use controlDb only for control-plane models.
-     * Platform-scoped requests without a tenant get the shared tenant
-     * database (for cross-tenant platform views).
+     * Connected as the tenant's own database role, so row-level security
+     * keeps it to the tenant's rows. Platform-scoped requests without a
+     * tenant have no tenant client; using it throws.
      */
     db: TenantDb;
   }
@@ -70,7 +71,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   if (tenantId) {
     const tenant = await controlDb.tenant.findUnique({
       where: { id: tenantId },
-      select: { id: true, name: true, slug: true, plan: true, status: true },
+      select: { id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true },
     });
     if (!tenant) {
       return reply.status(404).send({ error: 'Not Found', message: 'Tenant not found' });
@@ -79,12 +80,17 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     if (tenant.status === 'SUSPENDED' && !platformUser) {
       return reply.status(403).send({ error: 'Forbidden', message: 'Tenant is suspended' });
     }
-    request.tenant = tenant;
-    request.db = dbForTenant(tenant.id);
+    // Nobody works inside a tenant until its data is set up
+    if (tenant.provisioningStatus !== 'READY') {
+      return reply.status(409).send({ error: 'Conflict', message: 'This tenant is not ready yet' });
+    }
+    const { provisioningStatus: _, ...tenantInfo } = tenant;
+    request.tenant = tenantInfo;
+    request.db = await dbForTenant(tenant.id);
     return;
   }
 
-  request.db = tenantDb;
+  request.db = NO_TENANT;
   if (!request.routeOptions.config.platformScoped) {
     return reply.status(400).send({
       error: 'Bad Request',
@@ -92,3 +98,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     });
   }
 }
+
+/** request.db when no tenant is selected: any use is a bug in a platform-scoped route. */
+const NO_TENANT = new Proxy({} as TenantDb, {
+  get() {
+    throw new AppError(`Select a tenant with the ${config.tenantHeader} header`, 400);
+  },
+});

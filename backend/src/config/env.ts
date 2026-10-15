@@ -5,9 +5,30 @@ import { z } from 'zod';
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
-  // The shared tenant database: tenant users, roles and data for every tenant on
-  // SHARED_TABLES. Must be a different database from DATABASE_URL (the control plane).
+  // The shared tenant database, connected as the migration owner (owns every
+  // tenant table, runs tenant migrations). Holds tenants on SHARED_TABLES and the
+  // schemas of tenants on SCHEMA_PER_TENANT. Must differ from DATABASE_URL.
+  // Tenant requests never use it: they connect as the tenant's own role.
   TENANT_DATABASE_URL: z.string().url(),
+  // Same server, as the provisioner (CREATEROLE, CREATEDB): creates and drops
+  // tenant roles and databases. See prisma/tenant/setup-roles.sql.
+  TENANT_PROVISIONER_URL: z.string().url().optional(),
+  // Same server, as the platform role (BYPASSRLS): cross-tenant platform work
+  // (usage snapshots, re-encrypting secrets) and tests. Database name is swapped per target.
+  TENANT_PLATFORM_URL: z.string().url().optional(),
+  // Tenant connections: max pool size per tenant role, how many tenant clients
+  // stay open (least recently used are closed), and each role's connection limit
+  TENANT_POOL_MAX: z.string().default('3').transform(Number),
+  TENANT_CLIENT_CACHE_MAX: z.string().default('100').transform(Number),
+  TENANT_ROLE_CONNECTION_LIMIT: z.string().default('10').transform(Number),
+  // Prefix of every tenant role, schema and database name (tnt_<slug>). Use a
+  // different one per environment sharing a database server (e.g. dev_, e2e_):
+  // role names are server-wide.
+  TENANT_ROLE_PREFIX: z.string().regex(/^[a-z][a-z0-9]{0,11}_$/, 'lowercase letters and digits, ending in _').default('tnt_'),
+  // Where tenant migrations are read from (default prisma/tenant/migrations)
+  TENANT_MIGRATIONS_DIR: z.string().optional(),
+  // How often platform usage snapshots refresh (ms); 0 turns the job off
+  TENANT_USAGE_REFRESH_MS: z.string().default('300000').transform(Number),
 
   // Server
   // Defaults to production so a deployment that forgets NODE_ENV gets secure behaviour.
@@ -60,6 +81,11 @@ const envSchema = z.object({
   if (env.TENANT_DATABASE_URL === env.DATABASE_URL) {
     ctx.addIssue({ code: 'custom', path: ['TENANT_DATABASE_URL'], message: 'TENANT_DATABASE_URL must be a different database from DATABASE_URL' });
   }
+  if (env.NODE_ENV === 'production') {
+    for (const key of ['TENANT_PROVISIONER_URL', 'TENANT_PLATFORM_URL'] as const) {
+      if (!env[key]) ctx.addIssue({ code: 'custom', path: [key], message: `${key} is required in production (see prisma/tenant/setup-roles.sql)` });
+    }
+  }
   if (env.NODE_ENV === 'production' && !env.COOKIE_SECRET) {
     ctx.addIssue({ code: 'custom', path: ['COOKIE_SECRET'], message: 'COOKIE_SECRET is required in production' });
   }
@@ -100,6 +126,16 @@ export const config = {
   // Database
   databaseUrl: env.DATABASE_URL,
   tenantDatabaseUrl: env.TENANT_DATABASE_URL,
+  // Outside production these fall back to the owner connection, which works
+  // when that account is a superuser (a local database)
+  tenantProvisionerUrl: env.TENANT_PROVISIONER_URL ?? env.TENANT_DATABASE_URL,
+  tenantPlatformUrl: env.TENANT_PLATFORM_URL ?? env.TENANT_DATABASE_URL,
+  tenantPoolMax: env.TENANT_POOL_MAX,
+  tenantClientCacheMax: env.TENANT_CLIENT_CACHE_MAX,
+  tenantRoleConnectionLimit: env.TENANT_ROLE_CONNECTION_LIMIT,
+  tenantRolePrefix: env.TENANT_ROLE_PREFIX,
+  tenantMigrationsDir: env.TENANT_MIGRATIONS_DIR,
+  tenantUsageRefreshMs: env.TENANT_USAGE_REFRESH_MS,
 
   // Server
   nodeEnv: env.NODE_ENV,

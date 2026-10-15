@@ -12,12 +12,11 @@ import { PASSWORD, api, db, login, seedTenant, startServer, stopServerAndCleanUp
 
 let A: TenantSeed;
 let B: TenantSeed;
-let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
 let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 const run = Math.random().toString(36).slice(2, 10);
 
 before(async () => {
-  ({ tenantDb, controlDb } = await db());
+  ({ controlDb } = await db());
   A = await seedTenant('sec-a');
   B = await seedTenant('sec-b');
   await startServer();
@@ -72,7 +71,7 @@ test('a tenant admin cannot modify another tenant\'s auth providers', async () =
   assert.equal(res.status, 404);
   const del = await api('DELETE', `/auth-config/providers/${B.providerId}`, { token, tenant: A.tenantId });
   assert.equal(del.status, 404);
-  assert.ok(await tenantDb.authProvider.findUnique({ where: { id: B.providerId } }), 'provider B still exists');
+  assert.ok(await B.db.authProvider.findUnique({ where: { id: B.providerId } }), 'provider B still exists');
 });
 
 test('auth config never returns OAuth client secrets, and is admin-only', async () => {
@@ -99,19 +98,19 @@ test('a manager cannot create platform admins or users above their rank', async 
 
 test('users cannot change their own user type; admins cannot grant platform types', async () => {
   const adminToken = await login(A, A.adminEmail);
-  const me = await tenantDb.user.findFirstOrThrow({ where: { email: A.adminEmail } });
+  const me = await A.db.user.findFirstOrThrow({ where: { email: A.adminEmail } });
   const self = await api('PATCH', `/users/${me.id}`, { token: adminToken, tenant: A.tenantId, body: { userType: 'TENANT_VIEWER' } });
   assert.equal(self.status, 403);
 
-  const target = await tenantDb.user.findFirstOrThrow({ where: { email: A.userEmail } });
+  const target = await A.db.user.findFirstOrThrow({ where: { email: A.userEmail } });
   const grant = await api('PATCH', `/users/${target.id}`, { token: adminToken, tenant: A.tenantId, body: { userType: 'PLATFORM_ADMIN' } });
   assert.equal(grant.status, 400);
-  assert.equal((await tenantDb.user.findUniqueOrThrow({ where: { id: target.id } })).userType, 'TENANT_USER');
+  assert.equal((await A.db.user.findUniqueOrThrow({ where: { id: target.id } })).userType, 'TENANT_USER');
 });
 
 test('a regular user can edit their own name but not their type', async () => {
   const token = await login(A, A.userEmail);
-  const me = await tenantDb.user.findFirstOrThrow({ where: { email: A.userEmail } });
+  const me = await A.db.user.findFirstOrThrow({ where: { email: A.userEmail } });
   assert.equal((await api('PATCH', `/users/${me.id}`, { token, tenant: A.tenantId, body: { name: 'New Name' } })).status, 200);
   assert.equal((await api('PATCH', `/users/${me.id}`, { token, tenant: A.tenantId, body: { userType: 'TENANT_ADMIN' } })).status, 403);
 });

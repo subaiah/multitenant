@@ -73,7 +73,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     const data = { passwordHash: await hashPassword(password), status: 'ACTIVE' as const, ...(name && { name }) };
     if (invite.tenant) {
-      await dbForTenant(invite.tenant.id).user.update({ where: { id: invite.userId }, data });
+      await (await dbForTenant(invite.tenant.id)).user.update({ where: { id: invite.userId }, data });
       await logActivity({ tenantId: invite.tenant.id, userId: invite.userId, action: 'accepted invitation', target: invite.user.email, type: 'USER' });
     } else {
       await controlDb.platformUser.update({ where: { id: invite.userId }, data });
@@ -93,10 +93,10 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     const { email, tenantSlug } = forgotSchema.parse(request.body);
     const platform = isPlatformSlug(tenantSlug);
     const tenant = platform ? null : await controlDb.tenant.findUnique({ where: { slug: tenantSlug } });
-    if (!platform && (!tenant || tenant.status === 'SUSPENDED')) return { message: GENERIC_FORGOT };
+    if (!platform && (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY')) return { message: GENERIC_FORGOT };
 
     const user = tenant
-      ? await dbForTenant(tenant.id).user.findFirst({ where: { tenantId: tenant.id, email } })
+      ? await (await dbForTenant(tenant.id)).user.findFirst({ where: { tenantId: tenant.id, email } })
       : await controlDb.platformUser.findUnique({ where: { email } });
     if (!user || user.status !== 'ACTIVE') return { message: GENERIC_FORGOT };
 
@@ -136,7 +136,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     const passwordHash = await hashPassword(password);
     if (reset.tenant) {
-      const db = dbForTenant(reset.tenant.id);
+      const db = await dbForTenant(reset.tenant.id);
       await db.$transaction([
         db.user.update({ where: { id: reset.userId }, data: { passwordHash } }),
         ...endAllSessions(db, reset.userId),
