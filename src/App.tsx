@@ -20,6 +20,7 @@ import ApiManagement from './pages/ApiManagement';
 import Profile from './pages/Profile';
 import Groups from './pages/Groups';
 import RoleAssignments from './pages/RoleAssignments';
+import RoleEditor from './pages/RoleEditor';
 import Organizations from './pages/Organizations';
 import ApplicationsManagement from './pages/ApplicationsManagement';
 import TenantEntitlements from './pages/TenantEntitlements';
@@ -155,6 +156,16 @@ export default function App() {
               <Route path="/role-assignments" element={
                 <PermissionGuard permission="roles:read" redirectTo="/unauthorized">
                   <RoleAssignments />
+                </PermissionGuard>
+              } />
+              <Route path="/roles/new" element={
+                <PermissionGuard permission="roles:manage" redirectTo="/unauthorized">
+                  <RoleEditor />
+                </PermissionGuard>
+              } />
+              <Route path="/roles/:id" element={
+                <PermissionGuard permission="roles:read" redirectTo="/unauthorized">
+                  <RoleEditor />
                 </PermissionGuard>
               } />
               <Route path="/organizations" element={
