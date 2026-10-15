@@ -86,7 +86,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E '^not ok|^\s+error:|^\s+(expected|actual):' test-output.txt | head -30 | while IFS= read -r line; do echo "::error::${line}"; done || true
+          grep -A2 -E '^not ok|^\s+error:' test-output.txt | grep -vE '^--$|duration_ms|^\s+---$' | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
   frontend:
     runs-on: ubuntu-latest

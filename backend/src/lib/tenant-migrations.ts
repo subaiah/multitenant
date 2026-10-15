@@ -187,7 +187,10 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
       );
     }
 
-    // Who may connect to the target's database at all
+    // Who may connect to the target's database at all. Grants on one database
+    // from parallel runs (schema targets share the shared database) would
+    // collide in Postgres ("tuple concurrently updated"), so take turns.
+    await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`tenant-database-acl:${databaseOf(target)}`]);
     const db = ident(databaseOf(target));
     if (target.kind === 'database') {
       await c.query(`REVOKE ALL ON DATABASE ${db} FROM PUBLIC`);
