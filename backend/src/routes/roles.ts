@@ -1,5 +1,7 @@
-import { AUTHENTICATED, requirePermission } from '../middleware/authorize.js';
-import { FastifyPluginAsync } from 'fastify';
+import { AUTHENTICATED, requireCanGrant, requirePermission } from '../middleware/authorize.js';
+import { assignmentState, rolePermissionNames } from '../lib/access.js';
+import { isTenantGrantable } from '../utils/permissions.js';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -30,10 +32,21 @@ const assignRoleSchema = z.object({
   userId: z.string().uuid().optional(),
   groupId: z.string().uuid().optional(),
   scopeType: z.enum(['TENANT', 'ORGANIZATION', 'ORG_UNIT', 'RESOURCE']).default('TENANT'),
-  scopeId: z.string().uuid(),
+  scopeId: z.string().uuid().optional(), // defaults to the tenant for TENANT scope
   validFrom: z.string().datetime().optional(),
   validTo: z.string().datetime().optional(),
 });
+
+const memberCount = (n: number) => `${n} ${n === 1 ? 'member' : 'members'}`;
+
+/** A role may only hold tenant-level catalog permissions that the editor has. */
+async function checkRolePermissions(request: FastifyRequest, permissions: string[]) {
+  const refused = permissions.filter((p) => !isTenantGrantable(p));
+  if (refused.length > 0) {
+    throw new AppError(`These permissions can't be part of a tenant role: ${refused.join(', ')}`, 400);
+  }
+  await requireCanGrant(request, permissions, 'build a role with these permissions');
+}
 
 export const roleRoutes: FastifyPluginAsync = async (fastify) => {
   // List all roles (platform-wide or tenant-specific)
@@ -49,43 +62,14 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         },
       },
     },
-  }, async (request, reply) => {
-    const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
+  }, async (request) => {
+    // Roles belong to the current tenant (platform staff choose it with x-tenant-id)
     const { tenantId } = request.query as { tenantId?: string };
-
-    // Platform admins can see all roles
-    if (userType === 'PLATFORM_ADMIN') {
-      const roles = await prisma.role.findMany({
-        where: tenantId ? { tenantId } : {},
-        include: {
-          permissions: {
-            include: {
-              permission: true,
-            },
-          },
-          _count: {
-            select: { users: true },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      return { roles };
+    if (tenantId && tenantId !== request.tenant.id) {
+      throw new AppError('Access denied to this tenant', 403);
     }
-
-    // Tenant users can only see their tenant's roles
-    if (tenantId) {
-      await requireTenantAccess(userId, tenantId);
-    }
-
-    const userTenantId = (request.user as any).tenantId;
-    if (!userTenantId && !tenantId) {
-      throw new AppError('Tenant ID required', 400);
-    }
-
     const roles = await prisma.role.findMany({
-      where: { tenantId: tenantId || userTenantId },
+      where: { tenantId: request.tenant.id },
       include: {
         permissions: {
           include: {
@@ -93,10 +77,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
         _count: {
-          select: { users: true },
+          select: { users: true, roleAssignments: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ isSystem: 'desc' }, { name: 'asc' }],
     });
 
     return { roles };
@@ -117,11 +101,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const userId = (request.user as any).userId;
     const { id } = request.params as { id: string };
 
-    const role = await prisma.role.findUnique({
-      where: { id },
+    const role = await prisma.role.findFirst({
+      where: { id, tenantId: request.tenant.id },
       include: {
         permissions: {
           include: {
@@ -147,11 +130,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Role not found', 404);
     }
 
-    // Check access
-    if (role.tenantId) {
-      await requireTenantAccess(userId, role.tenantId);
-    }
-
     return role;
   });
 
@@ -163,7 +141,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Create role',
       body: {
         type: 'object',
-        required: ['name', 'tenantId'],
+        required: ['name'],
         properties: {
           name: { type: 'string', minLength: 2, maxLength: 50 },
           description: { type: 'string' },
@@ -176,12 +154,12 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType as UserType;
     const data = createRoleSchema.parse(request.body);
-    const { tenantId } = request.body as { tenantId: string };
-
-    // Check tenant access
-    await requireTenantAccess(userId, tenantId);
-
-    // Check if user can create roles
+    const tenantId = request.tenant.id;
+    const bodyTenant = (request.body as { tenantId?: string }).tenantId;
+    if (bodyTenant && bodyTenant !== tenantId) {
+      throw new AppError('Access denied to this tenant', 403);
+    }
+    if (data.permissions) await checkRolePermissions(request, data.permissions);
 
     // Check if role name already exists
     const existingRole = await prisma.role.findFirst({
@@ -262,8 +240,8 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const data = updateRoleSchema.parse(request.body);
 
-    const role = await prisma.role.findUnique({
-      where: { id },
+    const role = await prisma.role.findFirst({
+      where: { id, tenantId: request.tenant.id },
     });
 
     if (!role) {
@@ -275,11 +253,11 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot update system roles', 403);
     }
 
-    // Check tenant access
-    if (role.tenantId) {
-      await requireTenantAccess(userId, role.tenantId);
+    if (data.permissions) {
+      await checkRolePermissions(request, data.permissions);
+      // Changing a role changes everyone who holds it
+      await requireCanGrant(request, await rolePermissionNames(id), 'change this role');
     }
-
 
     // Update role
     const updatedRole = await prisma.role.update({
@@ -290,30 +268,18 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    // Update permissions if provided
+    // Replace permissions if provided (all or nothing)
     if (data.permissions) {
-      // Remove existing permissions
-      await prisma.rolePermission.deleteMany({
-        where: { roleId: id },
+      const permissions = await prisma.permission.findMany({
+        where: { name: { in: data.permissions } },
       });
-
-      // Add new permissions
-      if (data.permissions.length > 0) {
-        const permissions = await prisma.permission.findMany({
-          where: { name: { in: data.permissions } },
-        });
-
-        if (permissions.length !== data.permissions.length) {
-          throw new AppError('Some permissions not found', 400);
-        }
-
-        await prisma.rolePermission.createMany({
-          data: permissions.map(p => ({
-            roleId: id,
-            permissionId: p.id,
-          })),
-        });
+      if (permissions.length !== new Set(data.permissions).size) {
+        throw new AppError('Some permissions not found', 400);
       }
+      await prisma.$transaction([
+        prisma.rolePermission.deleteMany({ where: { roleId: id } }),
+        prisma.rolePermission.createMany({ data: permissions.map((p) => ({ roleId: id, permissionId: p.id })) }),
+      ]);
     }
 
     // Log activity
@@ -351,11 +317,11 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType as UserType;
     const { id } = request.params as { id: string };
 
-    const role = await prisma.role.findUnique({
-      where: { id },
+    const role = await prisma.role.findFirst({
+      where: { id, tenantId: request.tenant.id },
       include: {
         _count: {
-          select: { users: true },
+          select: { users: true, roleAssignments: true },
         },
       },
     });
@@ -370,13 +336,8 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Check if role has users
-    if (role._count.users > 0) {
-      throw new AppError('Cannot delete role with assigned users', 400);
-    }
-
-    // Check tenant access
-    if (role.tenantId) {
-      await requireTenantAccess(userId, role.tenantId);
+    if (role._count.users > 0 || role._count.roleAssignments > 0) {
+      throw new AppError('Cannot delete a role that is assigned. Remove its assignments first.', 400);
     }
 
 
@@ -400,7 +361,20 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.status(204).send();
   });
 
-  // Assign role to user or group
+  // Where a role can apply: the tenant, its organizations and their units
+  fastify.get('/scopes', {
+    config: { permission: 'roles:read' },
+    schema: { tags: ['roles'], summary: 'Scopes a role can be assigned at' },
+  }, async (request) => {
+    const tenantId = request.tenant.id;
+    const organizations = await prisma.organization.findMany({
+      where: { tenantId },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, units: { select: { id: true, name: true }, orderBy: { name: 'asc' } } },
+    });
+    return { tenant: { id: tenantId, name: request.tenant.name }, organizations };
+  });
+
   // List role assignments in the current tenant (Role Assignments page)
   fastify.get('/assignments', {
     config: { permission: 'roles:read' },
@@ -416,8 +390,8 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       orderBy: { createdAt: 'desc' },
       include: {
         role: { include: { permissions: { include: { permission: true } } } },
-        user: { select: { email: true, name: true } },
-        group: { select: { name: true } },
+        user: { select: { email: true, name: true, status: true } },
+        group: { select: { name: true, status: true, _count: { select: { members: true } } } },
       },
     });
 
@@ -438,17 +412,20 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         userId: a.userId,
         groupId: a.groupId,
         principalName: a.principalType === 'USER' ? (a.user?.name || a.user?.email || 'Unknown user') : (a.group?.name || 'Unknown group'),
+        principalDetail: a.principalType === 'USER' ? (a.user?.email ?? null) : memberCount(a.group?._count.members ?? 0),
         scopeType: a.scopeType,
         scopeId: a.scopeId,
         scopeName: a.scopeType === 'TENANT' ? request.tenant.name : (scopeNames.get(a.scopeId) ?? a.scopeId),
         validFrom: a.validFrom,
         validTo: a.validTo,
         status: a.status,
+        state: assignmentState(a),
         permissions: a.role.permissions.map((rp) => `${rp.permission.resource}:${rp.permission.action}`),
       })),
     };
   });
 
+  // Assign role to user or group
   fastify.post('/assign', {
     config: { permission: 'roles:assign' },
     schema: {
@@ -456,7 +433,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Assign role to user or group with scope',
       body: {
         type: 'object',
-        required: ['roleId', 'principalType', 'scopeId'],
+        required: ['roleId', 'principalType'],
         properties: {
           roleId: { type: 'string', format: 'uuid' },
           principalType: { type: 'string', enum: ['USER', 'GROUP'] },
@@ -471,7 +448,6 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
     const tenantId = request.tenant.id;
     
     const data = assignRoleSchema.parse(request.body);
@@ -482,6 +458,25 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     }
     if (data.principalType === 'GROUP' && !data.groupId) {
       throw new AppError('groupId is required for GROUP principal', 400);
+    }
+    
+    // Validate scope: it must exist in this tenant
+    let scopeId = data.scopeId;
+    if (data.scopeType === 'TENANT') {
+      if (scopeId && scopeId !== tenantId) throw new AppError('Tenant scope must be the current tenant', 400);
+      scopeId = tenantId;
+    } else if (!scopeId) {
+      throw new AppError('scopeId is required for this scope', 400);
+    } else if (data.scopeType === 'ORGANIZATION') {
+      if (!(await prisma.organization.findFirst({ where: { id: scopeId, tenantId } }))) throw new AppError('Organization not found', 404);
+    } else if (data.scopeType === 'ORG_UNIT') {
+      if (!(await prisma.orgUnit.findFirst({ where: { id: scopeId, tenantId } }))) throw new AppError('Organization unit not found', 404);
+    }
+    
+    const validFrom = data.validFrom ? new Date(data.validFrom) : new Date();
+    const validTo = data.validTo ? new Date(data.validTo) : null;
+    if (validTo && validTo <= validFrom) {
+      throw new AppError('End date must be after the start date', 400);
     }
     
     // Verify role exists
@@ -513,6 +508,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       principalName = group.name;
     }
     
+    await requireCanGrant(request, await rolePermissionNames(role.id), `assign ${role.name}`);
     
     // Check for existing assignment
     const existing = await prisma.roleAssignment.findFirst({
@@ -522,7 +518,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         principalType: data.principalType,
         ...(data.principalType === 'USER' ? { userId: data.userId } : { groupId: data.groupId }),
         scopeType: data.scopeType,
-        scopeId: data.scopeId,
+        scopeId,
       },
     });
     
@@ -538,9 +534,9 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         userId: data.principalType === 'USER' ? data.userId : null,
         groupId: data.principalType === 'GROUP' ? data.groupId : null,
         scopeType: data.scopeType,
-        scopeId: data.scopeId,
-        validFrom: data.validFrom ? new Date(data.validFrom) : new Date(),
-        validTo: data.validTo ? new Date(data.validTo) : null,
+        scopeId,
+        validFrom,
+        validTo,
       },
     });
     
@@ -558,28 +554,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.status(201).send(assignment);
   });
 
-  // Remove role assignment
-  fastify.delete('/unassign', {
-    config: { permission: 'roles:assign' },
-    schema: {
-      tags: ['roles'],
-      summary: 'Remove role assignment',
-      body: {
-        type: 'object',
-        required: ['assignmentId'],
-        properties: {
-          assignmentId: { type: 'string', format: 'uuid' },
-        },
-      },
-    },
-  }, async (request, reply) => {
+  async function removeAssignment(request: FastifyRequest, assignmentId: string) {
     const userId = (request.user as any).userId;
-    const userType = (request.user as any).userType as UserType;
     const tenantId = request.tenant.id;
-    const { assignmentId } = request.body as { assignmentId: string };
-    
-    
-    // Get assignment
+
     const assignment = await prisma.roleAssignment.findFirst({
       where: { id: assignmentId, tenantId },
       include: {
@@ -593,12 +571,13 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Role assignment not found', 404);
     }
     
-    // Remove assignment
+    // Taking access away needs the same standing as granting it
+    await requireCanGrant(request, await rolePermissionNames(assignment.roleId), `remove ${assignment.role.name}`);
+    
     await prisma.roleAssignment.delete({
       where: { id: assignmentId },
     });
     
-    // Log activity
     const principalName = assignment.principalType === 'USER' 
       ? assignment.user?.email 
       : assignment.group?.name;
@@ -612,7 +591,37 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'USER',
       },
     });
-    
+  }
+
+  // Remove role assignment
+  fastify.delete('/assignments/:id', {
+    config: { permission: 'roles:assign' },
+    schema: {
+      tags: ['roles'],
+      summary: 'Remove role assignment',
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request, reply) => {
+    await removeAssignment(request, (request.params as { id: string }).id);
+    return reply.status(204).send();
+  });
+
+  // Remove role assignment (older form, assignment id in the body)
+  fastify.delete('/unassign', {
+    config: { permission: 'roles:assign' },
+    schema: {
+      tags: ['roles'],
+      summary: 'Remove role assignment',
+      body: {
+        type: 'object',
+        required: ['assignmentId'],
+        properties: {
+          assignmentId: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  }, async (request) => {
+    await removeAssignment(request, (request.body as { assignmentId: string }).assignmentId);
     return { message: 'Role assignment removed successfully' };
   });
 

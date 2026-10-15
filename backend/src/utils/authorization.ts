@@ -601,6 +601,7 @@ export async function getEnhancedUserPermissions(
     where: {
       userId,
       tenantId,
+      group: { status: 'ACTIVE' }, // a deactivated group grants nothing
       validFrom: { lte: new Date() },
       OR: [
         { validTo: null },
