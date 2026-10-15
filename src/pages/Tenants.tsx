@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
-import { apiPatch } from '../lib/api-client';
+import { apiPatch, apiPost } from '../lib/api-client';
+import { Dialog, Field } from '../components/Dialog';
 import {
   Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatRelative, humanize, inputClass, selectClass, primaryButtonClass, secondaryButtonClass,
 } from '../components/ui';
@@ -37,6 +38,9 @@ export default function Tenants() {
   const search = params.get('search') ?? '';
   const page = Number(params.get('page') ?? '1');
   const [selected, setSelected] = useState<Tenant | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { hasPermission } = useAuth();
 
   const query = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
   if (status) query.set('status', status);
@@ -54,7 +58,11 @@ export default function Tenants() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="Tenants" description="Every organization on the platform" />
+      <PageHeader title="Tenants" description="Every organization on the platform"
+        actions={hasPermission('tenants:manage') && (
+          <button onClick={() => setCreating(true)} className={primaryButtonClass}><Plus size={16} />New tenant</button>
+        )} />
+      {notice && <p role="status" className="text-sm text-green-700 dark:text-green-400">{notice}</p>}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 p-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -131,6 +139,9 @@ export default function Tenants() {
 
       {selected && (
         <TenantPanel tenant={selected} onClose={() => setSelected(null)} onSaved={async () => { setSelected(null); await list.reload(); }} />
+      )}
+      {creating && (
+        <NewTenantDialog onClose={() => setCreating(false)} onCreated={async (msg) => { setCreating(false); setNotice(msg); await list.reload(); }} />
       )}
     </div>
   );
@@ -211,5 +222,69 @@ function TenantPanel({ tenant, onClose, onSaved }: { tenant: Tenant; onClose: ()
         </div>
       </aside>
     </div>
+  );
+}
+
+const slugify = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
+
+function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (message: string) => void }) {
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [plan, setPlan] = useState('FREE');
+  const [status, setStatus] = useState('ACTIVE');
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const t = await apiPost<{ name: string; adminInvited: string }>('/tenants', { name, slug, plan, status, adminName, adminEmail });
+      onCreated(`${t.name} created. An invitation was sent to ${t.adminInvited}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the tenant');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog title="New tenant" onClose={onClose} onSubmit={submit}>
+      <Field label="Organization name">
+        <input required minLength={2} value={name} autoFocus className={inputClass}
+          onChange={(e) => { setName(e.target.value); if (!slugEdited) setSlug(slugify(e.target.value)); }} />
+      </Field>
+      <Field label="Sign-in address" hint="Lowercase letters, digits and hyphens. Users sign in with this; it can't be changed later.">
+        <input required pattern="[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?" value={slug} className={`${inputClass} font-mono`}
+          onChange={(e) => { setSlug(e.target.value.toLowerCase()); setSlugEdited(true); }} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Plan">
+          <select value={plan} onChange={(e) => setPlan(e.target.value)} className={inputClass}>
+            {PLANS.map((p) => <option key={p} value={p}>{humanize(p)}</option>)}
+          </select>
+        </Field>
+        <Field label="Status">
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
+            {['ACTIVE', 'TRIAL'].map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
+          </select>
+        </Field>
+      </div>
+      <p className="pt-2 text-sm font-medium text-slate-700 dark:text-slate-200">First administrator</p>
+      <Field label="Name">
+        <input required minLength={2} value={adminName} onChange={(e) => setAdminName(e.target.value)} className={inputClass} />
+      </Field>
+      <Field label="Email" hint="They get an invitation to set a password.">
+        <input required type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} className={inputClass} />
+      </Field>
+      {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+        <button type="submit" disabled={saving} className={primaryButtonClass}>{saving ? 'Creating…' : 'Create tenant'}</button>
+      </div>
+    </Dialog>
   );
 }

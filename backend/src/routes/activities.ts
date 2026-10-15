@@ -1,6 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { withActivityUsers } from '../lib/activity-users.js';
 
 const querySchema = z.object({
@@ -59,13 +58,13 @@ export const activityRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     const [activities, total] = await Promise.all([
-      prisma.activity.findMany({
+      request.db.activity.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-      }).then(withActivityUsers),
-      prisma.activity.count({ where }),
+      }).then((rows) => withActivityUsers(request.db, rows)),
+      request.db.activity.count({ where }),
     ]);
 
     return {
@@ -91,22 +90,22 @@ export const activityRoutes: FastifyPluginAsync = async (fastify) => {
     const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const [totalActivities, last24hActivities, last7dActivities, byType] = await Promise.all([
-      prisma.activity.count({
+      request.db.activity.count({
         where: { tenantId: request.tenant.id },
       }),
-      prisma.activity.count({
+      request.db.activity.count({
         where: {
           tenantId: request.tenant.id,
           createdAt: { gte: last24Hours },
         },
       }),
-      prisma.activity.count({
+      request.db.activity.count({
         where: {
           tenantId: request.tenant.id,
           createdAt: { gte: last7Days },
         },
       }),
-      prisma.activity.groupBy({
+      request.db.activity.groupBy({
         by: ['type'],
         where: { tenantId: request.tenant.id },
         _count: true,

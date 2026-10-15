@@ -1,0 +1,55 @@
+/**
+ * The contract between the kit and the product built on it.
+ *
+ * The kit (tenants, identity, access, organizations, the two portals) is the
+ * same in every product forked from the starter. A product adds its own
+ * features through one module, src/product/index.ts, and its own tenant
+ * tables in prisma/tenant/product/. Keeping product code behind this
+ * interface is what lets kit updates merge into a fork cleanly.
+ * See docs/extending.md.
+ */
+import type { FastifyPluginAsync } from 'fastify';
+import type { TenantDb } from '../lib/tenant-db.js';
+import type { UserType } from '../utils/authorization.js';
+
+export interface ProductPermission {
+  /** `resource:action`. The resource must not be a kit or platform resource. */
+  name: string;
+  /** What it allows, in plain language (shown in the role editor) */
+  description: string;
+}
+
+export interface ProductMenuItem {
+  label: string;
+  /** A frontend route */
+  path: string;
+  /** A lucide-react icon name */
+  icon: string;
+  permission?: string;
+  children?: ProductMenuItem[];
+}
+
+export interface ProductModule {
+  /** Shown in logs and the API docs */
+  name: string;
+
+  /** Permissions the product's routes and screens check. Tenant-grantable. */
+  permissions: ProductPermission[];
+  /** Plain-language names for the product's resources (role editor) */
+  resources: Record<string, { label: string; description: string }>;
+  /** Extra grants per user type, on top of the kit's (e.g. TENANT_ADMIN: ['invoices:*']) */
+  userTypeGrants: Partial<Record<UserType, string[]>>;
+
+  /**
+   * The product's API, registered inside the authenticated, tenant-bound
+   * scope: every route has `request.tenant`, `request.user` and `request.db`
+   * (the tenant's database) and must declare `config: { permission }`.
+   */
+  routes: FastifyPluginAsync;
+
+  /** Tenant-portal menu entries, added after the kit's */
+  tenantMenu: ProductMenuItem[];
+
+  /** Runs when a tenant is created, after the kit's defaults (seed product data here). */
+  onTenantCreated?: (tenantId: string, db: TenantDb) => Promise<void>;
+}

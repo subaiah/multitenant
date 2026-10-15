@@ -13,8 +13,10 @@
  * menu seed ask for is listed here.
  */
 import type { UserType } from './authorization.js';
+import { product } from '../product/index.js';
 
-export const PERMISSIONS = [
+/** The kit's own permissions. */
+export const KIT_PERMISSIONS = [
   // Platform portal
   'platform:read',
   'tenants:read',
@@ -69,10 +71,13 @@ export const PERMISSIONS = [
   'delegations:manage', // revoke anyone's delegation
 ] as const;
 
-export type Permission = (typeof PERMISSIONS)[number];
+export type KitPermission = (typeof KIT_PERMISSIONS)[number];
+
+/** Every permission: the kit's, then the product's (src/product). */
+export const PERMISSIONS: readonly string[] = [...KIT_PERMISSIONS, ...product.permissions.map((p) => p.name)];
 
 /** Plain-language names for the role editor (tenant-grantable resources only). */
-export const RESOURCE_INFO: Record<string, { label: string; description: string }> = {
+const KIT_RESOURCE_INFO: Record<string, { label: string; description: string }> = {
   dashboard: { label: 'Dashboard', description: 'The tenant overview' },
   tenant: { label: 'Tenant profile', description: 'Name, branding and plan details' },
   applications: { label: 'Applications', description: 'Apps available to and deployed in the tenant' },
@@ -93,7 +98,7 @@ export const RESOURCE_INFO: Record<string, { label: string; description: string 
 };
 
 /** What each permission allows, where the action name alone isn't clear. */
-export const PERMISSION_INFO: Partial<Record<Permission, string>> = {
+const KIT_PERMISSION_INFO: Partial<Record<KitPermission, string>> = {
   'dashboard:view': 'See the dashboard',
   'tenant:read': 'See tenant details',
   'tenant:update': 'Change tenant details and branding',
@@ -134,8 +139,8 @@ export const PERMISSION_INFO: Partial<Record<Permission, string>> = {
   'delegations:manage': "Revoke anyone's delegation",
 };
 
-/** What each user type can do before any roles are assigned. */
-export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
+/** What each user type can do before any roles are assigned (kit part). */
+const KIT_USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
   PLATFORM_ADMIN: ['*'],
   PLATFORM_USER: ['platform:read', 'tenants:read', 'applications:read', 'policies:read', 'platform-users:read', 'support:request'],
   TENANT_ADMIN: [
@@ -154,6 +159,18 @@ export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
   TENANT_USER: ['dashboard:view', 'tenant:read', 'applications:read', 'users:read', 'groups:read', 'organizations:read'],
   TENANT_VIEWER: ['dashboard:view', 'tenant:read', 'applications:read'],
 };
+
+export const RESOURCE_INFO: Record<string, { label: string; description: string }> = { ...KIT_RESOURCE_INFO, ...product.resources };
+
+export const PERMISSION_INFO: Record<string, string> = {
+  ...KIT_PERMISSION_INFO,
+  ...Object.fromEntries(product.permissions.map((p) => [p.name, p.description])),
+};
+
+/** What each user type can do before any roles are assigned (kit and product). */
+export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = Object.fromEntries(
+  Object.entries(KIT_USER_TYPE_PERMISSIONS).map(([type, grants]) => [type, [...grants, ...(product.userTypeGrants[type as UserType] ?? [])]]),
+) as Record<UserType, string[]>;
 
 /** Resources that exist only at platform level. */
 const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support']);
@@ -181,4 +198,19 @@ export function permissionMatches(granted: Iterable<string>, required: string): 
   const resource = required.slice(0, i);
   const action = required.slice(i + 1);
   return set.has(`${resource}:*`) || set.has(`*:${action}`);
+}
+
+// A product permission must be a new, tenant-grantable resource: it can't
+// widen a kit resource (e.g. `users:export`) or touch a platform one.
+{
+  const kitResources = new Set(KIT_PERMISSIONS.map((p) => p.split(':')[0]));
+  for (const { name } of product.permissions) {
+    const [resource, action] = name.split(':');
+    if (!resource || !action || name.split(':').length !== 2 || name.includes('*')) {
+      throw new Error(`Product permission "${name}" must look like resource:action`);
+    }
+    if (kitResources.has(resource) || !isTenantGrantable(name)) {
+      throw new Error(`Product permission "${name}" uses a kit or platform resource; use a resource of your own`);
+    }
+  }
 }

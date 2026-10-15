@@ -1,10 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '../utils/authorization.js';
 import { permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -54,7 +55,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Get all active menu items for the portal
-    const menuItems = await prisma.menuItem.findMany({
+    const menuItems = await controlDb.menuItem.findMany({
       where: {
         portal,
         isActive: true,
@@ -110,7 +111,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     const where = portal ? { portal } : {};
     
-    const menuItems = await prisma.menuItem.findMany({
+    const menuItems = await controlDb.menuItem.findMany({
       where,
       orderBy: [{ portal: 'asc' }, { order: 'asc' }],
       include: {
@@ -148,7 +149,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const menuItem = await prisma.menuItem.findUnique({
+    const menuItem = await controlDb.menuItem.findUnique({
       where: { id },
       include: {
         parent: true,
@@ -195,7 +196,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Verify parent exists if provided
     if (data.parentId) {
-      const parent = await prisma.menuItem.findUnique({
+      const parent = await controlDb.menuItem.findUnique({
         where: { id: data.parentId },
       });
       
@@ -208,20 +209,18 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
     
-    const menuItem = await prisma.menuItem.create({
+    const menuItem = await controlDb.menuItem.create({
       data,
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'created menu item',
         target: menuItem.label,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(menuItem);
   });
@@ -262,7 +261,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Verify parent exists if provided
     if (data.parentId) {
-      const parent = await prisma.menuItem.findUnique({
+      const parent = await controlDb.menuItem.findUnique({
         where: { id: data.parentId },
       });
       
@@ -270,27 +269,25 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         throw new AppError('Parent menu item not found', 404);
       }
       
-      const menuItem = await prisma.menuItem.findUnique({ where: { id } });
+      const menuItem = await controlDb.menuItem.findUnique({ where: { id } });
       if (menuItem && parent.portal !== menuItem.portal) {
         throw new AppError('Parent menu item must be in the same portal', 400);
       }
     }
     
-    const menuItem = await prisma.menuItem.update({
+    const menuItem = await controlDb.menuItem.update({
       where: { id },
       data,
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'updated menu item',
         target: menuItem.label,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return menuItem;
   });
@@ -315,20 +312,18 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const menuItem = await prisma.menuItem.delete({
+    const menuItem = await controlDb.menuItem.delete({
       where: { id },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'deleted menu item',
         target: menuItem.label,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });
@@ -364,9 +359,9 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     // Update all items in a transaction
-    await prisma.$transaction(
+    await controlDb.$transaction(
       items.map(item =>
-        prisma.menuItem.update({
+        controlDb.menuItem.update({
           where: { id: item.id },
           data: { order: item.order },
         })
@@ -374,15 +369,13 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     );
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'reordered menu items',
         target: `${items.length} items`,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return { message: 'Menu items reordered successfully' };
   });

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { prisma } from '../lib/prisma.js';
+import { controlDb, tenantDb } from '../lib/prisma.js';
 
 export const healthRoutes: FastifyPluginAsync = async (fastify) => {
   // Basic health check
@@ -25,25 +25,24 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
       description: 'Check API and database health',
     },
   }, async () => {
-    let dbStatus = 'healthy';
-    let dbLatency = 0;
-
-    try {
+    const ping = async (db: { $queryRaw: (q: TemplateStringsArray) => Promise<unknown> }) => {
       const start = Date.now();
-      await prisma.$queryRaw`SELECT 1`;
-      dbLatency = Date.now() - start;
-    } catch (error) {
-      dbStatus = 'unhealthy';
-    }
+      try {
+        await db.$queryRaw`SELECT 1`;
+        return { status: 'healthy', latency: `${Date.now() - start}ms` };
+      } catch {
+        return { status: 'unhealthy', latency: `${Date.now() - start}ms` };
+      }
+    };
+    // The control plane and the shared tenant database
+    const [control, tenant] = await Promise.all([ping(controlDb), ping(tenantDb)]);
+    const healthy = control.status === 'healthy' && tenant.status === 'healthy';
 
     return {
-      status: dbStatus === 'healthy' ? 'ok' : 'degraded',
+      status: healthy ? 'ok' : 'degraded',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      database: {
-        status: dbStatus,
-        latency: `${dbLatency}ms`,
-      },
+      database: { status: healthy ? 'healthy' : 'unhealthy', control, tenant },
       memory: {
         used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),

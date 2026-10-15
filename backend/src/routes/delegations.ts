@@ -1,10 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const createDelegationSchema = z.object({
   delegateId: z.string().uuid(),
@@ -54,7 +54,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [delegations, total] = await Promise.all([
-      prisma.delegation.findMany({
+      request.db.delegation.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -75,7 +75,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.delegation.count({ where }),
+      request.db.delegation.count({ where }),
     ]);
     
     return {
@@ -107,7 +107,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    const delegation = await prisma.delegation.findFirst({
+    const delegation = await request.db.delegation.findFirst({
       where: { id, tenantId },
       include: {
         delegator: {
@@ -157,7 +157,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createDelegationSchema.parse(request.body);
     
     // Verify role assignment exists and belongs to delegator
-    const roleAssignment = await prisma.roleAssignment.findFirst({
+    const roleAssignment = await request.db.roleAssignment.findFirst({
       where: {
         id: data.roleAssignmentId,
         tenantId,
@@ -171,7 +171,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Verify delegate exists and belongs to same tenant
-    const delegate = await prisma.user.findFirst({
+    const delegate = await request.db.user.findFirst({
       where: { id: data.delegateId, tenantId },
     });
     
@@ -197,7 +197,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check for existing active delegation
-    const existing = await prisma.delegation.findFirst({
+    const existing = await request.db.delegation.findFirst({
       where: {
         tenantId,
         delegateId: data.delegateId,
@@ -211,7 +211,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Active delegation already exists for this user and role', 409);
     }
     
-    const delegation = await prisma.delegation.create({
+    const delegation = await request.db.delegation.create({
       data: {
         tenantId,
         delegatorId: userId,
@@ -224,15 +224,13 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'created delegation',
         target: `Delegation to ${delegate.email}`,
         type: 'USER',
-      },
-    });
+      });
     
     return reply.status(201).send(delegation);
   });
@@ -263,7 +261,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { reason } = revokeDelegationSchema.parse(request.body);
     
-    const delegation = await prisma.delegation.findFirst({
+    const delegation = await request.db.delegation.findFirst({
       where: { id, tenantId },
     });
     
@@ -281,7 +279,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Not authorized to revoke this delegation', 403);
     }
     
-    const revoked = await prisma.delegation.update({
+    const revoked = await request.db.delegation.update({
       where: { id },
       data: {
         status: 'REVOKED',
@@ -291,15 +289,13 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'revoked delegation',
         target: `Delegation ${id}`,
         type: 'USER',
-      },
-    });
+      });
     
     return revoked;
   });
@@ -315,7 +311,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = request.tenant.id;
     
-    const delegations = await prisma.delegation.findMany({
+    const delegations = await request.db.delegation.findMany({
       where: {
         tenantId,
         delegateId: userId,

@@ -1,14 +1,16 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
-import { endAllSessions } from '../lib/sessions.js';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import { logActivity } from '../lib/activity.js';
+import { endAllPlatformSessions, endAllSessions } from '../lib/sessions.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
 import { sendMail } from '../lib/mailer.js';
 import { passwordResetEmail } from '../lib/email-templates.js';
-import { RESET_TTL_MINUTES, consumeUserToken, findValidUserToken, issueUserToken } from '../lib/user-tokens.js';
+import { RESET_TTL_MINUTES, consumeUserToken, findValidUserToken, issueUserToken, type ValidUserToken } from '../lib/user-tokens.js';
 import { otpRequestRateLimit } from '../lib/rate-limits.js';
-import { isPlatformSlug } from '../lib/platform.js';
+import { PLATFORM_SLUG, isPlatformSlug } from '../lib/platform.js';
 import { checkPasswordPolicy, hashPassword, type PasswordPolicy } from '../utils/auth.js';
 
 /**
@@ -26,10 +28,8 @@ const resetSchema = z.object({ token: z.string().min(10), password: z.string().m
 const PLATFORM_POLICY: PasswordPolicy = 'STRONG';
 const GENERIC_FORGOT = 'If an account exists for this email, we have sent a link to reset the password.';
 
-type TokenWithUser = NonNullable<Awaited<ReturnType<typeof findValidUserToken>>>;
-const policyFor = (t: TokenWithUser): PasswordPolicy =>
-  (t.user.tenant?.authConfig?.passwordPolicy as PasswordPolicy | undefined) ?? (t.user.tenantId ? 'STANDARD' : PLATFORM_POLICY);
-const slugFor = (t: TokenWithUser) => t.user.tenant?.slug ?? 'platform';
+const policyFor = (t: ValidUserToken): PasswordPolicy => (t.tenant ? (t.tenant.passwordPolicy as PasswordPolicy) : PLATFORM_POLICY);
+const slugFor = (t: ValidUserToken) => t.tenant?.slug ?? PLATFORM_SLUG;
 
 export const accountRoutes: FastifyPluginAsync = async (fastify) => {
   // What the accept-invitation page shows
@@ -44,7 +44,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       email: invite.user.email,
       name: invite.user.name,
-      tenant: invite.user.tenant ? { name: invite.user.tenant.name, slug: invite.user.tenant.slug } : null,
+      tenant: invite.tenant ? { name: invite.tenant.name, slug: invite.tenant.slug } : null,
       passwordPolicy: policyFor(invite),
     };
   });
@@ -67,18 +67,16 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const problem = checkPasswordPolicy(password, policyFor(invite));
     if (problem) throw new AppError(problem, 400);
-    if (!(await consumeUserToken(invite.id))) {
+    if (!(await consumeUserToken(invite))) {
       throw new AppError('This invitation has already been used.', 409);
     }
 
-    await prisma.user.update({
-      where: { id: invite.userId },
-      data: { passwordHash: await hashPassword(password), status: 'ACTIVE', ...(name && { name }) },
-    });
-    if (invite.user.tenantId) {
-      await prisma.activity.create({
-        data: { tenantId: invite.user.tenantId, userId: invite.userId, action: 'accepted invitation', target: invite.user.email, type: 'USER' },
-      });
+    const data = { passwordHash: await hashPassword(password), status: 'ACTIVE' as const, ...(name && { name }) };
+    if (invite.tenant) {
+      await dbForTenant(invite.tenant.id).user.update({ where: { id: invite.userId }, data });
+      await logActivity({ tenantId: invite.tenant.id, userId: invite.userId, action: 'accepted invitation', target: invite.user.email, type: 'USER' });
+    } else {
+      await controlDb.platformUser.update({ where: { id: invite.userId }, data });
     }
     return { message: 'Your account is ready. Sign in with your new password.', tenantSlug: slugFor(invite), email: invite.user.email };
   });
@@ -94,15 +92,16 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request) => {
     const { email, tenantSlug } = forgotSchema.parse(request.body);
     const platform = isPlatformSlug(tenantSlug);
-    const tenant = platform ? null : await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+    const tenant = platform ? null : await controlDb.tenant.findUnique({ where: { slug: tenantSlug } });
     if (!platform && (!tenant || tenant.status === 'SUSPENDED')) return { message: GENERIC_FORGOT };
 
-    const user = await prisma.user.findFirst({
-      where: tenant ? { tenantId: tenant.id, email } : { tenantId: null, email, userType: { in: ['PLATFORM_ADMIN', 'PLATFORM_USER'] } },
-    });
+    const user = tenant
+      ? await dbForTenant(tenant.id).user.findFirst({ where: { tenantId: tenant.id, email } })
+      : await controlDb.platformUser.findUnique({ where: { email } });
     if (!user || user.status !== 'ACTIVE') return { message: GENERIC_FORGOT };
 
-    const token = await issueUserToken(user.id, 'PASSWORD_RESET', RESET_TTL_MINUTES * 60 * 1000);
+    const owner = tenant ? { tenantId: tenant.id, tenantSlug: tenant.slug } : ('platform' as const);
+    const token = await issueUserToken(owner, user.id, 'PASSWORD_RESET', RESET_TTL_MINUTES * 60 * 1000);
     const link = `${config.frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
     await sendMail(passwordResetEmail(user.email, link, tenant?.name ?? 'Platform Administration', RESET_TTL_MINUTES));
     return { message: GENERIC_FORGOT };
@@ -131,20 +130,23 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const problem = checkPasswordPolicy(password, policyFor(reset));
     if (problem) throw new AppError(problem, 400);
-    if (!(await consumeUserToken(reset.id))) {
+    if (!(await consumeUserToken(reset))) {
       throw new AppError('This reset link has already been used.', 409);
     }
 
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: reset.userId }, data: { passwordHash: await hashPassword(password) } }),
-      // Sign out everywhere, including access tokens already issued: a reset
-      // usually means the old password can't be trusted
-      ...endAllSessions(reset.userId),
-    ]);
-    if (reset.user.tenantId) {
-      await prisma.activity.create({
-        data: { tenantId: reset.user.tenantId, userId: reset.userId, action: 'reset password', target: reset.user.email, type: 'AUTH' },
-      });
+    const passwordHash = await hashPassword(password);
+    if (reset.tenant) {
+      const db = dbForTenant(reset.tenant.id);
+      await db.$transaction([
+        db.user.update({ where: { id: reset.userId }, data: { passwordHash } }),
+        ...endAllSessions(db, reset.userId),
+      ]);
+      await logActivity({ tenantId: reset.tenant.id, userId: reset.userId, action: 'reset password', target: reset.user.email, type: 'AUTH' });
+    } else {
+      await controlDb.$transaction([
+        controlDb.platformUser.update({ where: { id: reset.userId }, data: { passwordHash } }),
+        ...endAllPlatformSessions(reset.userId),
+      ]);
     }
     return { message: 'Your password has been changed. Sign in with your new password.', tenantSlug: slugFor(reset), email: reset.user.email };
   });

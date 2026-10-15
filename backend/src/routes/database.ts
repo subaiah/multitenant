@@ -1,8 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const updateDatabaseConfigSchema = z.object({
   strategy: z.enum(['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES']).optional(),
@@ -26,7 +27,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get database configuration for current tenant',
     },
   }, async (request, reply) => {
-    const config = await prisma.databaseConfig.findUnique({
+    const config = await controlDb.databaseConfig.findUnique({
       where: { tenantId: request.tenant.id },
     });
 
@@ -67,7 +68,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Validate strategy-specific fields against the resulting config, so a save
     // that doesn't resend the (never returned) connection string still works
-    const current = await prisma.databaseConfig.findUnique({ where: { tenantId: request.tenant.id } });
+    const current = await controlDb.databaseConfig.findUnique({ where: { tenantId: request.tenant.id } });
     if (!current) {
       throw new AppError('Database configuration not found', 404);
     }
@@ -85,22 +86,20 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Tenant column required for SHARED_TABLES strategy', 400);
     }
 
-    const config = await prisma.databaseConfig.update({
+    const config = await controlDb.databaseConfig.update({
       where: { tenantId: request.tenant.id },
       data,
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'updated database configuration',
         target: 'database',
         type: 'CONFIG',
         metadata: { strategy: data.strategy },
-      },
-    });
+      });
 
     const { connectionString, ...safe } = config;
     return { ...safe, hasConnectionString: Boolean(connectionString) };

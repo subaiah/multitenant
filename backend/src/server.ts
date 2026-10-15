@@ -7,7 +7,8 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
-import { prisma, pool } from './lib/prisma.js';
+import { controlDb, tenantDb, disconnectDatabases } from './lib/prisma.js';
+import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
 import { authRoutes } from './routes/auth.js';
@@ -232,6 +233,9 @@ async function registerRoutes() {
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });
+
+    // The product's own API (src/product), tenant-bound like the routes above
+    await protectedRoutes.register(product.routes);
   });
 }
 
@@ -247,7 +251,7 @@ async function start() {
     if (emailWarning) fastify.log.warn(emailWarning);
 
     // Test database connection
-    await prisma.$connect();
+    await Promise.all([controlDb.$connect(), tenantDb.$connect()]);
     fastify.log.info('Database connected successfully');
 
     // Start server
@@ -267,8 +271,7 @@ async function start() {
 // Graceful shutdown
 const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
-  await prisma.$disconnect();
-  await pool.end();
+  await disconnectDatabases();
   await fastify.close();
   process.exit(0);
 };

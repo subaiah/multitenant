@@ -1,0 +1,18 @@
+// Tenant plane: everything a tenant owns. The same schema is used in every
+// isolation mode (shared tables, schema per tenant, database per tenant).
+// Kit models live in kit/, a product's own models in product/; Prisma reads
+// every .prisma file under this folder. Config: prisma.tenant.config.ts.
+//
+// Rules for every model here:
+// - a tenant_id column (row-level security checks it; data can move between modes)
+// - no relations to the control plane (tenants, platform users): plain ids only
+// - unique constraints on user-chosen values include tenant_id
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/tenant"
+}
+
+datasource db {
+  provider = "postgresql"
+}

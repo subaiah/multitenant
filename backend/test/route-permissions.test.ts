@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { PERMISSIONS, isTenantGrantable } from '../src/utils/permissions.js';
 
 const ROUTES = join(import.meta.dirname, '..', 'src', 'routes');
+// The product's routes (src/product) follow the same rules
+const PRODUCT = join(import.meta.dirname, '..', 'src', 'product');
 // Registered outside the authenticated scope (login, session, health)
 const PUBLIC_FILES = new Set(['auth.ts', 'bff-auth.ts', 'account.ts', 'health.ts']);
 const catalog = new Set<string>(PERMISSIONS);
@@ -22,10 +24,14 @@ interface Declared {
 }
 
 function protectedRoutes(): Declared[] {
-  return readdirSync(ROUTES)
-    .filter((f) => f.endsWith('.ts') && !PUBLIC_FILES.has(f))
-    .flatMap((file) => {
-      const src = readFileSync(join(ROUTES, file), 'utf8');
+  const files = [
+    ...readdirSync(ROUTES).filter((f) => !PUBLIC_FILES.has(f)).map((f) => join(ROUTES, f)),
+    ...readdirSync(PRODUCT).map((f) => join(PRODUCT, f)),
+  ].filter((f) => f.endsWith('.ts'));
+  return files
+    .flatMap((path) => {
+      const file = path.split('/').slice(-2).join('/');
+      const src = readFileSync(path, 'utf8');
       const starts = [...src.matchAll(/fastify\.(get|post|put|patch|delete)\('([^']*)'/g)];
       return starts.map((m, i) => {
         const options = src.slice(m.index, starts[i + 1]?.index ?? src.length).split('async (')[0];

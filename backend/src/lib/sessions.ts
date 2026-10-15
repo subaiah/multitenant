@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
-import { prisma } from './prisma.js';
+import { controlDb } from './prisma.js';
+import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
 import { USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 
@@ -11,11 +12,33 @@ import { USER_TYPE_HIERARCHY } from '../utils/authorization.js';
  * Returns Prisma operations so callers can run them inside their own
  * transaction: `prisma.$transaction([...update, ...endAllSessions(id)])`.
  */
-export function endAllSessions(userId: string, at = new Date()) {
+export function endAllSessions(db: TenantDb, userId: string, at = new Date()) {
   return [
-    prisma.user.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
-    prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
+    db.user.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
+    db.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
   ];
+}
+
+/** endAllSessions for a platform user (control plane). */
+export function endAllPlatformSessions(userId: string, at = new Date()) {
+  return [
+    controlDb.platformUser.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
+    controlDb.platformRefreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
+  ];
+}
+
+/**
+ * The account behind a token: a tenant user (token carries tenantId) in that
+ * tenant's database, or a platform user in the control plane.
+ */
+export async function findSessionAccount(token: { userId: string; tenantId?: string }) {
+  const select = { id: true, status: true, userType: true, sessionsValidAfter: true } as const;
+  if (token.tenantId) {
+    const user = await dbForTenant(token.tenantId).user.findFirst({ where: { id: token.userId, tenantId: token.tenantId }, select });
+    return user ? { ...user, tenantId: token.tenantId as string | null } : null;
+  }
+  const user = await controlDb.platformUser.findUnique({ where: { id: token.userId }, select });
+  return user ? { ...user, tenantId: null as string | null } : null;
 }
 
 export type SessionUser = { id: string; status: string; userType: string; tenantId: string | null };
@@ -53,10 +76,7 @@ export async function verifySession(request: FastifyRequest): Promise<SessionUse
   }
   const token = request.user as { userId?: string; userType?: string; tenantId?: string; iat?: number; iatMs?: number; type?: string };
   if (!token.userId) throw new AppError('Not authenticated', 401);
-  const user = await prisma.user.findUnique({
-    where: { id: token.userId },
-    select: { id: true, status: true, userType: true, tenantId: true, sessionsValidAfter: true },
-  });
+  const user = await findSessionAccount({ userId: token.userId, tenantId: token.tenantId });
   const problem = sessionProblem(token, user);
   if (problem) throw new AppError(problem, 401);
   request.user.userType = user!.userType as typeof request.user.userType;

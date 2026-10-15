@@ -1,16 +1,13 @@
-import { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { config } from '../config/env.js';
-import { sendMail } from '../lib/mailer.js';
-import { inviteEmail } from '../lib/email-templates.js';
-import { INVITE_TTL_DAYS, issueUserToken } from '../lib/user-tokens.js';
+import { FastifyPluginAsync } from 'fastify';
+import { sendInvitation } from '../lib/invitations.js';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { explainAccess } from '../lib/access.js';
 import { endAllSessions } from '../lib/sessions.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireCanManageUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
@@ -30,17 +27,10 @@ const updateUserSchema = z.object({
 const querySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).default(10),
-  userType: z.enum(['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
+  userType: z.enum(['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   search: z.string().optional(),
 });
-
-async function sendInvitation(request: FastifyRequest, user: { id: string; email: string }) {
-  const inviter = await prisma.user.findUnique({ where: { id: request.user.userId }, select: { name: true, email: true } });
-  const token = await issueUserToken(user.id, 'INVITE', INVITE_TTL_DAYS * 24 * 60 * 60 * 1000, request.user.userId);
-  const link = `${config.frontendUrl}/accept-invite?token=${encodeURIComponent(token)}`;
-  await sendMail(inviteEmail(user.email, link, request.tenant.name, inviter?.name || inviter?.email || 'An administrator', INVITE_TTL_DAYS));
-}
 
 export const userRoutes: FastifyPluginAsync = async (fastify) => {
   // List users for current tenant
@@ -54,7 +44,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         properties: {
           page: { type: 'string', default: '1' },
           limit: { type: 'string', default: '10' },
-          userType: { type: 'string', enum: ['PLATFORM_ADMIN', 'PLATFORM_USER', 'TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
+          userType: { type: 'string', enum: ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] },
           status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
           search: { type: 'string' },
         },
@@ -81,7 +71,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     const [users, total] = await Promise.all([
-      prisma.user.findMany({
+      request.db.user.findMany({
         where,
         skip,
         take: limit,
@@ -96,7 +86,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
           createdAt: true,
         },
       }),
-      prisma.user.count({ where }),
+      request.db.user.count({ where }),
     ]);
 
     return {
@@ -118,7 +108,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get current user',
     },
   }, async (request, reply) => {
-    const user = await prisma.user.findUnique({
+    const user = await request.db.user.findUnique({
       where: { id: request.user.userId },
       select: {
         id: true,
@@ -148,7 +138,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     if (id !== request.user.userId) {
       await requirePermission(request, 'roles:read');
     }
-    const review = await explainAccess(id, request.tenant.id, request.tenant.name);
+    const review = await explainAccess(request.db, id, request.tenant.id, request.tenant.name);
     if (!review) {
       throw new AppError('User not found', 404);
     }
@@ -177,7 +167,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       await requirePermission(request, 'users:read');
     }
 
-    const user = await prisma.user.findFirst({
+    const user = await request.db.user.findFirst({
       where: {
         id,
         tenantId: request.tenant.id,
@@ -221,7 +211,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     requireCanManageUserType(request.user.userType, data.userType);
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
+    const existingUser = await request.db.user.findUnique({
       where: {
         tenantId_email: {
           tenantId: request.tenant.id,
@@ -235,7 +225,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // New users are invited: they set their own password from the emailed link
-    const user = await prisma.user.create({
+    const user = await request.db.user.create({
       data: {
         ...data,
         tenantId: request.tenant.id,
@@ -252,17 +242,15 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'invited user',
         target: user.email,
         type: 'USER',
-      },
-    });
+      });
 
-    await sendInvitation(request, user);
+    await sendInvitation(request.tenant, user, request.user.userId);
     return reply.status(201).send({ ...user, invitationSent: true });
   });
 
@@ -276,7 +264,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request) => {
     const { id } = request.params as { id: string };
-    const user = await prisma.user.findFirst({
+    const user = await request.db.user.findFirst({
       where: { id, tenantId: request.tenant.id },
       select: { id: true, email: true, name: true, userType: true, status: true },
     });
@@ -287,7 +275,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('This user has already accepted their invitation', 409);
     }
     requireCanManageUserType(request.user.userType, user.userType);
-    await sendInvitation(request, user);
+    await sendInvitation(request.tenant, user, request.user.userId);
     return { invitationSent: true };
   });
 
@@ -319,7 +307,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const actorType = request.user.userType;
     const isSelf = id === request.user.userId;
 
-    const target = await prisma.user.findFirst({
+    const target = await request.db.user.findFirst({
       where: { id, tenantId: request.tenant.id },
       select: { userType: true },
     });
@@ -341,7 +329,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    const update = prisma.user.update({
+    const update = request.db.user.update({
       where: {
         id,
         tenantId: request.tenant.id,
@@ -358,20 +346,18 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
     // Deactivating signs the person out everywhere, right away
     const [user] = data.status && data.status !== 'ACTIVE'
-      ? await prisma.$transaction([update, ...endAllSessions(id)])
+      ? await request.db.$transaction([update, ...endAllSessions(request.db, id)])
       : [await update];
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'updated user',
         target: user.email,
         type: 'USER',
         metadata: data,
-      },
-    });
+      });
 
     return user;
   });
@@ -400,7 +386,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete your own account', 400);
     }
 
-    const target = await prisma.user.findFirst({
+    const target = await request.db.user.findFirst({
       where: { id, tenantId: request.tenant.id },
       select: { userType: true },
     });
@@ -409,7 +395,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     }
     requireCanManageUserType(request.user.userType, target.userType);
 
-    await prisma.user.delete({
+    await request.db.user.delete({
       where: {
         id,
         tenantId: request.tenant.id,

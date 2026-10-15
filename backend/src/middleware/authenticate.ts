@@ -1,5 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant, type TenantDb } from '../lib/tenant-db.js';
+import { tenantDb } from '../lib/prisma.js';
 import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
@@ -12,6 +14,15 @@ declare module 'fastify' {
      * is then undefined, so handlers must use `request.tenant?.id`.
      */
     platformScoped?: boolean;
+  }
+  interface FastifyRequest {
+    /**
+     * The tenant plane client for this request's tenant. Use it for every
+     * tenant-owned model; use controlDb only for control-plane models.
+     * Platform-scoped requests without a tenant get the shared tenant
+     * database (for cross-tenant platform views).
+     */
+    db: TenantDb;
   }
 }
 
@@ -57,7 +68,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 
   if (tenantId) {
-    const tenant = await prisma.tenant.findUnique({
+    const tenant = await controlDb.tenant.findUnique({
       where: { id: tenantId },
       select: { id: true, name: true, slug: true, plan: true, status: true },
     });
@@ -69,9 +80,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       return reply.status(403).send({ error: 'Forbidden', message: 'Tenant is suspended' });
     }
     request.tenant = tenant;
+    request.db = dbForTenant(tenant.id);
     return;
   }
 
+  request.db = tenantDb;
   if (!request.routeOptions.config.platformScoped) {
     return reply.status(400).send({
       error: 'Bad Request',

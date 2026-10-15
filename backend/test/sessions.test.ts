@@ -9,11 +9,12 @@ import { PASSWORD, api, db, loginSession, seedTenant, startServer, stopServerAnd
 
 let A: TenantSeed;
 let adminCookie: string;
-let prisma: Awaited<ReturnType<typeof db>>['prisma'];
+let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
+let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 const PROTECTED = '/groups'; // any tenant route a regular user may read
 
 before(async () => {
-  ({ prisma } = await db());
+  ({ tenantDb, controlDb } = await db());
   A = await seedTenant('sess');
   await startServer();
   adminCookie = (await loginSession(A.slug, A.adminEmail)).cookie;
@@ -23,7 +24,7 @@ after(stopServerAndCleanUp);
 
 async function newUser(label: string, userType = 'TENANT_USER') {
   const { hashPassword } = await import('../src/utils/auth.js');
-  return prisma.user.create({
+  return tenantDb.user.create({
     data: { tenantId: A.tenantId, email: `${label}-${Date.now()}@test.local`, name: label, userType: userType as any, passwordHash: await hashPassword(PASSWORD) },
   });
 }
@@ -100,6 +101,6 @@ test('tokens from another tenant or for a missing account are refused', async ()
   const s = await loginSession(A.slug, u.email);
   // Simulate the account being moved to another tenant
   const B = await seedTenant('sess-b');
-  await prisma.user.update({ where: { id: u.id }, data: { tenantId: B.tenantId } });
+  await tenantDb.user.update({ where: { id: u.id }, data: { tenantId: B.tenantId } });
   assert.equal((await api('GET', PROTECTED, { cookie: s.cookie })).status, 401);
 });

@@ -1,11 +1,16 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import { countTenantData, createTenantDefaults, deleteTenantData } from '../lib/tenant-data.js';
+import { sendInvitation } from '../lib/invitations.js';
+import { isPlatformSlug } from '../lib/platform.js';
 import { AppError } from '../middleware/error-handler.js';
 import { countBy } from '../lib/stats.js';
 import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { logActivity, logPlatformActivity } from '../lib/activity.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -21,6 +26,19 @@ const updateTenantSchema = z.object({
   status: z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']).optional(),
 });
 
+const createTenantSchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/, 'Use 2-50 lowercase letters, digits and hyphens'),
+  plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('FREE'),
+  status: z.enum(['ACTIVE', 'TRIAL']).default('ACTIVE'),
+  adminEmail: z.string().trim().toLowerCase().email(),
+  adminName: z.string().trim().min(2).max(100),
+});
+
 const querySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).default(10),
@@ -29,7 +47,90 @@ const querySchema = z.object({
   search: z.string().optional(),
 });
 
+async function withCounts<T extends { id: string }>(tenant: T | null) {
+  if (!tenant) return tenant;
+  const c = (await countTenantData([tenant.id])).get(tenant.id)!;
+  return { ...tenant, _count: { users: c.users, applications: c.applications } };
+}
+
 export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
+  // Create a tenant (platform admins only; there is no self sign-up)
+  fastify.post('/', {
+    config: { permission: 'tenants:manage' },
+    schema: {
+      tags: ['tenants'],
+      summary: 'Create a tenant and invite its first administrator',
+      body: {
+        type: 'object',
+        required: ['name', 'slug', 'adminEmail', 'adminName'],
+        properties: {
+          name: { type: 'string' },
+          slug: { type: 'string' },
+          plan: { type: 'string', enum: ['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'] },
+          status: { type: 'string', enum: ['ACTIVE', 'TRIAL'] },
+          adminEmail: { type: 'string' },
+          adminName: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const data = createTenantSchema.parse(request.body);
+    if (isPlatformSlug(data.slug)) {
+      throw new AppError('That address is reserved', 409);
+    }
+    if (await controlDb.tenant.findUnique({ where: { slug: data.slug } })) {
+      throw new AppError(`The address "${data.slug}" is already taken`, 409);
+    }
+
+    const tenant = await controlDb.tenant.create({
+      data: {
+        name: data.name,
+        slug: data.slug,
+        plan: data.plan,
+        status: data.status,
+        loginTitle: `Welcome to ${data.name}`,
+        loginSubtitle: 'Sign in to your account',
+        databaseConfig: {
+          create: { strategy: 'SHARED_TABLES', provider: 'POSTGRESQL', region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
+        },
+      },
+    });
+
+    // Tenant-plane defaults and the first admin. There's no transaction across
+    // the two planes, so undo the tenant if this part fails.
+    let admin: { id: string; email: string };
+    try {
+      const db = dbForTenant(tenant.id);
+      await createTenantDefaults(tenant.id, db);
+      admin = await db.user.create({
+        data: { tenantId: tenant.id, email: data.adminEmail, name: data.adminName, userType: 'TENANT_ADMIN', status: 'PENDING' },
+        select: { id: true, email: true },
+      });
+    } catch (err) {
+      await deleteTenantData(tenant.id).catch(() => undefined);
+      await controlDb.tenant.delete({ where: { id: tenant.id } }).catch(() => undefined);
+      throw err;
+    }
+
+    await sendInvitation(tenant, admin, request.user.userId);
+    await logPlatformActivity({
+      tenantId: tenant.id,
+      userId: request.user.userId,
+      action: 'created tenant',
+      target: `${tenant.name} (${tenant.slug})`,
+      type: 'CONFIG',
+    });
+    await logActivity({
+      tenantId: tenant.id,
+      userId: request.user.userId,
+      action: 'invited first administrator',
+      target: admin.email,
+      type: 'USER',
+    });
+
+    return reply.status(201).send({ ...tenant, adminInvited: admin.email });
+  });
+
   // List tenants (admin only)
   fastify.get('/', {
     config: { permission: 'tenants:read' },
@@ -71,35 +172,25 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     const [tenants, total, statusCounts] = await Promise.all([
-      prisma.tenant.findMany({
+      controlDb.tenant.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          _count: {
-            select: {
-              users: true,
-              applications: true,
-            },
-          },
-        },
       }),
-      prisma.tenant.count({ where }),
+      controlDb.tenant.count({ where }),
       // Counts for the status tabs: same plan/search filters, any status
-      prisma.tenant.groupBy({ by: ['status'], where: { AND: [plan ? { plan } : {}, searchFilter] }, _count: true }),
+      controlDb.tenant.groupBy({ by: ['status'], where: { AND: [plan ? { plan } : {}, searchFilter] }, _count: true }),
     ]);
 
-    // Last activity per tenant on this page
-    const lastActivity = await prisma.activity.groupBy({
-      by: ['tenantId'],
-      where: { tenantId: { in: tenants.map((t) => t.id) } },
-      _max: { createdAt: true },
-    });
-    const lastActiveAt = new Map(lastActivity.map((a) => [a.tenantId, a._max.createdAt]));
+    // Users, apps and last activity live in the tenant plane
+    const counts = await countTenantData(tenants.map((t) => t.id));
 
     return {
-      data: tenants.map((t) => ({ ...t, lastActiveAt: lastActiveAt.get(t.id) ?? null })),
+      data: tenants.map((t) => {
+        const c = counts.get(t.id)!;
+        return { ...t, _count: { users: c.users, applications: c.applications }, lastActiveAt: c.lastActiveAt };
+      }),
       statusCounts: countBy(statusCounts, 'status'),
       pagination: {
         page,
@@ -122,19 +213,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('No tenant selected', 400);
     }
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: request.tenant.id },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            applications: true,
-          },
-        },
-      },
-    });
-
-    return tenant;
+    return withCounts(await controlDb.tenant.findUnique({ where: { id: request.tenant.id } }));
   });
 
   // Get tenant by ID
@@ -159,23 +238,12 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Access denied', 403);
     }
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            applications: true,
-          },
-        },
-      },
-    });
-
+    const tenant = await controlDb.tenant.findUnique({ where: { id } });
     if (!tenant) {
       throw new AppError('Tenant not found', 404);
     }
 
-    return tenant;
+    return withCounts(tenant);
   });
 
   // Update tenant
@@ -220,22 +288,20 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    const tenant = await prisma.tenant.update({
+    const tenant = await controlDb.tenant.update({
       where: { id },
       data,
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: id,
         userId: request.user.userId,
         action: 'updated tenant',
         target: tenant.name,
         type: 'CONFIG',
         metadata: data,
-      },
-    });
+      });
 
     return tenant;
   });
@@ -257,9 +323,27 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    // Deleting a tenant cascades to all its data (route requires tenants:manage)
-    await prisma.tenant.delete({
-      where: { id },
+    const tenant = await controlDb.tenant.findUnique({ where: { id } });
+    if (!tenant) {
+      throw new AppError('Tenant not found', 404);
+    }
+
+    // The tenant plane has no foreign keys to tenants: delete its data first,
+    // then the tenant's control-plane rows (explicitly, not relying on cascades)
+    await deleteTenantData(id);
+    await controlDb.$transaction([
+      controlDb.supportSession.deleteMany({ where: { tenantId: id } }),
+      controlDb.tenantApplication.deleteMany({ where: { tenantId: id } }),
+      controlDb.databaseConfig.deleteMany({ where: { tenantId: id } }),
+      controlDb.tenant.delete({ where: { id } }),
+    ]);
+
+    await logPlatformActivity({
+      tenantId: id,
+      userId: request.user.userId,
+      action: 'deleted tenant',
+      target: `${tenant.name} (${tenant.slug})`,
+      type: 'CONFIG',
     });
 
     return reply.status(204).send();

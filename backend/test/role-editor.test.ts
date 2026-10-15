@@ -19,15 +19,15 @@ before(async () => {
   tok.manager = await login(A, A.managerEmail);
   tok.user = await login(A, A.userEmail);
   assert.equal((await api('POST', `/roles/initialize/${A.tenantId}`, as('admin'))).status, 200);
-  const { prisma } = await db();
-  for (const u of await prisma.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
+  const { tenantDb, controlDb } = await db();
+  for (const u of await tenantDb.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
   for (const r of (await api('GET', '/roles', as('admin'))).json.roles) roles[r.name] = r.id;
 });
 
 after(stopServerAndCleanUp);
 
 const permsOf = async (id: string) =>
-  ((await api('GET', `/roles/${id}`, as('admin'))).json.permissions as any[]).map((p) => p.permission.name).sort();
+  ((await api('GET', `/roles/${id}`, as('admin'))).json.permissions as any[]).map((p) => p.permission).sort();
 
 test('catalog lists only tenant permissions, grouped and described', async () => {
   const res = await api('GET', '/roles/catalog', as('manager'));
@@ -62,8 +62,8 @@ test('create, edit and delete a custom role; holders see changes immediately', a
   assert.equal((await api('GET', '/roles', as('user'))).status, 200, 'holder gains the added permission');
 
   // The change is in the activity log with what was added and removed
-  const { prisma } = await db();
-  const log = await prisma.activity.findFirst({ where: { tenantId: A.tenantId, action: 'updated role' }, orderBy: { createdAt: 'desc' } });
+  const { tenantDb, controlDb } = await db();
+  const log = await tenantDb.activity.findFirst({ where: { tenantId: A.tenantId, action: 'updated role' }, orderBy: { createdAt: 'desc' } });
   assert.match(log!.target, /\+roles:read/);
   assert.match(log!.target, /-dashboard:view/);
 

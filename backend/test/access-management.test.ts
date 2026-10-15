@@ -28,8 +28,8 @@ before(async () => {
     const init = await api('POST', `/roles/initialize/${t.tenantId}`, as(k));
     assert.equal(init.status, 200, JSON.stringify(init.json));
   }
-  const { prisma } = await db();
-  for (const u of await prisma.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
+  const { tenantDb, controlDb } = await db();
+  for (const u of await tenantDb.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
   const list = await api('GET', '/roles', as('admin'));
   for (const r of list.json.roles) roles[r.name] = r.id;
   assert.ok(roles['Tenant Admin'] && roles['Tenant Manager'] && roles['Viewer']);
@@ -115,9 +115,9 @@ test("roles:assign can't hand out more than the assigner holds", async () => {
 
 test('assignment validation: scope, dates, duplicates', async () => {
   const body = { roleId: roles['Viewer'], principalType: 'USER', userId: ids[A.managerEmail] };
-  const { prisma } = await db();
-  const orgB = await prisma.organization.create({ data: { tenantId: B.tenantId, name: 'B Org' } });
-  const orgA = await prisma.organization.create({ data: { tenantId: A.tenantId, name: 'A Org' } });
+  const { tenantDb, controlDb } = await db();
+  const orgB = await tenantDb.organization.create({ data: { tenantId: B.tenantId, name: 'B Org' } });
+  const orgA = await tenantDb.organization.create({ data: { tenantId: A.tenantId, name: 'A Org' } });
 
   assert.equal((await api('POST', '/roles/assign', { ...as('admin'), body: { ...body, scopeType: 'ORGANIZATION', scopeId: orgB.id } })).status, 404, "another tenant's organization");
   assert.equal((await api('POST', '/roles/assign', { ...as('admin'), body: { ...body, scopeType: 'ORGANIZATION' } })).status, 400, 'scope id required');

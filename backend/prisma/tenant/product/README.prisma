@@ -1,0 +1,6 @@
+// Your product's own tenant tables go in this folder, one or more .prisma
+// files. They're migrated into every tenant database and schema with the kit's.
+// Follow the rules at the top of ../schema.prisma: a tenant_id column on every
+// model, no relations to the control plane, and tenant_id in every unique
+// constraint. The row-level security check in CI covers these tables too.
+// See docs/extending.md.

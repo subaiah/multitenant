@@ -1,8 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -47,7 +48,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [tenantApplications, total] = await Promise.all([
-      prisma.tenantApplication.findMany({
+      controlDb.tenantApplication.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -68,7 +69,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.tenantApplication.count({ where }),
+      controlDb.tenantApplication.count({ where }),
     ]);
     
     return {
@@ -100,7 +101,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    const tenantApplication = await prisma.tenantApplication.findFirst({
+    const tenantApplication = await controlDb.tenantApplication.findFirst({
       where: { id, tenantId },
       include: {
         application: {
@@ -144,7 +145,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createTenantApplicationSchema.parse(request.body);
     
     // Verify application exists and is active
-    const application = await prisma.applicationRegistry.findUnique({
+    const application = await controlDb.applicationRegistry.findUnique({
       where: { id: data.applicationId },
     });
     
@@ -157,7 +158,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check if already entitled
-    const existing = await prisma.tenantApplication.findFirst({
+    const existing = await controlDb.tenantApplication.findFirst({
       where: { tenantId, applicationId: data.applicationId },
     });
     
@@ -165,7 +166,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Tenant already has entitlement to this application', 409);
     }
     
-    const tenantApplication = await prisma.tenantApplication.create({
+    const tenantApplication = await controlDb.tenantApplication.create({
       data: {
         tenantId,
         applicationId: data.applicationId,
@@ -176,15 +177,13 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'enabled application',
         target: application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(tenantApplication);
   });
@@ -220,7 +219,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateTenantApplicationSchema.parse(request.body);
     
-    const tenantApplication = await prisma.tenantApplication.update({
+    const tenantApplication = await controlDb.tenantApplication.update({
       where: { id, tenantId },
       data: {
         ...data,
@@ -235,15 +234,13 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'updated application entitlement',
         target: tenantApplication.application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return tenantApplication;
   });
@@ -269,7 +266,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
-    const tenantApplication = await prisma.tenantApplication.delete({
+    const tenantApplication = await controlDb.tenantApplication.delete({
       where: { id, tenantId },
       include: {
         application: {
@@ -279,15 +276,13 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'disabled application',
         target: tenantApplication.application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });
@@ -310,7 +305,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const { applicationId } = request.params as { applicationId: string };
     const tenantId = request.tenant.id;
     
-    const tenantApplication = await prisma.tenantApplication.findFirst({
+    const tenantApplication = await controlDb.tenantApplication.findFirst({
       where: {
         tenantId,
         applicationId,

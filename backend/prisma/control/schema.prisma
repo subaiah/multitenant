@@ -1,0 +1,294 @@
+// Control plane: the platform's own data. Platform users, tenants and how
+// to reach each tenant's data, the app catalogue, menus, support sessions.
+// Nothing tenant-owned lives here; that's the tenant schema (prisma/tenant).
+// Migrated once, against DATABASE_URL. Config: prisma.config.ts.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/control"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// A customer organization. Its users, roles and data live in the tenant plane.
+model Tenant {
+  id              String       @id @default(uuid())
+  name            String
+  slug            String       @unique
+  plan            TenantPlan
+  status          TenantStatus
+
+  // Branding (read before sign-in)
+  logoUrl         String?      @map("logo_url")
+  primaryColor    String?      @default("#3b82f6") @map("primary_color")
+  customDomain    String?      @unique @map("custom_domain")
+  loginTitle      String?      @map("login_title")
+  loginSubtitle   String?      @map("login_subtitle")
+
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  databaseConfig     DatabaseConfig?
+  tenantApplications TenantApplication[]
+  supportSessions    SupportSession[]
+
+  @@map("tenants")
+  @@index([status])
+}
+
+enum TenantPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+}
+
+// Where a tenant's data lives and how to reach it
+model DatabaseConfig {
+  id                String           @id @default(uuid())
+  tenantId          String           @unique @map("tenant_id")
+  strategy          DatabaseStrategy
+  provider          DatabaseProvider
+  region            String
+  backupEnabled     Boolean          @default(false) @map("backup_enabled")
+  encryptionAtRest  Boolean          @default(false) @map("encryption_at_rest")
+  maxConnections    Int              @default(100) @map("max_connections")
+  storageLimit      String           @map("storage_limit")
+  /// Encrypted at rest (lib/secrets.ts)
+  connectionString  String?          @map("connection_string")
+  schemaName        String?          @map("schema_name")
+  tenantColumn      String?          @map("tenant_column")
+  /// The tenant's own Postgres role (set when it is provisioned)
+  dbRoleName        String?          @unique @map("db_role_name")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("database_configs")
+}
+
+enum DatabaseStrategy {
+  DATABASE_PER_TENANT
+  SCHEMA_PER_TENANT
+  SHARED_TABLES
+}
+
+enum DatabaseProvider {
+  POSTGRESQL
+  MYSQL
+  MONGODB
+  SQLSERVER
+}
+
+// People who run the platform. Tenant users are in the tenant plane.
+model PlatformUser {
+  id                 String           @id @default(uuid())
+  email              String           @unique
+  name               String?
+  passwordHash       String?          @map("password_hash")
+  userType           PlatformUserType @default(PLATFORM_USER) @map("user_type")
+  status             UserStatus       @default(ACTIVE)
+  lastLoginAt        DateTime?        @map("last_login_at")
+  /// Access tokens issued before this are refused ("sign out everywhere")
+  sessionsValidAfter DateTime?        @map("sessions_valid_after")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  tokens             PlatformUserToken[]
+  supportSessions    SupportSession[] @relation("SupportPlatformUser")
+  approvedSupport    SupportSession[] @relation("SupportApprover")
+
+  @@map("platform_users")
+  @@index([userType])
+}
+
+enum PlatformUserType {
+  PLATFORM_ADMIN
+  PLATFORM_USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model PlatformRefreshToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  token      String    @unique
+  familyId   String    @map("family_id")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  userAgent  String?   @map("user_agent")
+  ipAddress  String?   @map("ip_address")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("platform_refresh_tokens")
+}
+
+// Single-use emailed tokens for platform users (password reset). Hash only.
+model PlatformUserToken {
+  id          String        @id @default(uuid())
+  userId      String        @map("user_id")
+  type        UserTokenType
+  tokenHash   String        @unique @map("token_hash")
+  expiresAt   DateTime      @map("expires_at")
+  usedAt      DateTime?     @map("used_at")
+  createdById String?       @map("created_by_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  user        PlatformUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("platform_user_tokens")
+}
+
+enum UserTokenType {
+  INVITE
+  PASSWORD_RESET
+}
+
+// Platform-level audit trail (actions not inside one tenant's data)
+model PlatformActivity {
+  id         String       @id @default(uuid())
+  /// The tenant the action concerned, if any
+  tenantId   String?      @map("tenant_id")
+  userId     String?      @map("user_id")
+  action     String
+  target     String
+  type       ActivityType
+  metadata   Json?
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("platform_activities")
+}
+
+enum ActivityType {
+  DEPLOY
+  CONFIG
+  USER
+  BILLING
+  ALERT
+  AUTH
+  API
+}
+
+// Platform-wide catalogue of applications tenants can be entitled to
+model ApplicationRegistry {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String?
+  version     String
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenantApplications TenantApplication[]
+  permissions        Permission[]
+
+  @@index([status])
+  @@map("application_registries")
+}
+
+// Permissions an application in the registry declares (shown on the Applications
+// page). Tenant roles reference permissions by name; the kit's own catalogue is
+// in code (src/utils/permissions.ts).
+model Permission {
+  id            String               @id @default(uuid())
+  applicationId String?              @map("application_id")
+  name          String               @unique
+  description   String?
+  resource      String
+  action        String
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+
+  application   ApplicationRegistry? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([resource, action])
+  @@map("permissions")
+}
+
+// A tenant's entitlement to an application (granted by the platform)
+model TenantApplication {
+  id            String              @id @default(uuid())
+  tenantId      String              @map("tenant_id")
+  applicationId String              @map("application_id")
+  state         String              @default("ENABLED") // ENABLED, DISABLED, TRIAL
+  validFrom     DateTime            @default(now()) @map("valid_from")
+  validTo       DateTime?           @map("valid_to")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, applicationId])
+  @@index([applicationId])
+  @@index([state])
+  @@map("tenant_applications")
+}
+
+// A platform user's time-limited access into a tenant
+model SupportSession {
+  id              String       @id @default(uuid())
+  platformUserId  String       @map("platform_user_id")
+  tenantId        String       @map("tenant_id")
+  approvedBy      String       @map("approved_by")
+  reason          String
+  permissions     Json
+  validFrom       DateTime     @default(now()) @map("valid_from")
+  validTo         DateTime     @map("valid_to")
+  status          String       @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  revokedAt       DateTime?    @map("revoked_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  platformUser    PlatformUser @relation("SupportPlatformUser", fields: [platformUserId], references: [id], onDelete: Cascade)
+  approver        PlatformUser @relation("SupportApprover", fields: [approvedBy], references: [id], onDelete: Cascade)
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([platformUserId])
+  @@index([validFrom, validTo])
+  @@map("support_sessions")
+}
+
+// Database-driven navigation for both portals
+model MenuItem {
+  id          String     @id @default(uuid())
+  portal      String     // PLATFORM, TENANT
+  parentId    String?    @map("parent_id")
+  label       String
+  path        String
+  icon        String?
+  permission  String?
+  order       Int        @default(0)
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  parent      MenuItem?  @relation("MenuHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    MenuItem[] @relation("MenuHierarchy")
+
+  @@index([portal, isActive, order])
+  @@index([parentId])
+  @@map("menu_items")
+}

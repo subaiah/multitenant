@@ -1,4 +1,5 @@
-import { prisma, pool } from '../src/lib/prisma.js';
+import { controlDb, tenantDb, disconnectDatabases } from '../src/lib/prisma.js';
+import { product } from '../src/product/index.js';
 import { hashPassword } from '../src/utils/auth.js';
 import { createDefaultTenantRoles } from '../src/utils/authorization.js';
 
@@ -7,7 +8,7 @@ async function main() {
 
   // Create tenants
   const tenants = await Promise.all([
-    prisma.tenant.create({
+    controlDb.tenant.create({
       data: {
         name: 'Acme Corporation',
         slug: 'acme-corp',
@@ -18,7 +19,7 @@ async function main() {
         loginSubtitle: 'Sign in with your corporate account',
       },
     }),
-    prisma.tenant.create({
+    controlDb.tenant.create({
       data: {
         name: 'TechStart Inc.',
         slug: 'techstart',
@@ -29,7 +30,7 @@ async function main() {
         loginSubtitle: 'Access your workspace',
       },
     }),
-    prisma.tenant.create({
+    controlDb.tenant.create({
       data: {
         name: 'Global Media Group',
         slug: 'global-media',
@@ -40,7 +41,7 @@ async function main() {
         loginSubtitle: 'Continue with your organization credentials',
       },
     }),
-    prisma.tenant.create({
+    controlDb.tenant.create({
       data: {
         name: 'Startup Labs',
         slug: 'startup-labs',
@@ -55,14 +56,14 @@ async function main() {
 
   console.log(`✅ Created ${tenants.length} tenants`);
 
-  // Permission catalog + default roles (Tenant Admin, Manager, Developer, User, Viewer) per tenant
+  // Default roles (Tenant Admin, Manager, Developer, User, Viewer) per tenant
   for (const tenant of tenants) {
-    await createDefaultTenantRoles(tenant.id);
+    await createDefaultTenantRoles(tenant.id, tenantDb);
   }
   console.log('✅ Created default roles for each tenant');
 
-  // Platform users have no tenant; they sign in at /platform/login
-  await prisma.user.createMany({
+  // Platform users live in the control plane; they sign in at /platform/login
+  await controlDb.platformUser.createMany({
     data: [
       {
         email: 'admin@platform.local',
@@ -90,7 +91,7 @@ async function main() {
     const userPasswordHash = await hashPassword('user123');
 
     const tenantUsers = await Promise.all([
-      prisma.user.create({
+      tenantDb.user.create({
         data: {
           tenantId: tenant.id,
           email: `admin@${tenant.slug}.com`,
@@ -100,7 +101,7 @@ async function main() {
           status: 'ACTIVE',
         },
       }),
-      prisma.user.create({
+      tenantDb.user.create({
         data: {
           tenantId: tenant.id,
           email: `user@${tenant.slug}.com`,
@@ -120,7 +121,7 @@ async function main() {
   const applications = [];
   for (const tenant of tenants) {
     const tenantApps = await Promise.all([
-      prisma.application.create({
+      tenantDb.application.create({
         data: {
           tenantId: tenant.id,
           name: 'Customer Portal',
@@ -134,7 +135,7 @@ async function main() {
           requests: 12500,
         },
       }),
-      prisma.application.create({
+      tenantDb.application.create({
         data: {
           tenantId: tenant.id,
           name: 'Admin Dashboard',
@@ -154,25 +155,24 @@ async function main() {
 
   console.log(`✅ Created ${applications.length} applications`);
 
-  // Create database configurations
+  // Where each tenant's data lives. Every tenant starts on shared tables in
+  // the tenant database (TENANT_DATABASE_URL); other modes come with provisioning.
   const dbConfigs = await Promise.all(
-    tenants.map((tenant, index) => {
-      const strategies = ['DATABASE_PER_TENANT', 'SCHEMA_PER_TENANT', 'SHARED_TABLES', 'SCHEMA_PER_TENANT'];
-      return prisma.databaseConfig.create({
+    tenants.map((tenant) =>
+      controlDb.databaseConfig.create({
         data: {
           tenantId: tenant.id,
-          strategy: strategies[index % strategies.length] as any,
+          strategy: 'SHARED_TABLES',
           provider: 'POSTGRESQL',
           region: 'US East',
           backupEnabled: true,
           encryptionAtRest: true,
           maxConnections: 100,
           storageLimit: '50 GB',
-          schemaName: strategies[index % strategies.length] === 'SCHEMA_PER_TENANT' ? `tenant_${tenant.slug}` : undefined,
-          tenantColumn: strategies[index % strategies.length] === 'SHARED_TABLES' ? 'tenant_id' : undefined,
+          tenantColumn: 'tenant_id',
         },
-      });
-    })
+      })
+    )
   );
 
   console.log(`✅ Created ${dbConfigs.length} database configurations`);
@@ -180,7 +180,7 @@ async function main() {
   // Create auth configurations
   const authConfigs = await Promise.all(
     tenants.map((tenant) =>
-      prisma.authConfig.create({
+      tenantDb.authConfig.create({
         data: {
           tenantId: tenant.id,
           mfaEnabled: true,
@@ -199,13 +199,14 @@ async function main() {
   // Create auth providers - multiple providers per tenant
   const authProviders = await Promise.all([
     // Acme Corporation - Entra ID + Google (multiple providers)
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[0].id,
         authConfigId: authConfigs[0].id,
         provider: 'ENTRA',
         enabled: true,
         clientId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        tenantId: 'acme.onmicrosoft.com',
+        idpTenantId: 'acme.onmicrosoft.com',
         scopes: ['openid', 'profile', 'email'],
         autoProvision: true,
         authorizeUrl: 'https://login.microsoftonline.com/acme.onmicrosoft.com/oauth2/v2.0/authorize',
@@ -213,8 +214,9 @@ async function main() {
         userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
       },
     }),
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[0].id,
         authConfigId: authConfigs[0].id,
         provider: 'GOOGLE',
         enabled: true,
@@ -227,8 +229,9 @@ async function main() {
       },
     }),
     // TechStart - Google only
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[1].id,
         authConfigId: authConfigs[1].id,
         provider: 'GOOGLE',
         enabled: true,
@@ -241,13 +244,14 @@ async function main() {
       },
     }),
     // Global Media - Entra ID + GitHub (multiple providers)
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[2].id,
         authConfigId: authConfigs[2].id,
         provider: 'ENTRA',
         enabled: true,
         clientId: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-        tenantId: 'globalmedia.onmicrosoft.com',
+        idpTenantId: 'globalmedia.onmicrosoft.com',
         scopes: ['openid', 'profile', 'email'],
         autoProvision: true,
         authorizeUrl: 'https://login.microsoftonline.com/globalmedia.onmicrosoft.com/oauth2/v2.0/authorize',
@@ -255,8 +259,9 @@ async function main() {
         userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
       },
     }),
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[2].id,
         authConfigId: authConfigs[2].id,
         provider: 'GITHUB',
         enabled: true,
@@ -269,8 +274,9 @@ async function main() {
       },
     }),
     // Startup Labs - Google only (simple setup)
-    prisma.authProvider.create({
+    tenantDb.authProvider.create({
       data: {
+        tenantId: tenants[3].id,
         authConfigId: authConfigs[3].id,
         provider: 'GOOGLE',
         enabled: true,
@@ -290,7 +296,7 @@ async function main() {
   const apiConfigs = await Promise.all(
     tenants.map((tenant, index) => {
       const gateways = ['AZURE_APIM', 'AWS_APIGATEWAY', 'KONG', 'CUSTOM'];
-      return prisma.apiConfig.create({
+      return tenantDb.apiConfig.create({
         data: {
           tenantId: tenant.id,
           bffEnabled: index % 2 === 0,
@@ -310,7 +316,7 @@ async function main() {
 
   // Create activities
   const activities = await Promise.all([
-    prisma.activity.create({
+    tenantDb.activity.create({
       data: {
         tenantId: tenants[0].id,
         userId: users[0].id,
@@ -319,7 +325,7 @@ async function main() {
         type: 'DEPLOY',
       },
     }),
-    prisma.activity.create({
+    tenantDb.activity.create({
       data: {
         tenantId: tenants[0].id,
         userId: users[0].id,
@@ -328,7 +334,7 @@ async function main() {
         type: 'CONFIG',
       },
     }),
-    prisma.activity.create({
+    tenantDb.activity.create({
       data: {
         tenantId: tenants[1].id,
         userId: users[2].id,
@@ -337,7 +343,7 @@ async function main() {
         type: 'USER',
       },
     }),
-    prisma.activity.create({
+    tenantDb.activity.create({
       data: {
         tenantId: tenants[2].id,
         userId: users[4].id,
@@ -350,6 +356,10 @@ async function main() {
 
   console.log(`✅ Created ${activities.length} activities`);
 
+  for (const tenant of tenants) {
+    await product.onTenantCreated?.(tenant.id, tenantDb);
+  }
+
   console.log('🎉 Database seed completed successfully!');
 }
 
@@ -359,6 +369,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
-    await pool.end();
+    await disconnectDatabases();
   });

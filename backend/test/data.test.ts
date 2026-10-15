@@ -13,27 +13,28 @@ import {
 let A: TenantSeed;
 let B: TenantSeed;
 let P: PlatformSeed;
-let prisma: Awaited<ReturnType<typeof db>>['prisma'];
+let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
+let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 let appB: string;
 
 before(async () => {
-  ({ prisma } = await db());
+  ({ tenantDb, controlDb } = await db());
   A = await seedTenant('data-a');
   B = await seedTenant('data-b');
   P = await seedPlatformUsers();
   for (const [t, prefix] of [[A, 'Alpha'], [B, 'Beta']] as const) {
-    await prisma.application.createMany({
+    await tenantDb.application.createMany({
       data: [
         { tenantId: t.tenantId, name: `${prefix} Web`, status: 'RUNNING', version: '1.0.0', environment: 'PRODUCTION', url: 'https://x.test', cpu: 40, memory: 50, requests: 100 },
         { tenantId: t.tenantId, name: `${prefix} Worker`, status: 'ERROR', version: '1.0.1', environment: 'STAGING', url: 'https://y.test', cpu: 90, memory: 95, requests: 5 },
       ],
     });
-    await prisma.databaseConfig.create({
+    await controlDb.databaseConfig.create({
       data: { tenantId: t.tenantId, strategy: 'DATABASE_PER_TENANT', provider: 'POSTGRESQL', region: 'eu', storageLimit: '10 GB', connectionString: 'postgresql://secret-user:secret-pass@db/x' },
     });
-    await prisma.activity.create({ data: { tenantId: t.tenantId, action: 'deployed', target: `${prefix} Web`, type: 'DEPLOY' } });
+    await tenantDb.activity.create({ data: { tenantId: t.tenantId, action: 'deployed', target: `${prefix} Web`, type: 'DEPLOY' } });
   }
-  appB = (await prisma.application.findFirstOrThrow({ where: { tenantId: B.tenantId } })).id;
+  appB = (await tenantDb.application.findFirstOrThrow({ where: { tenantId: B.tenantId } })).id;
   await startServer();
 });
 
@@ -144,12 +145,12 @@ test('OAuth client secrets are write-only and never logged', async () => {
   assert.equal(updated.status, 200);
   assert.ok(!JSON.stringify(updated.json).includes('okta-SECRET-2'));
 
-  const stored = await prisma.authProvider.findUniqueOrThrow({ where: { id: created.json.id } });
+  const stored = await tenantDb.authProvider.findUniqueOrThrow({ where: { id: created.json.id } });
   const { decryptSecret, isEncrypted } = await import('../src/lib/secrets.js');
   assert.ok(isEncrypted(stored.clientSecret!), 'secret is stored encrypted');
   assert.equal(decryptSecret(stored.clientSecret!, 'auth_providers.client_secret'), 'okta-SECRET-2', 'secret was saved');
 
-  const logs = await prisma.activity.findMany({ where: { tenantId: A.tenantId } });
+  const logs = await tenantDb.activity.findMany({ where: { tenantId: A.tenantId } });
   assert.ok(!JSON.stringify(logs).includes('okta-SECRET'), 'secret not in the activity log');
 
   const config = await api('GET', '/auth-config', { cookie });
