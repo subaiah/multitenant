@@ -29,6 +29,8 @@ export interface Migration {
 }
 
 export const POLICY = 'tenant_isolation';
+/** Bump when the policy text changes, so the next run replaces existing policies */
+const POLICY_VERSION = 'v1';
 /** Tables the tenant roles never touch */
 const INTERNAL_TABLES = ['tenant_roles', '_prisma_migrations'];
 
@@ -144,7 +146,6 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
   const schema = schemaOf(target);
   const s = ident(schema);
   const platform = userOf(config.tenantPlatformUrl);
-  const grantees = access.grantees.map(ident).join(', ');
 
   await c.query('BEGIN');
   try {
@@ -156,29 +157,68 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
       AS $fn$ SELECT tenant_id FROM ${s}.tenant_roles WHERE role_name = session_user $fn$`);
     await c.query(`REVOKE ALL ON FUNCTION ${s}.current_tenant_id() FROM PUBLIC`);
 
+    // Change only what's missing. The shared tables are live: re-running ALTER
+    // TABLE or CREATE POLICY on them takes exclusive locks and can deadlock
+    // with tenants writing to them, so a routine run touches nothing.
     const tables = await tenantTables(c, schema);
+    const state = new Map(
+      (
+        await c.query(
+          `SELECT c.relname, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced,
+                  (SELECT d.description FROM pg_policy p JOIN pg_description d ON d.objoid = p.oid AND d.classoid = 'pg_policy'::regclass
+                    WHERE p.polrelid = c.oid AND p.polname = $2) AS policy_version
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1 AND c.relname = ANY($3)`,
+          [schema, POLICY, tables],
+        )
+      ).rows.map((r) => [r.relname as string, r]),
+    );
     for (const t of tables) {
       const table = `${s}.${ident(t)}`;
-      await c.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
-      await c.query(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`);
-      await c.query(`DROP POLICY IF EXISTS ${POLICY} ON ${table}`);
-      await c.query(
-        `CREATE POLICY ${POLICY} ON ${table} USING (tenant_id = ${s}.current_tenant_id()) WITH CHECK (tenant_id = ${s}.current_tenant_id())`,
-      );
+      const st = state.get(t);
+      if (!st?.enabled) await c.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+      if (!st?.forced) await c.query(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`);
+      if (st?.policy_version !== POLICY_VERSION) {
+        await c.query(`DROP POLICY IF EXISTS ${POLICY} ON ${table}`);
+        await c.query(
+          `CREATE POLICY ${POLICY} ON ${table} USING (tenant_id = ${s}.current_tenant_id()) WITH CHECK (tenant_id = ${s}.current_tenant_id())`,
+        );
+        await c.query(`COMMENT ON POLICY ${POLICY} ON ${table} IS '${POLICY_VERSION}'`);
+      }
     }
+
+    // Grants, only where missing (DELETE is granted last, so it stands for all four)
+    const lacking = async (role: string, list: string[]) =>
+      list.length
+        ? (
+            await c.query(
+              `SELECT t FROM unnest($2::text[]) t WHERE NOT has_table_privilege($1, format('%I.%I', $3::text, t), 'DELETE')`,
+              [role, list, schema],
+            )
+          ).rows.map((r) => `${s}.${ident(r.t)}`)
+        : [];
+    const dml = 'SELECT, INSERT, UPDATE, DELETE';
 
     // Tenant roles: rows in the tenant tables, nothing else, no DDL
     if (target.kind !== 'shared') await c.query(`REVOKE ALL ON SCHEMA ${s} FROM PUBLIC`);
-    if (grantees) {
-      await c.query(`GRANT USAGE ON SCHEMA ${s} TO ${grantees}`);
-      await c.query(`GRANT EXECUTE ON FUNCTION ${s}.current_tenant_id() TO ${grantees}`);
-      if (tables.length) {
-        await c.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${tables.map((t) => `${s}.${ident(t)}`).join(', ')} TO ${grantees}`);
+    for (const role of access.grantees) {
+      const r = ident(role);
+      if (!(await c.query('SELECT has_schema_privilege($1, $2, $3) AS ok', [role, schema, 'USAGE'])).rows[0].ok) {
+        await c.query(`GRANT USAGE ON SCHEMA ${s} TO ${r}`);
       }
+      if (!(await c.query(`SELECT has_function_privilege($1, $2, 'EXECUTE') AS ok`, [role, `${s}.current_tenant_id()`])).rows[0].ok) {
+        await c.query(`GRANT EXECUTE ON FUNCTION ${s}.current_tenant_id() TO ${r}`);
+      }
+      const missing = await lacking(role, tables);
+      if (missing.length) await c.query(`GRANT ${dml} ON ${missing.join(', ')} TO ${r}`);
     }
-    // Platform role: everything in the schema (it bypasses row-level security)
-    await c.query(`GRANT USAGE ON SCHEMA ${s} TO ${ident(platform)}`);
-    await c.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${s} TO ${ident(platform)}`);
+    // Platform role: every table in the schema (it bypasses row-level security)
+    const all = (await c.query(`SELECT tablename FROM pg_tables WHERE schemaname = $1`, [schema])).rows.map((r) => r.tablename as string);
+    if (!(await c.query('SELECT has_schema_privilege($1, $2, $3) AS ok', [platform, schema, 'USAGE'])).rows[0].ok) {
+      await c.query(`GRANT USAGE ON SCHEMA ${s} TO ${ident(platform)}`);
+    }
+    const platformMissing = await lacking(platform, all);
+    if (platformMissing.length) await c.query(`GRANT ${dml} ON ${platformMissing.join(', ')} TO ${ident(platform)}`);
 
     for (const { role, tenantId } of access.tenantRoles) {
       await c.query(
