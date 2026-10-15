@@ -80,13 +80,13 @@ jobs:
       - name: Tenant migrations (a throwaway baseline when none are committed)
         run: npm run tenant:baseline && npm run tenant:migrate
       - name: Test
-        run: npm test 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
+        run: npx tsx --test --test-reporter=tap test/*.test.ts 2>&1 | tee test-output.txt; exit ${PIPESTATUS[0]}
         shell: bash
       - name: Report failing tests as annotations
         if: failure()
         shell: bash
         run: |
-          grep -A2 -E '^not ok|^\s+error:' test-output.txt | grep -vE '^--$|duration_ms|^\s+---$' | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
+          grep -A3 -E '^\s*not ok|^\s+error:' test-output.txt | grep -vE '^--$|duration_ms|^\s+---$|type:|location:' | head -40 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
   frontend:
     runs-on: ubuntu-latest
