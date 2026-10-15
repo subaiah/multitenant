@@ -15,6 +15,7 @@ import { userRoutes } from './routes/users.js';
 import { activityRoutes } from './routes/activities.js';
 import { bffRoutes } from './routes/bff.js';
 import { bffAuthRoutes } from './routes/bff-auth.js';
+import { accountRoutes } from './routes/account.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
@@ -36,6 +37,7 @@ import { deploymentRoutes } from './routes/deployments.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 import { authorize } from './middleware/authorize.js';
+import { emailDeliveryWarning } from './lib/mailer.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -151,6 +153,9 @@ async function registerRoutes() {
   // BFF Authentication routes (handles cookies, no JWT auth required)
   await fastify.register(bffAuthRoutes, { prefix: '/bff/auth' });
 
+  // Account flows from emailed links (invitations, password reset); no session
+  await fastify.register(accountRoutes, { prefix: '/bff/account' });
+
   // Protected routes (require authentication)
   await fastify.register(async (protectedRoutes) => {
     // Add authentication hook
@@ -227,6 +232,9 @@ async function start() {
     await registerPlugins();
     await registerMiddleware();
     await registerRoutes();
+
+    const emailWarning = emailDeliveryWarning();
+    if (emailWarning) fastify.log.warn(emailWarning);
 
     // Test database connection
     await prisma.$connect();

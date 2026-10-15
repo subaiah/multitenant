@@ -41,3 +41,20 @@ export function isOtpExpired(expiresAt: Date): boolean {
 export function getOtpExpiration(minutes: number = 5): Date {
   return new Date(Date.now() + minutes * 60 * 1000);
 }
+
+export type PasswordPolicy = 'STANDARD' | 'STRONG' | 'VERY_STRONG';
+
+/** Returns a message describing what's missing, or null if the password meets the policy. */
+export function checkPasswordPolicy(password: string, policy: PasswordPolicy = 'STANDARD'): string | null {
+  const rules: [boolean, string][] = [];
+  const min = policy === 'VERY_STRONG' ? 12 : policy === 'STRONG' ? 10 : 8;
+  rules.push([password.length >= min, `at least ${min} characters`]);
+  if (policy !== 'STANDARD') {
+    rules.push([/[a-z]/.test(password) && /[A-Z]/.test(password), 'upper- and lower-case letters']);
+    rules.push([/\d/.test(password), 'a number']);
+  }
+  if (policy === 'VERY_STRONG') rules.push([/[^A-Za-z0-9]/.test(password), 'a symbol']);
+  if (password.length > 200) return 'Password must be at most 200 characters';
+  const missing = rules.filter(([ok]) => !ok).map(([, label]) => label);
+  return missing.length ? `Password needs ${missing.join(', ')}` : null;
+}

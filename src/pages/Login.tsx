@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { apiGet, apiPost } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
 import { portalHome } from '../lib/permissions';
@@ -74,12 +74,18 @@ export default function Login() {
   const { tenantSlug } = useParams<{ tenantSlug?: string }>();
   const navigate = useNavigate();
   const { user, loading: authLoading, login, reload } = useAuth();
+  // Arriving from an accepted invitation or a password reset
+  const [searchParams] = useSearchParams();
+  const notice = searchParams.get('notice');
   
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password' | 'otp'>('provider-selection');
-  const [email, setEmail] = useState('');
+  const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password' | 'otp'>(
+    // Arriving with an email (after accepting an invitation or resetting a password): go straight to the password form
+    searchParams.get('email') ? 'email-password' : 'provider-selection',
+  );
+  const [email, setEmail] = useState(searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [devOtp, setDevOtp] = useState<string | null>(null);
@@ -229,12 +235,23 @@ export default function Login() {
   }
 
   const primaryColor = tenant?.primaryColor || '#3b82f6';
+  const noticeText = notice === 'invite-accepted'
+    ? 'Your account is ready. Sign in with your new password.'
+    : notice === 'password-reset'
+      ? 'Your password has been changed. Sign in with your new password.'
+      : null;
   const hasProviders = tenant?.authConfig?.providers && tenant.authConfig.providers.length > 0;
   const ssoOnly = tenant?.authConfig?.ssoOnly || false;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="max-w-md w-full">
+        {noticeText && (
+          <div role="status" className="mb-6 flex items-center gap-2 p-3 rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/10 text-sm text-green-700 dark:text-green-300">
+            <CheckCircle2 size={18} /> {noticeText}
+          </div>
+        )}
+
         {/* Logo and Branding */}
         <div className="text-center mb-8">
           {tenant?.logoUrl ? (
@@ -347,9 +364,14 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
-                  Password
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Password
+                  </label>
+                  <Link to={`/${tenant?.slug ?? tenantSlug}/forgot-password`} className="text-xs font-medium text-blue-600 hover:text-blue-700">
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input

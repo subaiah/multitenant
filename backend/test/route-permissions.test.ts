@@ -12,7 +12,7 @@ import { PERMISSIONS, isTenantGrantable } from '../src/utils/permissions.js';
 
 const ROUTES = join(import.meta.dirname, '..', 'src', 'routes');
 // Registered outside the authenticated scope (login, session, health)
-const PUBLIC_FILES = new Set(['auth.ts', 'bff-auth.ts', 'health.ts']);
+const PUBLIC_FILES = new Set(['auth.ts', 'bff-auth.ts', 'account.ts', 'health.ts']);
 const catalog = new Set<string>(PERMISSIONS);
 
 interface Declared {

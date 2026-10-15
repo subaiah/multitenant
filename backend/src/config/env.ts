@@ -40,7 +40,20 @@ const envSchema = z.object({
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
   DEV_EXPOSE_OTP: z.enum(['true', 'false']).default('false'),
+
+  // Email: smtp (real delivery), log (print to the server log), file (append
+  // JSON lines to MAIL_OUTBOX_FILE; used by tests)
+  EMAIL_TRANSPORT: z.enum(['smtp', 'log', 'file']).default('log'),
+  SMTP_URL: z.string().optional(), // e.g. smtps://user:pass@smtp.example.com:465
+  MAIL_FROM: z.string().default('Multitenant Platform <no-reply@localhost>'),
+  MAIL_OUTBOX_FILE: z.string().optional(),
 }).superRefine((env, ctx) => {
+  if (env.EMAIL_TRANSPORT === 'smtp' && !env.SMTP_URL) {
+    ctx.addIssue({ code: 'custom', path: ['SMTP_URL'], message: 'SMTP_URL is required when EMAIL_TRANSPORT=smtp' });
+  }
+  if (env.EMAIL_TRANSPORT === 'file' && !env.MAIL_OUTBOX_FILE) {
+    ctx.addIssue({ code: 'custom', path: ['MAIL_OUTBOX_FILE'], message: 'MAIL_OUTBOX_FILE is required when EMAIL_TRANSPORT=file' });
+  }
   if (env.NODE_ENV === 'production' && !env.COOKIE_SECRET) {
     ctx.addIssue({ code: 'custom', path: ['COOKIE_SECRET'], message: 'COOKIE_SECRET is required in production' });
   }
@@ -80,6 +93,13 @@ export const config = {
   bffUrl: env.BFF_URL,
   frontendUrl: env.FRONTEND_URL,
   cookieSecret: env.COOKIE_SECRET ?? 'dev-only-cookie-secret-not-for-production-use',
+
+  email: {
+    transport: env.EMAIL_TRANSPORT,
+    smtpUrl: env.SMTP_URL,
+    from: env.MAIL_FROM,
+    outboxFile: env.MAIL_OUTBOX_FILE,
+  },
 
   // Dev convenience: expose OTPs / user-not-found details. Never true outside development.
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
