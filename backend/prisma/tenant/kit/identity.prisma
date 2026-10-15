@@ -11,9 +11,17 @@ model User {
   lastLoginAt        DateTime?  @map("last_login_at")
   /// Access tokens issued before this are refused ("sign out everywhere")
   sessionsValidAfter DateTime?  @map("sessions_valid_after")
+  /// Two-factor sign-in (lib/mfa.ts). The TOTP secret is encrypted at rest (lib/secrets.ts).
+  totpSecret         String?    @map("totp_secret")
+  mfaEnabledAt       DateTime?  @map("mfa_enabled_at")
+  /// SHA-256 hashes of unused recovery codes
+  mfaRecoveryCodes   String[]   @default([]) @map("mfa_recovery_codes")
+  /// Last TOTP time step accepted, so a code can't be used twice
+  mfaLastStep        Int?       @map("mfa_last_step")
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
+  externalIdentities     ExternalIdentity[]
   groupMemberships       GroupMembership[]
   roleAssignments        RoleAssignment[]
   orgMemberships         OrgMembership[]
@@ -53,6 +61,10 @@ model RefreshToken {
   revokedAt  DateTime? @map("revoked_at")
   userAgent  String?   @map("user_agent")
   ipAddress  String?   @map("ip_address")
+  /// When the session (token family) began; carried across rotations (maximum session length)
+  sessionStartedAt DateTime @default(now()) @map("session_started_at")
+  /// Last request seen in this session (idle timeout); updated at most once a minute
+  lastSeenAt       DateTime @default(now()) @map("last_seen_at")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
 
@@ -99,12 +111,18 @@ model OtpCode {
   @@map("otp_codes")
 }
 
+// A single-sign-on attempt in progress (lib/sso.ts), between leaving for the
+// identity provider and coming back. Single use, a few minutes long.
 model OAuthSession {
   id           String   @id @default(uuid())
   tenantId     String   @map("tenant_id")
   state        String   @unique
   providerId   String   @map("provider_id")
+  /// Where to send the browser afterwards (a path in the frontend)
   redirectUri  String   @map("redirect_uri")
+  /// PKCE verifier and OpenID nonce for this attempt
+  codeVerifier String   @map("code_verifier")
+  nonce        String?
   expiresAt    DateTime @map("expires_at")
   createdAt    DateTime @default(now()) @map("created_at")
 
@@ -116,7 +134,10 @@ model AuthConfig {
   id              String         @id @default(uuid())
   tenantId        String         @unique @map("tenant_id")
   mfaEnabled      Boolean        @default(false) @map("mfa_enabled")
+  /// Idle timeout in minutes: signed out after this long without activity
   sessionTimeout  Int            @default(60) @map("session_timeout")
+  /// Maximum session length in hours: sign in again after this, however active
+  maxSessionHours Int            @default(12) @map("max_session_hours")
   passwordPolicy  PasswordPolicy @default(STANDARD) @map("password_policy")
   ssoOnly         Boolean        @default(false) @map("sso_only")
   otpEnabled      Boolean        @default(true) @map("otp_enabled")
@@ -169,4 +190,25 @@ enum AuthProviderType {
   OKTA
   AUTH0
   CUSTOM_OIDC
+}
+
+// A user's account at an identity provider, linked on first single sign-on.
+// Later sign-ins match on the provider's stable subject id, not the email,
+// so a changed or recycled email at the provider can't take over an account.
+model ExternalIdentity {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  userId     String   @map("user_id")
+  providerId String   @map("provider_id")
+  /// The provider's id for the person (OpenID `sub`, GitHub user id)
+  subject    String
+  email      String?
+  lastUsedAt DateTime @default(now()) @map("last_used_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, providerId, subject])
+  @@index([userId])
+  @@map("external_identities")
 }

@@ -15,6 +15,8 @@ declare module '@fastify/jwt' {
     payload: Partial<AuthUser> & {
       provider?: string;
       type?: 'access';
+      /** Session id: the refresh-token family, for idle tracking (lib/sign-in.ts) */
+      sid?: string;
       service?: string;
       scope?: string;
     };

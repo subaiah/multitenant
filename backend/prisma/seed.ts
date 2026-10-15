@@ -118,11 +118,14 @@ async function main() {
     });
     const authConfig = await db.authConfig.update({
       where: { tenantId },
-      data: { mfaEnabled: true, passwordPolicy: 'STRONG', otpEnabled: true, otpExpiry: 5 },
+      // Two-factor is real: requiring it would make every demo user set up an
+      // authenticator app at first sign-in. Turn it on from the Authentication page.
+      data: { mfaEnabled: false, passwordPolicy: 'STRONG', otpEnabled: true, otpExpiry: 5 },
     });
     for (const p of t.providers) {
       await db.authProvider.create({
-        data: { tenantId, authConfigId: authConfig.id, provider: p.provider, enabled: true, clientId: p.clientId, idpTenantId: p.idpTenantId, autoProvision: p.autoProvision, ...PROVIDER_URLS[p.provider](p.idpTenantId) },
+        // Placeholder client ids: off until real ones are entered
+        data: { tenantId, authConfigId: authConfig.id, provider: p.provider, enabled: false, clientId: p.clientId, idpTenantId: p.idpTenantId, autoProvision: p.autoProvision, ...PROVIDER_URLS[p.provider](p.idpTenantId) },
       });
     }
     await db.apiConfig.update({

@@ -21,7 +21,7 @@ export function RequireAuth({ portal, children }: { portal: Portal; children: Re
 
   if (!user) {
     const base = tenant?.slug ? `/${tenant.slug}/login` : '/login';
-    const loginPath = sessionEnded ? `${base}?notice=signed-out` : base;
+    const loginPath = sessionEnded ? `${base}?notice=${sessionEnded === 'signed-out' ? 'signed-out' : `session-${sessionEnded}`}` : base;
     return <Navigate to={loginPath} replace state={{ from: location.pathname }} />;
   }
 

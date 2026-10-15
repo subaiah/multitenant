@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { apiGet, apiPost } from '../lib/api-client';
+import { API_URL, apiGet, apiPost, isMfaStep, type MfaStep } from '../lib/api-client';
+import { TwoFactorSignIn } from '../components/TwoFactor';
 import { useAuth } from '../contexts/AuthContext';
 import { portalHome } from '../lib/permissions';
-import { Building2, Mail, Lock, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, ArrowRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 
 interface TenantInfo {
   id: string | null; // null for the platform portal
@@ -80,7 +81,10 @@ export default function Login() {
   
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Back from single sign-on with a problem (see /bff/auth/sso/callback)
+  const [error, setError] = useState<string | null>(searchParams.get('sso_error') ? searchParams.get('message') || 'Single sign-on failed' : null);
+  // Password or emailed code accepted; two-factor comes next
+  const [mfaStep, setMfaStep] = useState<MfaStep | null>(null);
   const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password' | 'otp'>(
     // Arriving with an email (after accepting an invitation or resetting a password): go straight to the password form
     searchParams.get('email') ? 'email-password' : 'provider-selection',
@@ -118,29 +122,29 @@ export default function Login() {
     fetchTenant();
   }, [tenantSlug]);
 
-  const handleProviderLogin = async (providerId: string) => {
-    if (!tenant) return;
+  // Single sign-on is a full-page trip: our server, the identity provider,
+  // back to our server (which starts the session), then this page
+  const hasProviders = !!tenant?.authConfig?.providers?.length;
 
+  const handleProviderLogin = (providerId: string) => {
+    if (!tenant) return;
     setSubmitting(true);
     setError(null);
+    const params = new URLSearchParams({ tenantSlug: tenant.slug, providerId });
+    window.location.href = `${API_URL}/bff/auth/sso/start?${params}`;
+  };
 
-    try {
-      const data = await apiPost<{ authorizationUrl: string }>(
-        '/auth/oauth/initiate',
-        {
-          tenantSlug: tenant.slug,
-          provider: providerId,
-          redirectUri: window.location.origin + (tenantSlug ? `/${tenantSlug}/login` : '/login'),
-        },
-        { skipAuth: true },
-      );
+  const finishSignIn = async () => {
+    const portal = await reload();
+    navigate(portal ? portalHome(portal) : '/login', { replace: true });
+  };
 
-      // Redirect to provider's authorization URL
-      window.location.href = data.authorizationUrl;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to initiate login');
-      setSubmitting(false);
-    }
+  const restart = () => {
+    setMfaStep(null);
+    setPassword('');
+    setOtp('');
+    setSubmitting(false);
+    setLoginMode(hasProviders ? 'provider-selection' : 'email-password');
   };
 
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {
@@ -152,8 +156,13 @@ export default function Login() {
 
     try {
       // Sets httpOnly session cookies and loads the user + permissions
-      const portal = await login(email, password, tenant.slug);
-      navigate(portalHome(portal), { replace: true });
+      const result = await login(email, password, tenant.slug);
+      if (typeof result === 'object') {
+        setMfaStep(result);
+        setSubmitting(false);
+        return;
+      }
+      navigate(portalHome(result), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
       setSubmitting(false);
@@ -196,9 +205,13 @@ export default function Login() {
     setError(null);
 
     try {
-      await apiPost('/bff/auth/otp/verify', { email, tenantSlug: tenant.slug, code: otp }, { skipAuth: true });
-      const portal = await reload();
-      navigate(portal ? portalHome(portal) : '/login', { replace: true });
+      const body = await apiPost('/bff/auth/otp/verify', { email, tenantSlug: tenant.slug, code: otp }, { skipAuth: true });
+      if (isMfaStep(body)) {
+        setMfaStep(body);
+        setSubmitting(false);
+        return;
+      }
+      await finishSignIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'OTP verification failed');
       setSubmitting(false);
@@ -242,12 +255,22 @@ export default function Login() {
       : notice === 'signed-out'
         ? 'You were signed out. Sign in again to continue.'
         : null;
-  const hasProviders = tenant?.authConfig?.providers && tenant.authConfig.providers.length > 0;
+  // The session timed out (the organization's session settings)
+  const timeoutText = notice === 'session-idle'
+    ? 'You were signed out after a period of inactivity.'
+    : notice === 'session-max'
+      ? 'Your session reached its maximum length. Please sign in again.'
+      : null;
   const ssoOnly = tenant?.authConfig?.ssoOnly || false;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="max-w-md w-full">
+        {timeoutText && (
+          <div role="status" className="mb-6 flex items-center gap-2 p-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300">
+            <Clock size={18} /> {timeoutText}
+          </div>
+        )}
         {noticeText && (
           <div role="status" className="mb-6 flex items-center gap-2 p-3 rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/10 text-sm text-green-700 dark:text-green-300">
             <CheckCircle2 size={18} /> {noticeText}
@@ -294,8 +317,12 @@ export default function Login() {
             </div>
           )}
 
+          {mfaStep && (
+            <TwoFactorSignIn step={mfaStep} primaryColor={primaryColor} onSignedIn={() => void finishSignIn()} onCancel={restart} />
+          )}
+
           {/* Provider Selection */}
-          {loginMode === 'provider-selection' && hasProviders && (
+          {!mfaStep && loginMode === 'provider-selection' && hasProviders && (
             <div className="space-y-4">
               <p className="text-sm text-slate-600 dark:text-slate-400 text-center mb-6">
                 Choose your sign-in method
@@ -308,7 +335,7 @@ export default function Login() {
                 return (
                   <button
                     key={provider.id}
-                    onClick={() => handleProviderLogin(provider.provider)}
+                    onClick={() => handleProviderLogin(provider.id)}
                     disabled={submitting}
                     className={`w-full flex items-center justify-center gap-3 px-6 py-3 ${providerInfo.color} text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md`}
                   >
@@ -346,7 +373,7 @@ export default function Login() {
           )}
 
           {/* Email/Password Login */}
-          {(loginMode === 'email-password' || !hasProviders) && (
+          {!mfaStep && (loginMode === 'email-password' || (!hasProviders && loginMode === 'provider-selection')) && (
             <form onSubmit={handleEmailPasswordLogin} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
@@ -452,7 +479,7 @@ export default function Login() {
           )}
 
           {/* OTP Login */}
-          {loginMode === 'otp' && (
+          {!mfaStep && loginMode === 'otp' && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               {/* Development OTP Display */}
               {devOtp && (
@@ -530,7 +557,7 @@ export default function Login() {
           )}
 
           {/* No providers configured */}
-          {!hasProviders && !ssoOnly && (
+          {!mfaStep && !hasProviders && !ssoOnly && loginMode !== 'otp' && (
             <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-lg">
               <div className="flex items-start gap-3">
                 <CheckCircle2 size={20} className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />

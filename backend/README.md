@@ -167,11 +167,12 @@ Response:
 ### Login
 
 ```bash
-curl -X POST http://localhost:4000/auth/login \
+curl -X POST http://localhost:4000/bff/auth/login -c cookies.txt \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "admin@example.com",
-    "tenantId": "uuid"
+    "email": "admin@acme-corp.com",
+    "password": "admin123",
+    "tenantSlug": "acme-corp"
   }'
 ```
 
@@ -189,7 +190,7 @@ curl -X GET http://localhost:4000/tenants/current \
 
 ### Authentication
 - `POST /auth/register` - Register new tenant and admin user
-- `POST /auth/login` - Login and get JWT token
+- `POST /bff/auth/login` - Sign in; sets the session cookies (see docs/AUTHENTICATION_METHODS.md for two-factor and single sign-on)
 - `GET /auth/verify` - Verify JWT token
 
 ### Tenants

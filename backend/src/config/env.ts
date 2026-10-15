@@ -60,6 +60,12 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
+  // Platform users' sessions (tenants set their own in Authentication settings):
+  // signed out after this many idle minutes, and after this many hours in all
+  PLATFORM_SESSION_IDLE_MINUTES: z.string().default('30').transform(Number),
+  PLATFORM_SESSION_MAX_HOURS: z.string().default('12').transform(Number),
+  // Require two-factor sign-in for every platform user
+  PLATFORM_MFA_REQUIRED: z.enum(['true', 'false']).default('false'),
 
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
@@ -176,6 +182,9 @@ export const config = {
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
+  platformSessionIdleMinutes: env.PLATFORM_SESSION_IDLE_MINUTES,
+  platformSessionMaxHours: env.PLATFORM_SESSION_MAX_HOURS,
+  platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',
 
   /** Encryption keys for stored secrets, by version; see readSecretKeys */
   secretKeys: readSecretKeys(env.NODE_ENV),

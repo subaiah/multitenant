@@ -81,6 +81,8 @@ export function decryptSecret(stored: string, context: string, keys: Map<number,
 export const SECRET_FIELDS = {
   connectionString: { model: 'DatabaseConfig', table: 'database_configs', column: 'connection_string' },
   clientSecret: { model: 'AuthProvider', table: 'auth_providers', column: 'client_secret' },
+  totpSecret: { model: 'User', table: 'users', column: 'totp_secret' },
+  platformTotpSecret: { model: 'PlatformUser', table: 'platform_users', column: 'totp_secret' },
 } as const;
 
 export type SecretField = keyof typeof SECRET_FIELDS;

@@ -2,6 +2,7 @@ import type { FastifyRequest } from 'fastify';
 import { controlDb } from './prisma.js';
 import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
+import { touchSession } from './sign-in.js';
 import { USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 
 /**
@@ -77,11 +78,14 @@ export async function verifySession(request: FastifyRequest): Promise<SessionUse
   } catch {
     throw new AppError('Not authenticated', 401);
   }
-  const token = request.user as { userId?: string; userType?: string; tenantId?: string; iat?: number; iatMs?: number; type?: string };
-  if (!token.userId) throw new AppError('Not authenticated', 401);
+  const token = request.user as { userId?: string; userType?: string; tenantId?: string; iat?: number; iatMs?: number; type?: string; sid?: string };
+  // Only session access tokens, not other tokens signed with the same key (e.g. BFF service tokens)
+  if (!token.userId || token.type !== 'access') throw new AppError('Not authenticated', 401);
   const user = await findSessionAccount({ userId: token.userId, tenantId: token.tenantId });
   const problem = sessionProblem(token, user);
   if (problem) throw new AppError(problem, 401);
   request.user.userType = user!.userType as typeof request.user.userType;
+  // Activity keeps the session alive (idle timeout, lib/sign-in.ts)
+  await touchSession(token).catch(() => {});
   return user!;
 }

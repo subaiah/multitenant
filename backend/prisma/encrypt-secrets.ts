@@ -16,12 +16,17 @@ import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretCont
 
 type Delegate = { name: string; findMany: Function; update: Function };
 
-// Prisma delegates holding each secret field: connection strings in the
-// control plane; SSO secrets in every ready tenant target (as the platform
-// role, which sees every tenant's rows)
+// Prisma delegates holding each secret field: connection strings and platform
+// users' two-factor secrets in the control plane; SSO secrets and tenant users'
+// two-factor secrets in every ready tenant target (as the platform role, which
+// sees every tenant's rows)
 async function delegatesFor(field: SecretField): Promise<Delegate[]> {
   if (field === 'connectionString') return [{ name: 'control plane', ...bind(controlDb.databaseConfig) }];
-  return (await listTargets(['READY'])).map(({ target }) => ({ name: describeTarget(target), ...bind(platformDb(target).authProvider) }));
+  if (field === 'platformTotpSecret') return [{ name: 'control plane', ...bind(controlDb.platformUser) }];
+  return (await listTargets(['READY'])).map(({ target }) => {
+    const db = platformDb(target);
+    return { name: describeTarget(target), ...bind(field === 'totpSecret' ? db.user : db.authProvider) };
+  });
 }
 
 function bind(delegate: { findMany: Function; update: Function }) {
@@ -45,7 +50,7 @@ export async function encryptStoredSecrets({ check = false, only }: { check?: bo
           select: { id: true, [field]: true },
         });
       } catch (err) {
-        if (field === 'connectionString') throw err;
+        if (field === 'connectionString' || field === 'platformTotpSecret') throw err;
         skipped.push(`${delegate.name}: ${(err as Error).message.split('\n').at(-1)}`);
         continue;
       }

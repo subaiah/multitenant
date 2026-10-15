@@ -37,10 +37,15 @@ interface ApiOptions extends RequestInit {
 // would present the same token twice and trip reuse detection (logging the
 // user out everywhere).
 let refreshInFlight: Promise<boolean> | null = null;
+/** Why the last refresh was refused, when the server said (SESSION_IDLE, SESSION_MAX). */
+let endReason: string | undefined;
 
 function refreshSession(): Promise<boolean> {
   refreshInFlight ??= fetch(`${API_URL}/bff/auth/refresh`, { method: 'POST', credentials: 'include' })
-    .then((res) => res.ok)
+    .then(async (res) => {
+      if (!res.ok) endReason = ((await res.json().catch(() => ({}))) as { code?: string }).code;
+      return res.ok;
+    })
     .catch(() => false)
     .finally(() => {
       refreshInFlight = null;
@@ -93,8 +98,12 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiOptions 
  * listens for this and sends the user to the sign-in page.
  */
 export const SESSION_ENDED_EVENT = 'auth:session-ended';
+/** Why a session ended, for the sign-in page's notice. */
+export type SessionEndReason = 'idle' | 'max' | 'signed-out';
 function sessionEnded() {
-  window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+  const reason: SessionEndReason = endReason === 'SESSION_IDLE' ? 'idle' : endReason === 'SESSION_MAX' ? 'max' : 'signed-out';
+  endReason = undefined;
+  window.dispatchEvent(new CustomEvent<SessionEndReason>(SESSION_ENDED_EVENT, { detail: reason }));
 }
 
 export function apiGet<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
@@ -131,6 +140,14 @@ export interface CurrentUser {
 export function getCurrentUser() {
   return apiGet<CurrentUser>('/bff/auth/me');
 }
+
+/** What a sign-in step returns when two-factor comes next (no session yet). */
+export interface MfaStep {
+  mfa: 'verify' | 'enroll';
+  mfaToken: string;
+}
+export const isMfaStep = (body: unknown): body is MfaStep =>
+  !!body && typeof body === 'object' && 'mfa' in body && 'mfaToken' in body;
 
 /** Ends the session server-side and clears the cookies. */
 export async function logout() {

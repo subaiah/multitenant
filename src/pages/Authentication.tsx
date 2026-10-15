@@ -17,11 +17,14 @@ interface Provider {
 interface AuthConfig {
   mfaEnabled: boolean;
   sessionTimeout: number;
+  maxSessionHours: number;
   passwordPolicy: string;
   ssoOnly: boolean;
   otpEnabled: boolean;
   otpExpiry: number;
   providers: Provider[];
+  /** Register this with each identity provider */
+  ssoRedirectUri: string;
 }
 interface ProviderInfo {
   id: string;
@@ -31,6 +34,13 @@ interface ProviderInfo {
 }
 
 const POLICIES = ['STANDARD', 'STRONG', 'VERY_STRONG'];
+
+/** Providers that need to know where the identity provider lives */
+const DOMAIN_FIELD: Record<string, { label: string; placeholder: string }> = {
+  OKTA: { label: 'Okta domain', placeholder: 'your-org.okta.com' },
+  AUTH0: { label: 'Auth0 domain', placeholder: 'your-tenant.auth0.com' },
+  CUSTOM_OIDC: { label: 'Issuer URL', placeholder: 'https://login.example.com' },
+};
 
 export default function Authentication() {
   const config = useApi<AuthConfig>('/auth-config');
@@ -65,6 +75,9 @@ export default function Authentication() {
             <SecuritySettings config={c} onSave={(patch) => run(() => apiPatch('/auth-config', patch))} />
 
             <Card title="Identity providers" description="Single sign-on connections for this organization">
+              <p className="mb-3 text-xs text-slate-500">
+                Register this redirect URI with each provider: <code className="font-mono select-all text-slate-700 dark:text-slate-300">{c.ssoRedirectUri}</code>
+              </p>
               {c.providers.length === 0 ? (
                 <EmptyState icon={KeyRound} title="No identity providers" message="People sign in with a password or one-time code until you add one." />
               ) : (
@@ -117,6 +130,7 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
   const initial = {
     mfaEnabled: config.mfaEnabled,
     sessionTimeout: config.sessionTimeout,
+    maxSessionHours: config.maxSessionHours,
     passwordPolicy: config.passwordPolicy,
     ssoOnly: config.ssoOnly,
     otpEnabled: config.otpEnabled,
@@ -140,7 +154,7 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
   return (
     <Card title="Sign-in security" actions={<ShieldCheck size={18} className="text-slate-400" />}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {toggle('mfaEnabled', 'Multi-factor authentication', 'Require a second factor at sign-in')}
+        {toggle('mfaEnabled', 'Require two-factor sign-in', 'Everyone signing in with a password or emailed code also enters a code from an authenticator app (single sign-on relies on your identity provider)')}
         {toggle('ssoOnly', 'SSO only', 'Disable password and one-time-code sign-in')}
         {toggle('otpEnabled', 'One-time codes', 'Allow sign-in with an emailed code')}
         <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
@@ -155,9 +169,16 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
           </select>
         </label>
         <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
-          <span className="font-medium text-slate-700 dark:text-slate-200">Session timeout (minutes)</span>
+          <span className="font-medium text-slate-700 dark:text-slate-200">Sign out after inactivity (minutes)</span>
           <input type="number" min={5} max={1440} value={form.sessionTimeout}
             onChange={(e) => setForm({ ...form, sessionTimeout: Number(e.target.value) })} className={`${inputClass} mt-1`} />
+          <span className="block text-xs text-slate-500 mt-1">A session with no activity for this long ends.</span>
+        </label>
+        <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
+          <span className="font-medium text-slate-700 dark:text-slate-200">Maximum session length (hours)</span>
+          <input type="number" min={1} max={720} value={form.maxSessionHours}
+            onChange={(e) => setForm({ ...form, maxSessionHours: Number(e.target.value) })} className={`${inputClass} mt-1`} />
+          <span className="block text-xs text-slate-500 mt-1">People sign in again after this long, however active.</span>
         </label>
       </div>
       <div className="flex justify-end gap-2 mt-4">
@@ -225,8 +246,10 @@ function AddProviderDialog({ catalog, onClose, onAdd }: {
             <input value={clientId} onChange={(e) => setClientId(e.target.value)} className={`${inputClass} mt-1`} /></label>
           <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Client secret</span>
             <input type="password" autoComplete="new-password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} className={`${inputClass} mt-1`} /></label>
-          <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Domain (optional)</span>
-            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" className={`${inputClass} mt-1`} /></label>
+          {DOMAIN_FIELD[provider] && (
+            <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">{DOMAIN_FIELD[provider].label}</span>
+              <input value={domain} onChange={(e) => setDomain(e.target.value)} required placeholder={DOMAIN_FIELD[provider].placeholder} className={`${inputClass} mt-1`} /></label>
+          )}
           {provider === 'ENTRA' && (
             <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Directory (tenant) ID</span>
               <input value={directoryId} onChange={(e) => setDirectoryId(e.target.value)} className={`${inputClass} mt-1`} /></label>

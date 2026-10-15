@@ -7,6 +7,7 @@ import { isPlatformUser } from '../utils/authorization.js';
 import { countBy } from '../lib/stats.js';
 import { latestMigration, startRollout, tenantsBehind } from '../lib/tenant-migrations.js';
 import { logPlatformActivity } from '../lib/activity.js';
+import { resetTwoFactor } from './two-factor.js';
 
 /** Platform-portal data: cross-tenant statistics and platform users. */
 export const platformRoutes: FastifyPluginAsync = async (fastify) => {
@@ -106,8 +107,25 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
   }, async () => {
     const users = await controlDb.platformUser.findMany({
       orderBy: { createdAt: 'asc' },
-      select: { id: true, email: true, name: true, userType: true, status: true, lastLoginAt: true, createdAt: true },
+      select: { id: true, email: true, name: true, userType: true, status: true, lastLoginAt: true, createdAt: true, mfaEnabledAt: true },
     });
-    return { users };
+    return { users: users.map(({ mfaEnabledAt, ...u }) => ({ ...u, mfaEnabled: Boolean(mfaEnabledAt) })) };
+  });
+
+  // Clear a platform user's two-factor (lost device)
+  fastify.post('/users/:id/mfa/reset', {
+    config: { permission: 'platform-settings:manage' },
+    schema: {
+      tags: ['platform'],
+      summary: "Reset a platform user's two-factor sign-in",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const user = await controlDb.platformUser.findUnique({ where: { id }, select: { id: true, email: true } });
+    if (!user) throw new AppError('User not found', 404);
+    await resetTwoFactor('platform', user.id);
+    await logPlatformActivity({ userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
+    return { mfaEnabled: false };
   });
 };

@@ -17,6 +17,7 @@ interface TenantUser {
   status: string;
   lastLoginAt: string | null;
   createdAt: string;
+  mfaEnabled: boolean;
 }
 interface UserPage {
   data: TenantUser[];
@@ -114,6 +115,7 @@ export default function Users() {
                       <th className="px-5 py-3 font-medium">Type</th>
                       <th className="px-5 py-3 font-medium">Status</th>
                       <th className="px-5 py-3 font-medium">Last sign-in</th>
+                      <th className="px-5 py-3 font-medium">Two-factor</th>
                       <th className="px-5 py-3 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
@@ -142,6 +144,9 @@ export default function Users() {
                           <td className="px-5 py-3"><Badge value={u.status === 'PENDING' ? 'INVITED' : u.status} /></td>
                           <td className="px-5 py-3 text-slate-500">{u.status === 'PENDING' ? '—' : formatRelative(u.lastLoginAt)}</td>
                           <td className="px-5 py-3">
+                            <span className={u.mfaEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-400'}>{u.mfaEnabled ? 'On' : 'Off'}</span>
+                          </td>
+                          <td className="px-5 py-3">
                             <div className="flex justify-end gap-2">
                               {(canReviewAccess || isMe) && (
                                 <Link to={`/access-review/${u.id}`} className="px-3 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Access</Link>
@@ -155,6 +160,13 @@ export default function Users() {
                                     && act(() => apiPatch(`/users/${u.id}`, { status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }),
                                       `${u.email} ${u.status === 'ACTIVE' ? 'deactivated and signed out' : 'reactivated'}`)}>
                                   {u.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                                </button>
+                              )}
+                              {u.mfaEnabled && canUpdate && manageable && (
+                                <button className={secondaryButtonClass} title="For a lost phone: they set up two-factor again at their next sign-in"
+                                  onClick={() => confirm(`Reset two-factor for ${u.email}? They'll set it up again the next time they sign in.`)
+                                    && act(() => apiPost(`/users/${u.id}/mfa/reset`, {}), `Two-factor reset for ${u.email}`)}>
+                                  Reset 2FA
                                 </button>
                               )}
                               {canDelete && manageable && (
