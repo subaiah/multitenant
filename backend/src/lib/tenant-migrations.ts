@@ -60,6 +60,15 @@ export async function withConnection<T>(url: string, fn: (c: pg.Client) => Promi
   }
 }
 
+/**
+ * Take turns changing who may connect to a database: parallel GRANT/REVOKE on
+ * one database collide in Postgres ("tuple concurrently updated"). Call inside
+ * a transaction; the lock is held until it ends.
+ */
+export async function lockDatabaseAcl(c: pg.Client, database: string) {
+  await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`tenant-database-acl:${database}`]);
+}
+
 /** Login name in a connection string */
 export const userOf = (url: string) => decodeURIComponent(new URL(url).username);
 
@@ -230,7 +239,7 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
     // Who may connect to the target's database at all. Grants on one database
     // from parallel runs (schema targets share the shared database) would
     // collide in Postgres ("tuple concurrently updated"), so take turns.
-    await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`tenant-database-acl:${databaseOf(target)}`]);
+    await lockDatabaseAcl(c, databaseOf(target));
     const db = ident(databaseOf(target));
     if (target.kind === 'database') {
       await c.query(`REVOKE ALL ON DATABASE ${db} FROM PUBLIC`);

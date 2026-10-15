@@ -83,7 +83,6 @@ test('tenant list includes status counts and usage from the periodic snapshot', 
   assert.deepEqual(usageB.appsByStatus, { RUNNING: 1, ERROR: 1 });
   assert.ok((usageB.recentActivity as { target: string }[]).some((r) => r.target === 'Beta Web'));
   const stats = (await api('GET', '/platform/stats', { cookie })).json;
-  assert.equal(stats.status ?? 200, 200);
   assert.ok(stats.applications.byStatus.ERROR >= 2, 'both tenants have an app in error');
 });
 

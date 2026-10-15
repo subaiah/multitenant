@@ -28,7 +28,7 @@ import { decryptSecret, secretContext } from './secrets.js';
 import { sendInvitation } from './invitations.js';
 import { logPlatformActivity } from './activity.js';
 import { refreshTenantUsage } from './tenant-usage.js';
-import { accessFor, migrateTarget, userOf, withConnection } from './tenant-migrations.js';
+import { accessFor, lockDatabaseAcl, migrateTarget, userOf, withConnection } from './tenant-migrations.js';
 import {
   sharedGroupRole, databaseOf, ident, ownerUrl, roleNameFor, sharedDatabaseName, targetOf, tenantRoleUrl, type Target,
 } from './tenant-targets.js';
@@ -186,7 +186,10 @@ export async function deprovisionTenant(tenantId: string, actorId?: string): Pro
         await withConnection(ownerUrl(target), async (c) => {
           await c.query(`DROP SCHEMA IF EXISTS ${ident(target.schema)} CASCADE`);
           if ((await c.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role])).rowCount) {
+            await c.query('BEGIN');
+            await lockDatabaseAcl(c, sharedDatabaseName());
             await c.query(`REVOKE ALL ON DATABASE ${ident(sharedDatabaseName())} FROM ${ident(role)}`);
+            await c.query('COMMIT');
           }
         });
       }
