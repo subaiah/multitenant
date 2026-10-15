@@ -2,10 +2,19 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
+import { countBy } from '../lib/stats.js';
 import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authorization.js';
 
+const emptyToNull = (v: unknown) => (v === '' ? null : v);
+
 const updateTenantSchema = z.object({
-  name: z.string().min(2).optional(),
+  name: z.string().min(2).max(100).optional(),
+  // Branding (shown on the tenant's login page)
+  logoUrl: z.preprocess(emptyToNull, z.string().url().max(500).nullable()).optional(),
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a hex colour like #3b82f6').optional(),
+  loginTitle: z.preprocess(emptyToNull, z.string().max(100).nullable()).optional(),
+  loginSubtitle: z.preprocess(emptyToNull, z.string().max(200).nullable()).optional(),
+  // Platform admins only
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']).optional(),
 });
@@ -44,6 +53,10 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { page, limit, status, plan, search } = querySchema.parse(request.query);
     const skip = (page - 1) * limit;
 
+    const searchFilter = search
+      ? { OR: [{ name: { contains: search, mode: 'insensitive' as const } }, { slug: { contains: search, mode: 'insensitive' as const } }] }
+      : {};
+
     const where = {
       AND: [
         status ? { status } : {},
@@ -59,7 +72,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       ],
     };
 
-    const [tenants, total] = await Promise.all([
+    const [tenants, total, statusCounts] = await Promise.all([
       prisma.tenant.findMany({
         where,
         skip,
@@ -75,10 +88,21 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         },
       }),
       prisma.tenant.count({ where }),
+      // Counts for the status tabs: same plan/search filters, any status
+      prisma.tenant.groupBy({ by: ['status'], where: { AND: [plan ? { plan } : {}, searchFilter] }, _count: true }),
     ]);
 
+    // Last activity per tenant on this page
+    const lastActivity = await prisma.activity.groupBy({
+      by: ['tenantId'],
+      where: { tenantId: { in: tenants.map((t) => t.id) } },
+      _max: { createdAt: true },
+    });
+    const lastActiveAt = new Map(lastActivity.map((a) => [a.tenantId, a._max.createdAt]));
+
     return {
-      data: tenants,
+      data: tenants.map((t) => ({ ...t, lastActiveAt: lastActiveAt.get(t.id) ?? null })),
+      statusCounts: countBy(statusCounts, 'status'),
       pagination: {
         page,
         limit,
@@ -170,6 +194,10 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 2 },
+          logoUrl: { type: ['string', 'null'] },
+          primaryColor: { type: 'string' },
+          loginTitle: { type: ['string', 'null'] },
+          loginSubtitle: { type: ['string', 'null'] },
           plan: { type: 'string', enum: ['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'] },
           status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED', 'TRIAL'] },
         },
@@ -179,13 +207,13 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const data = updateTenantSchema.parse(request.body);
 
-    // Platform admins can update any tenant. Tenant admins can only rename
-    // their own tenant; plan and status (billing/suspension) are platform-only.
+    // Platform admins can update any tenant. Tenant admins can update their own
+    // tenant's name and branding; plan and status (billing/suspension) are platform-only.
     const { userType, tenantId } = request.user;
     if (!isPlatformAdmin(userType)) {
-      const ownTenantRenameOnly =
+      const ownTenantProfileOnly =
         isTenantAdmin(userType) && tenantId === id && data.plan === undefined && data.status === undefined;
-      if (!ownTenantRenameOnly) {
+      if (!ownTenantProfileOnly) {
         throw new AppError('Platform admin access required', 403);
       }
     }

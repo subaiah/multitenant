@@ -9,6 +9,7 @@ const querySchema = z.object({
   type: z.enum(['DEPLOY', 'CONFIG', 'USER', 'BILLING', 'ALERT', 'AUTH', 'API']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
+  search: z.string().optional(),
 });
 
 export const activityRoutes: FastifyPluginAsync = async (fastify) => {
@@ -24,18 +25,27 @@ export const activityRoutes: FastifyPluginAsync = async (fastify) => {
           limit: { type: 'string', default: '20' },
           type: { type: 'string', enum: ['DEPLOY', 'CONFIG', 'USER', 'BILLING', 'ALERT', 'AUTH', 'API'] },
           startDate: { type: 'string', format: 'date-time' },
+          search: { type: 'string' },
           endDate: { type: 'string', format: 'date-time' },
         },
       },
     },
   }, async (request, reply) => {
-    const { page, limit, type, startDate, endDate } = querySchema.parse(request.query);
+    const { page, limit, type, startDate, endDate, search } = querySchema.parse(request.query);
     const skip = (page - 1) * limit;
 
     const where = {
       tenantId: request.tenant.id,
       AND: [
         type ? { type } : {},
+        search
+          ? {
+              OR: [
+                { action: { contains: search, mode: 'insensitive' as const } },
+                { target: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {},
         startDate || endDate
           ? {
               createdAt: {

@@ -33,7 +33,9 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Database configuration not found', 404);
     }
 
-    return config;
+    // Never send the connection string (it contains credentials) to the browser
+    const { connectionString, ...safe } = config;
+    return { ...safe, hasConnectionString: Boolean(connectionString) };
   });
 
   // Update database config
@@ -65,16 +67,23 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
 
     const data = updateDatabaseConfigSchema.parse(request.body);
 
-    // Validate strategy-specific fields
-    if (data.strategy === 'DATABASE_PER_TENANT' && !data.connectionString) {
+    // Validate strategy-specific fields against the resulting config, so a save
+    // that doesn't resend the (never returned) connection string still works
+    const current = await prisma.databaseConfig.findUnique({ where: { tenantId: request.tenant.id } });
+    if (!current) {
+      throw new AppError('Database configuration not found', 404);
+    }
+    const next = { ...current, ...data };
+
+    if (next.strategy === 'DATABASE_PER_TENANT' && !next.connectionString) {
       throw new AppError('Connection string required for DATABASE_PER_TENANT strategy', 400);
     }
 
-    if (data.strategy === 'SCHEMA_PER_TENANT' && !data.schemaName) {
+    if (next.strategy === 'SCHEMA_PER_TENANT' && !next.schemaName) {
       throw new AppError('Schema name required for SCHEMA_PER_TENANT strategy', 400);
     }
 
-    if (data.strategy === 'SHARED_TABLES' && !data.tenantColumn) {
+    if (next.strategy === 'SHARED_TABLES' && !next.tenantColumn) {
       throw new AppError('Tenant column required for SHARED_TABLES strategy', 400);
     }
 
@@ -95,7 +104,8 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    return config;
+    const { connectionString, ...safe } = config;
+    return { ...safe, hasConnectionString: Boolean(connectionString) };
   });
 
   // Get database strategies info

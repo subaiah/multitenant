@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../lib/prisma.js';
 import { withActivityUsers } from '../lib/activity-users.js';
+import { activityByDay, countBy } from '../lib/stats.js';
 import { hasMinimumUserType, isPlatformUser } from '../utils/authorization.js';
 
 /**
@@ -25,7 +26,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
 
     // Aggregate multiple queries in parallel
-    const [tenant, appStats, recentActivities, userCount] = await Promise.all([
+    const [tenant, appStats, recentActivities, userCount, appsByEnv, groupCount, orgCount, entitledApps, perDay, activityTypes] = await Promise.all([
       // Get tenant info
       prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -45,13 +46,19 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       // Get recent activities
       prisma.activity.findMany({
         where: { tenantId },
-        take: 5,
+        take: 8,
         orderBy: { createdAt: 'desc' },
       }).then(withActivityUsers),
       // Get user count
       prisma.user.count({
         where: { tenantId },
       }),
+      prisma.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
+      prisma.group.count({ where: { tenantId } }),
+      prisma.organization.count({ where: { tenantId } }),
+      prisma.tenantApplication.count({ where: { tenantId } }),
+      activityByDay(tenantId, 14),
+      prisma.activity.groupBy({ by: ['type'], where: { tenantId }, _count: true }),
     ]);
 
     // Transform data for frontend
@@ -71,12 +78,16 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       users: {
         total: userCount,
       },
+      applicationsByEnvironment: countBy(appsByEnv, 'environment'),
+      counts: { groups: groupCount, organizations: orgCount, entitledApplications: entitledApps },
+      activityByDay: perDay,
+      activityByType: countBy(activityTypes, 'type'),
       recentActivities: recentActivities.map((activity) => ({
         id: activity.id,
         action: activity.action,
         target: activity.target,
         type: activity.type,
-        user: activity.user?.name || 'System',
+        user: activity.user?.name || activity.user?.email || 'System',
         timestamp: activity.createdAt,
       })),
     };

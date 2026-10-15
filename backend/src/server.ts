@@ -31,6 +31,8 @@ import { accessRequestRoutes } from './routes/access-requests.js';
 import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
+import { platformRoutes } from './routes/platform.js';
+import { deploymentRoutes } from './routes/deployments.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 
@@ -50,6 +52,9 @@ async function registerPlugins() {
   await fastify.register(cors, {
     origin: config.corsOrigin.split(','),
     credentials: true,
+    // @fastify/cors only allows GET, HEAD and POST by default, which blocked
+    // every PATCH/PUT/DELETE the frontend makes.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
   // Security headers
@@ -199,6 +204,12 @@ async function registerRoutes() {
 
     // Permission routes
     await protectedRoutes.register(platformScoped(permissionRoutes), { prefix: '/permissions' });
+
+    // Platform portal data (platform users only)
+    await protectedRoutes.register(platformScoped(platformRoutes), { prefix: '/platform' });
+
+    // Current tenant's deployed applications
+    await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });

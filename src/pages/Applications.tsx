@@ -1,462 +1,182 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Search,
-  Plus,
-  MoreVertical,
-  Play,
-  Pause,
-  RotateCw,
-  Trash2,
-  ExternalLink,
-  Cpu,
-  MemoryStick,
-  Activity,
-  Clock,
-  Globe,
-  Server,
-  X,
-} from 'lucide-react';
-import { applications, tenants, type Application } from '../data/mockData';
+import { Package, Search, X, ExternalLink, Cpu, MemoryStick, Activity } from 'lucide-react';
+import { useApi } from '../hooks/useApi';
+import { Badge, Card, DataView, EmptyState, LoadingState, PageHeader, formatDate, formatRelative, humanize, inputClass, selectClass } from '../components/ui';
+
+interface Deployment {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  version: string;
+  environment: string;
+  url: string;
+  cpu: number;
+  memory: number;
+  requests: number;
+  lastDeployedAt: string | null;
+  createdAt: string;
+}
+interface DeploymentList {
+  deployments: Deployment[];
+  counts: { byStatus: Record<string, number>; byEnvironment: Record<string, number> };
+}
+
+const STATUSES = ['RUNNING', 'DEPLOYING', 'STOPPED', 'ERROR'];
+const ENVIRONMENTS = ['PRODUCTION', 'STAGING', 'DEVELOPMENT'];
 
 export default function Applications() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [params, setParams] = useSearchParams();
+  const status = params.get('status') ?? '';
+  const environment = params.get('environment') ?? '';
+  const search = params.get('search') ?? '';
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Read filter state from URL
-  const searchQuery = searchParams.get('search') || '';
-  const statusFilter = searchParams.get('status') || 'all';
-  const envFilter = searchParams.get('env') || 'all';
-  const tenantFilter = searchParams.get('tenant') || 'all';
+  const query = new URLSearchParams();
+  if (status) query.set('status', status);
+  if (environment) query.set('environment', environment);
+  if (search) query.set('search', search);
+  const list = useApi<DeploymentList>(`/deployments?${query}`);
 
-  const updateFilter = (key: string, value: string) => {
-    const newParams = new URLSearchParams(searchParams);
-    if (value === 'all' || value === '') {
-      newParams.delete(key);
-    } else {
-      newParams.set(key, value);
-    }
-    setSearchParams(newParams);
-  };
-
-  const filteredApps = applications.filter((app) => {
-    const matchesSearch =
-      app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
-    const matchesEnv = envFilter === 'all' || app.environment === envFilter;
-    const matchesTenant = tenantFilter === 'all' || app.tenantId === tenantFilter;
-    return matchesSearch && matchesStatus && matchesEnv && matchesTenant;
-  });
-
-  const getTenantName = (tenantId: string) => {
-    return tenants.find((t) => t.id === tenantId)?.name || 'Unknown';
-  };
-
-  const statusColors: Record<string, { bg: string; text: string; dot: string }> = {
-    running: { bg: 'bg-green-100 dark:bg-green-500/20', text: 'text-green-700 dark:text-green-400', dot: 'bg-green-500' },
-    stopped: { bg: 'bg-slate-100 dark:bg-slate-600', text: 'text-slate-700 dark:text-slate-300', dot: 'bg-slate-400' },
-    deploying: { bg: 'bg-blue-100 dark:bg-blue-500/20', text: 'text-blue-700 dark:text-blue-400', dot: 'bg-blue-500' },
-    error: { bg: 'bg-red-100 dark:bg-red-500/20', text: 'text-red-700 dark:text-red-400', dot: 'bg-red-500' },
-  };
-
-  const envColors: Record<string, string> = {
-    production: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400',
-    staging: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
-    development: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400',
-  };
-
-  const hasActiveFilters = searchQuery || statusFilter !== 'all' || envFilter !== 'all' || tenantFilter !== 'all';
-
-  const clearAllFilters = () => {
-    setSearchParams({});
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white">Applications</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Monitor and manage all tenant applications
-          </p>
-        </div>
-        <button className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm">
-          <Plus size={16} />
-          Deploy New App
-        </button>
-      </div>
+    <div className="p-6 space-y-6">
+      <PageHeader title="Applications" description="Applications deployed for your organization" />
 
-      {/* Status Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { status: 'running', label: 'Running', icon: Play, color: 'green' },
-          { status: 'deploying', label: 'Deploying', icon: RotateCw, color: 'blue' },
-          { status: 'stopped', label: 'Stopped', icon: Pause, color: 'slate' },
-          { status: 'error', label: 'Errors', icon: Activity, color: 'red' },
-        ].map((item) => {
-          const Icon = item.icon;
-          const count = applications.filter((a) => a.status === item.status).length;
-          const colorMap: Record<string, { bg: string; icon: string }> = {
-            green: { bg: 'bg-green-100 dark:bg-green-500/20', icon: 'text-green-600 dark:text-green-400' },
-            blue: { bg: 'bg-blue-100 dark:bg-blue-500/20', icon: 'text-blue-600 dark:text-blue-400' },
-            slate: { bg: 'bg-slate-100 dark:bg-slate-600', icon: 'text-slate-600 dark:text-slate-300' },
-            red: { bg: 'bg-red-100 dark:bg-red-500/20', icon: 'text-red-600 dark:text-red-400' },
-          };
-          const colors = colorMap[item.color];
-          return (
-            <button
-              key={item.status}
-              onClick={() => updateFilter('status', statusFilter === item.status ? 'all' : item.status)}
-              className={`bg-white dark:bg-slate-800 rounded-xl p-4 border transition-all text-left ${
-                statusFilter === item.status
-                  ? 'border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/20'
-                  : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${colors.bg}`}>
-                  <Icon size={16} className={colors.icon} />
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{count}</p>
-                  <p className="text-xs text-slate-500">{item.label}</p>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-md">
+        {STATUSES.map((s) => (
+          <button key={s} onClick={() => update('status', status === s ? '' : s)} aria-pressed={status === s}
+            className={`px-3 py-1.5 text-sm rounded-lg border ${status === s ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'}`}>
+            {humanize(s)} <span className="ml-1 text-xs text-slate-400 tabular-nums">{list.data?.counts.byStatus[s] ?? 0}</span>
+          </button>
+        ))}
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search applications..."
-            value={searchQuery}
-            onChange={(e) => updateFilter('search', e.target.value)}
-            className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 placeholder-slate-400"
-          />
+          <input aria-label="Search applications" placeholder="Search applications" defaultValue={search}
+            onKeyDown={(e) => e.key === 'Enter' && update('search', (e.target as HTMLInputElement).value.trim())}
+            onBlur={(e) => e.target.value.trim() !== search && update('search', e.target.value.trim())}
+            className={`${inputClass} pl-9`} />
         </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => updateFilter('status', e.target.value)}
-          className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
-        >
-          <option value="all">All Status</option>
-          <option value="running">Running</option>
-          <option value="stopped">Stopped</option>
-          <option value="deploying">Deploying</option>
-          <option value="error">Error</option>
+        <select aria-label="Filter by environment" value={environment} onChange={(e) => update('environment', e.target.value)} className={`${selectClass}`}>
+          <option value="">All environments</option>
+          {ENVIRONMENTS.map((e) => <option key={e} value={e}>{humanize(e)}</option>)}
         </select>
-        <select
-          value={envFilter}
-          onChange={(e) => updateFilter('env', e.target.value)}
-          className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
-        >
-          <option value="all">All Environments</option>
-          <option value="production">Production</option>
-          <option value="staging">Staging</option>
-          <option value="development">Development</option>
-        </select>
-        <select
-          value={tenantFilter}
-          onChange={(e) => updateFilter('tenant', e.target.value)}
-          className="px-4 py-2.5 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-slate-700 dark:text-slate-200"
-        >
-          <option value="all">All Tenants</option>
-          {tenants.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-
-        {hasActiveFilters && (
-          <button
-            onClick={clearAllFilters}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
-          >
-            <X size={12} />
-            Clear filters
-          </button>
-        )}
-
-        {/* View toggle */}
-        <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setViewMode('grid')}
-            className={`px-3 py-2.5 text-sm ${
-              viewMode === 'grid'
-                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600'
-                : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
-            }`}
-          >
-            Grid
-          </button>
-          <button
-            onClick={() => setViewMode('table')}
-            className={`px-3 py-2.5 text-sm ${
-              viewMode === 'table'
-                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600'
-                : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
-            }`}
-          >
-            Table
-          </button>
-        </div>
       </div>
 
-      {/* URL indicator */}
-      <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
-        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-          <span className="text-slate-400">URL:</span>{' '}
-          <span className="text-blue-600 dark:text-blue-400">
-            /applications{searchParams.toString() ? `?${searchParams.toString()}` : ''}
-          </span>
-        </p>
-      </div>
-
-      {/* Grid View */}
-      {viewMode === 'grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredApps.map((app) => {
-            const status = statusColors[app.status];
-            return (
-              <div
-                key={app.id}
-                onClick={() => setSelectedApp(app)}
-                className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-800 transition-all cursor-pointer group"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-slate-800 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        {app.name}
-                      </h3>
-                      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${status.bg} ${status.text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${status.dot} ${app.status === 'deploying' ? 'animate-pulse' : ''}`}></span>
-                        {app.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
-                      {app.description}
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => e.stopPropagation()}
-                    className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400"
-                  >
-                    <MoreVertical size={16} />
-                  </button>
-                </div>
-
-                <div className="mt-3 flex items-center gap-2">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${envColors[app.environment]}`}>
-                    {app.environment}
-                  </span>
-                  <span className="text-xs text-slate-400">v{app.version}</span>
-                </div>
-
-                <div className="mt-4 flex items-center gap-1 text-xs text-slate-400">
-                  <Globe size={12} />
-                  <span className="truncate">{app.url}</span>
-                </div>
-
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Cpu size={12} className="text-slate-400" />
-                    <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          app.cpu > 80 ? 'bg-red-500' : app.cpu > 50 ? 'bg-amber-500' : 'bg-green-500'
-                        }`}
-                        style={{ width: `${app.cpu}%` }}
-                      ></div>
-                    </div>
-                    <span className="text-xs text-slate-500 w-8 text-right">{app.cpu}%</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MemoryStick size={12} className="text-slate-400" />
-                    <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          app.memory > 80 ? 'bg-red-500' : app.memory > 50 ? 'bg-amber-500' : 'bg-green-500'
-                        }`}
-                        style={{ width: `${app.memory}%` }}
-                      ></div>
-                    </div>
-                    <span className="text-xs text-slate-500 w-8 text-right">{app.memory}%</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">{getTenantName(app.tenantId)}</span>
-                  <span className="text-xs text-slate-400 flex items-center gap-1">
-                    <Clock size={10} />
-                    {app.lastDeployed}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Table View */}
-      {viewMode === 'table' && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Application</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tenant</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Environment</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">CPU</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Memory</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Requests</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredApps.map((app) => {
-                  const status = statusColors[app.status];
-                  return (
-                    <tr
-                      key={app.id}
-                      className="border-b border-slate-50 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors cursor-pointer"
-                      onClick={() => setSelectedApp(app)}
-                    >
-                      <td className="px-5 py-3.5">
-                        <div>
-                          <p className="text-sm font-medium text-slate-800 dark:text-white">{app.name}</p>
-                          <p className="text-xs text-slate-400">v{app.version}</p>
-                        </div>
+      <DataView {...list}>
+        {(l) =>
+          l.deployments.length === 0 ? (
+            <Card>
+              <EmptyState icon={Package} title={status || environment || search ? 'No applications match these filters' : 'No applications deployed yet'} />
+            </Card>
+          ) : (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="px-5 py-3 font-medium">Application</th>
+                    <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-5 py-3 font-medium">Environment</th>
+                    <th className="px-5 py-3 font-medium">Version</th>
+                    <th className="px-5 py-3 font-medium text-right">CPU</th>
+                    <th className="px-5 py-3 font-medium text-right">Memory</th>
+                    <th className="px-5 py-3 font-medium text-right">Requests</th>
+                    <th className="px-5 py-3 font-medium">Last deployed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {l.deployments.map((d) => (
+                    <tr key={d.id} onClick={() => setSelectedId(d.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                      <td className="px-5 py-3">
+                        <p className="font-medium text-slate-800 dark:text-white">{d.name}</p>
+                        {d.description && <p className="text-xs text-slate-500 truncate max-w-xs">{d.description}</p>}
                       </td>
-                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{getTenantName(app.tenantId)}</td>
-                      <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${status.bg} ${status.text}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
-                          {app.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${envColors[app.environment]}`}>
-                          {app.environment}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${app.cpu > 80 ? 'bg-red-500' : app.cpu > 50 ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${app.cpu}%` }}></div>
-                          </div>
-                          <span className="text-xs text-slate-500">{app.cpu}%</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${app.memory > 80 ? 'bg-red-500' : app.memory > 50 ? 'bg-amber-500' : 'bg-green-500'}`} style={{ width: `${app.memory}%` }}></div>
-                          </div>
-                          <span className="text-xs text-slate-500">{app.memory}%</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 text-sm text-slate-600 dark:text-slate-300">{app.requests.toLocaleString()}</td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-1">
-                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-green-500"><Play size={14} /></button>
-                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-amber-500"><RotateCw size={14} /></button>
-                          <button onClick={(e) => e.stopPropagation()} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-red-500"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
+                      <td className="px-5 py-3"><Badge value={d.status} /></td>
+                      <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{humanize(d.environment)}</td>
+                      <td className="px-5 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">{d.version}</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{d.cpu}%</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{d.memory}%</td>
+                      <td className="px-5 py-3 text-right tabular-nums">{d.requests.toLocaleString()}</td>
+                      <td className="px-5 py-3 text-slate-500">{formatRelative(d.lastDeployedAt)}</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </DataView>
 
-      {filteredApps.length === 0 && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center">
-          <Server size={40} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">No applications match your filters</p>
-          <button onClick={clearAllFilters} className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">
-            Clear all filters
-          </button>
-        </div>
-      )}
+      {selectedId && <DeploymentPanel id={selectedId} onClose={() => setSelectedId(null)} />}
+    </div>
+  );
+}
 
-      {/* App Detail Modal */}
-      {selectedApp && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white">
-                    <Server size={22} />
-                  </div>
+function DeploymentPanel({ id, onClose }: { id: string; onClose: () => void }) {
+  const detail = useApi<{ deployment: Deployment; activity: { id: string; action: string; type: string; createdAt: string }[] }>(`/deployments/${id}`);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
+      <aside role="dialog" aria-label="Application details" onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md h-full overflow-y-auto bg-white dark:bg-slate-800 p-6 shadow-xl">
+        {detail.loading ? <LoadingState /> : (
+          <DataView {...detail}>
+            {({ deployment: d, activity }) => (
+              <div className="space-y-6">
+                <div className="flex items-start justify-between">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-bold text-slate-800 dark:text-white">{selectedApp.name}</h3>
-                      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[selectedApp.status].bg} ${statusColors[selectedApp.status].text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusColors[selectedApp.status].dot}`}></span>
-                        {selectedApp.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-400">{selectedApp.description}</p>
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-white">{d.name}</h3>
+                    <div className="flex gap-2 mt-2"><Badge value={d.status} /><Badge value={d.environment} /></div>
                   </div>
+                  <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>
                 </div>
-                <button onClick={() => setSelectedApp(null)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">✕</button>
+                {d.description && <p className="text-sm text-slate-600 dark:text-slate-300">{d.description}</p>}
+                <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline break-all">
+                  {d.url} <ExternalLink size={14} />
+                </a>
+                <div className="grid grid-cols-3 gap-3">
+                  {[[Cpu, 'CPU', `${d.cpu}%`], [MemoryStick, 'Memory', `${d.memory}%`], [Activity, 'Requests', d.requests.toLocaleString()]].map(([Icon, label, value]) => {
+                    const I = Icon as typeof Cpu;
+                    return (
+                      <div key={label as string} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
+                        <p className="flex items-center gap-1.5 text-xs text-slate-500"><I size={13} />{label as string}</p>
+                        <p className="mt-1 font-semibold text-slate-800 dark:text-white tabular-nums">{value as string}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <dl className="text-sm space-y-2">
+                  <div className="flex justify-between"><dt className="text-slate-500">Version</dt><dd className="font-mono">{d.version}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500">Last deployed</dt><dd>{formatRelative(d.lastDeployedAt)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500">Created</dt><dd>{formatDate(d.createdAt)}</dd></div>
+                </dl>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Recent events</h4>
+                  {activity.length === 0 ? (
+                    <p className="text-sm text-slate-500">No events recorded for this application.</p>
+                  ) : (
+                    <ul className="space-y-2 text-sm">
+                      {activity.map((a) => (
+                        <li key={a.id} className="flex justify-between gap-3">
+                          <span className="text-slate-700 dark:text-slate-200">{a.action}</span>
+                          <span className="text-xs text-slate-400 shrink-0">{formatRelative(a.createdAt)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-center">
-                  <Cpu size={20} className="mx-auto text-blue-500 mb-2" />
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{selectedApp.cpu}%</p>
-                  <p className="text-xs text-slate-500">CPU Usage</p>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-center">
-                  <MemoryStick size={20} className="mx-auto text-purple-500 mb-2" />
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{selectedApp.memory}%</p>
-                  <p className="text-xs text-slate-500">Memory</p>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 text-center">
-                  <Activity size={20} className="mx-auto text-green-500 mb-2" />
-                  <p className="text-xl font-bold text-slate-800 dark:text-white">{selectedApp.requests.toLocaleString()}</p>
-                  <p className="text-xs text-slate-500">Requests</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-white">Application Details</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><p className="text-xs text-slate-400">Version</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">v{selectedApp.version}</p></div>
-                  <div><p className="text-xs text-slate-400">Environment</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200 capitalize">{selectedApp.environment}</p></div>
-                  <div><p className="text-xs text-slate-400">URL</p><p className="text-sm font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">{selectedApp.url}<ExternalLink size={12} /></p></div>
-                  <div><p className="text-xs text-slate-400">Tenant</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{getTenantName(selectedApp.tenantId)}</p></div>
-                  <div><p className="text-xs text-slate-400">Last Deployed</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.lastDeployed}</p></div>
-                  <div><p className="text-xs text-slate-400">Created</p><p className="text-sm font-medium text-slate-700 dark:text-slate-200">{selectedApp.createdAt}</p></div>
-                </div>
-              </div>
-              <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"><Play size={14} />Restart</button>
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"><RotateCw size={14} />Redeploy</button>
-                <button className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"><ExternalLink size={14} />Open</button>
-                <button className="px-4 py-2.5 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"><Trash2 size={14} /></button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+            )}
+          </DataView>
+        )}
+      </aside>
     </div>
   );
 }
