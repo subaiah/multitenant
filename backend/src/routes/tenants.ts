@@ -2,8 +2,9 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { config } from '../config/env.js';
-import { deprovisionTenant, startProvisioning } from '../lib/provisioning.js';
+import { deprovisionTenant, rotateTenantCredentials, startProvisioning } from '../lib/provisioning.js';
 import { RESERVED_ROLE_SLUGS, roleNameFor } from '../lib/tenant-targets.js';
+import { latestMigration, tenantsBehind } from '../lib/tenant-migrations.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { AppError } from '../middleware/error-handler.js';
 import { countBy } from '../lib/stats.js';
@@ -59,10 +60,19 @@ type TenantRow = Awaited<ReturnType<typeof controlDb.tenant.findMany<{ include: 
 
 function present(t: TenantRow) {
   const { usage, databaseConfig, initialAdminEmail, initialAdminName, ...tenant } = t;
+  const latest = latestMigration();
   return {
     ...tenant,
     isolation: databaseConfig?.strategy ?? null,
-    migration: databaseConfig ? { last: databaseConfig.lastMigration, at: databaseConfig.migratedAt, error: databaseConfig.migrationError } : null,
+    migration: databaseConfig
+      ? {
+          last: databaseConfig.lastMigration,
+          at: databaseConfig.migratedAt,
+          error: databaseConfig.migrationError,
+          // On an older schema than this server's newest migration
+          behind: t.provisioningStatus === 'READY' && !!latest && databaseConfig.lastMigration !== latest,
+        }
+      : null,
     // Snapshot from the periodic usage job (lib/tenant-usage.ts); may lag a few minutes
     _count: { users: usage?.users ?? 0, applications: usage?.applications ?? 0 },
     lastActiveAt: usage?.lastActiveAt ?? null,
@@ -118,7 +128,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
         initialAdminName: data.adminName,
         createdById: request.user.userId,
         databaseConfig: {
-          create: { strategy: data.strategy, provider: 'POSTGRESQL', region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
+          create: { strategy: data.strategy, region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
         },
       },
       include: tenantInclude,
@@ -140,6 +150,21 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.status(202).send({ ...present(tenant), adminInvited: data.adminEmail });
   });
 
+  // New password for the tenant's database role
+  fastify.post('/:id/rotate-credentials', {
+    config: { permission: 'tenants:manage' },
+    schema: {
+      tags: ['tenants'],
+      summary: "Rotate the tenant's database credentials",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    if (!(await controlDb.tenant.findUnique({ where: { id }, select: { id: true } }))) throw new AppError('Tenant not found', 404);
+    await rotateTenantCredentials(id, request.user.userId);
+    return { message: 'Database credentials rotated' };
+  });
+
   // Retry provisioning a tenant that failed
   fastify.post('/:id/provision', {
     config: { permission: 'tenants:manage' },
@@ -154,6 +179,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     if (!tenant) throw new AppError('Tenant not found', 404);
     if (tenant.provisioningStatus === 'READY') throw new AppError('This tenant is already set up', 409);
     if (tenant.provisioningStatus === 'DEPROVISIONING') throw new AppError('This tenant is being deleted', 409);
+    // Pending until the job picks it up, so nobody reads the old failure as the outcome
+    await controlDb.tenant.update({ where: { id }, data: { provisioningStatus: 'PENDING', provisioningError: null } });
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'retried provisioning', target: tenant.slug, type: 'CONFIG' });
     void startProvisioning(id);
     return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
@@ -214,6 +241,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
 
     return {
       data: tenants.map(present),
+      migrations: { latest: latestMigration(), tenantsBehind: await tenantsBehind() },
       statusCounts: countBy(statusCounts, 'status'),
       pagination: {
         page,
@@ -350,6 +378,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       await deprovisionTenant(id, request.user.userId);
     } catch (err) {
+      if (err instanceof AppError) throw err; // e.g. busy: another job is changing this tenant
       request.log.error({ err, tenantId: id }, 'Deleting tenant failed');
       throw new AppError('Deleting the tenant failed. The error is shown on the tenant; deleting again retries.', 500);
     }

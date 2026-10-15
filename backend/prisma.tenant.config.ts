@@ -7,5 +7,7 @@ export default defineConfig({
   schema: './prisma/tenant',
   datasource: {
     url: env('TENANT_DATABASE_URL'),
+    // Optional scratch database for `prisma migrate dev` and the CI drift check
+    ...(process.env.TENANT_SHADOW_DATABASE_URL && { shadowDatabaseUrl: process.env.TENANT_SHADOW_DATABASE_URL }),
   },
 });

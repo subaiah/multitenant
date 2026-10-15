@@ -5,6 +5,8 @@ import type { RecentActivity } from '../lib/tenant-usage.js';
 import { AppError } from '../middleware/error-handler.js';
 import { isPlatformUser } from '../utils/authorization.js';
 import { countBy } from '../lib/stats.js';
+import { latestMigration, startRollout, tenantsBehind } from '../lib/tenant-migrations.js';
+import { logPlatformActivity } from '../lib/activity.js';
 
 /** Platform-portal data: cross-tenant statistics and platform users. */
 export const platformRoutes: FastifyPluginAsync = async (fastify) => {
@@ -78,6 +80,24 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
         .slice(0, 5),
       usageAsOf: oldestSnapshot,
     };
+  });
+
+  // Apply pending tenant migrations everywhere (what `npm run tenant:migrate` does)
+  fastify.post('/tenant-migrations', {
+    config: { permission: 'tenants:manage' },
+    schema: { tags: ['platform'], summary: 'Run tenant migrations on every tenant database and schema' },
+  }, async (request) => {
+    const run = startRollout();
+    if (!run) throw new AppError('Tenant migrations are already running', 409);
+    const report = await run;
+    await logPlatformActivity({
+      userId: request.user.userId,
+      action: 'ran tenant migrations',
+      target: latestMigration() ?? 'no migrations',
+      type: report.failed.length ? 'ALERT' : 'DEPLOY',
+      metadata: { succeeded: report.succeeded.length, failed: report.failed.map((f) => f.target) },
+    });
+    return { ...report, latest: latestMigration(), tenantsBehind: await tenantsBehind() };
   });
 
   fastify.get('/users', {

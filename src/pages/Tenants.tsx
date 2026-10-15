@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight, Plus, Loader2, AlertTriangle, RotateCw, Trash2, Database } from 'lucide-react';
+import { Building2, Search, X, Users, Package, Clock, Calendar, ChevronLeft, ChevronRight, Plus, Loader2, AlertTriangle, RotateCw, Trash2, Database, KeyRound, ArrowUpCircle } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
@@ -24,7 +24,7 @@ interface Tenant {
   isolation: Isolation | null;
   provisioningStatus: 'PENDING' | 'PROVISIONING' | 'READY' | 'FAILED' | 'DEPROVISIONING';
   provisioningError: string | null;
-  migration: { last: string | null; at: string | null; error: string | null } | null;
+  migration: { last: string | null; at: string | null; error: string | null; behind: boolean } | null;
 }
 type Isolation = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
 
@@ -50,6 +50,7 @@ function ProvisioningBadge({ tenant }: { tenant: Tenant }) {
 }
 interface TenantList {
   data: Tenant[];
+  migrations: { latest: string | null; tenantsBehind: number };
   statusCounts: Record<string, number>;
   pagination: { page: number; limit: number; total: number; pages: number };
 }
@@ -98,6 +99,10 @@ export default function Tenants() {
           <button onClick={() => setCreating(true)} className={primaryButtonClass}><Plus size={16} />New tenant</button>
         )} />
       {notice && <p role="status" className="text-sm text-green-700 dark:text-green-400">{notice}</p>}
+      {list.data && list.data.migrations.tenantsBehind > 0 && (
+        <MigrationBanner migrations={list.data.migrations} canRun={hasPermission('tenants:manage')}
+          onDone={async (msg) => { setNotice(msg); await list.reload(); }} />
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 p-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -151,6 +156,9 @@ export default function Tenants() {
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300"><Database size={12} />{ISOLATION[t.isolation].label}</span>
                       )}
                       <ProvisioningBadge tenant={t} />
+                      {t.migration?.behind && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><ArrowUpCircle size={12} />Older schema</span>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-4 text-sm text-slate-600 dark:text-slate-300">
                       <span className="flex items-center gap-1.5"><Users size={14} className="text-slate-400" />{t._count.users} users</span>
@@ -202,7 +210,7 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
   const [status, setStatus] = useState(tenant.status);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState<'retry' | 'delete' | null>(null);
+  const [working, setWorking] = useState<'retry' | 'delete' | 'rotate' | null>(null);
   const dirty = plan !== tenant.plan || status !== tenant.status;
 
   const retry = async () => {
@@ -213,6 +221,20 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
       await onChanged(`Setting up ${tenant.name} again…`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const rotate = async () => {
+    if (!confirm(`Give ${tenant.name}'s database role a new password? Open connections finish normally; new ones use the new password.`)) return;
+    setWorking('rotate');
+    setError(null);
+    try {
+      await apiPost(`/tenants/${tenant.id}/rotate-credentials`);
+      await onChanged(`${tenant.name}'s database credentials were rotated.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Rotation failed');
     } finally {
       setWorking(null);
     }
@@ -278,11 +300,19 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
         {tenant.usageRefreshedAt && <p className="-mt-3 text-xs text-slate-400">Counts as of {formatRelative(tenant.usageRefreshedAt).toLowerCase()}</p>}
 
         <section aria-label="Data isolation" className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 text-sm space-y-1">
-          <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-white"><Database size={14} />{tenant.isolation ? ISOLATION[tenant.isolation].label : '—'}<ProvisioningBadge tenant={tenant} /></p>
+          <p className="flex items-center gap-2 font-medium text-slate-800 dark:text-white"><Database size={14} />{tenant.isolation ? ISOLATION[tenant.isolation].label : '—'} · PostgreSQL<ProvisioningBadge tenant={tenant} /></p>
           {tenant.isolation && <p className="text-xs text-slate-500">{ISOLATION[tenant.isolation].description} Fixed once created.</p>}
-          {tenant.migration?.last && <p className="text-xs text-slate-500">Schema version <span className="font-mono">{tenant.migration.last}</span></p>}
+          {tenant.migration?.last && (
+            <p className="text-xs text-slate-500">Schema version <span className="font-mono">{tenant.migration.last}</span>
+              {tenant.migration.behind && <span className="text-amber-700 dark:text-amber-300"> · older than the newest migration</span>}</p>
+          )}
           {tenant.migration?.error && <p className="text-xs text-red-600">Last migration failed: {tenant.migration.error}</p>}
           {tenant.provisioningError && <p role="alert" className="text-xs text-red-600 break-words">{tenant.provisioningError}</p>}
+          {canManage && tenant.provisioningStatus === 'READY' && (
+            <button onClick={rotate} disabled={working !== null} className={`${secondaryButtonClass} mt-2`}>
+              {working === 'rotate' ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}Rotate credentials
+            </button>
+          )}
           {canManage && tenant.provisioningStatus === 'FAILED' && (
             <button onClick={retry} disabled={working !== null} className={`${secondaryButtonClass} mt-2`}>
               <RotateCw size={14} className={working === 'retry' ? 'animate-spin' : ''} />Retry setup
@@ -389,7 +419,7 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
             </label>
           ))}
         </div>
-        <p className="mt-1 text-xs text-slate-500">Can't be changed once the tenant has data.</p>
+        <p className="mt-1 text-xs text-slate-500">All three run on PostgreSQL, the only supported database (isolation relies on its roles and row-level security). Can't be changed once the tenant has data.</p>
       </fieldset>
       <p className="pt-2 text-sm font-medium text-slate-700 dark:text-slate-200">First administrator</p>
       <Field label="Name">
@@ -404,5 +434,42 @@ function NewTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreate
         <button type="submit" disabled={saving} className={primaryButtonClass}>{saving ? 'Creating…' : 'Create tenant'}</button>
       </div>
     </Dialog>
+  );
+}
+
+function MigrationBanner({ migrations, canRun, onDone }: {
+  migrations: { latest: string | null; tenantsBehind: number };
+  canRun: boolean;
+  onDone: (message: string) => Promise<void>;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await apiPost<{ succeeded: unknown[]; failed: { target: string; error: string }[]; tenantsBehind: number }>('/platform/tenant-migrations');
+      if (r.failed.length) setError(`${r.failed.length} failed: ${r.failed.map((f) => `${f.target} (${f.error})`).join('; ')}`);
+      await onDone(`Migrations ran on ${r.succeeded.length} tenant location${r.succeeded.length === 1 ? '' : 's'} (databases and schemas).${r.tenantsBehind ? ` ${r.tenantsBehind} still behind.` : ''}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Running migrations failed');
+    } finally {
+      setRunning(false);
+    }
+  };
+  const n = migrations.tenantsBehind;
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <ArrowUpCircle size={16} />
+      <span className="flex-1 min-w-[200px]">
+        {n} tenant{n === 1 ? ' is' : 's are'} on an older schema than <span className="font-mono">{migrations.latest}</span>.
+        {error && <span className="block text-red-700 dark:text-red-300 mt-1">{error}</span>}
+      </span>
+      {canRun && (
+        <button onClick={run} disabled={running} className={secondaryButtonClass}>
+          {running ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}Run migrations
+        </button>
+      )}
+    </div>
   );
 }

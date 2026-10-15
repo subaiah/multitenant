@@ -2,6 +2,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant, type TenantDb } from '../lib/tenant-db.js';
 import { AppError } from './error-handler.js';
+import { classifyDatabaseError } from '../lib/db-errors.js';
 import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
@@ -46,6 +47,9 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     // and refreshes userType from the database
     await verifySession(request);
   } catch (err) {
+    // The tenant's database being briefly unreachable is not a reason to sign
+    // anyone out: let the error handler answer 503
+    if (classifyDatabaseError(err) || (err instanceof AppError && err.statusCode >= 500)) throw err;
     return reply.status(401).send({ error: 'Unauthorized', message: err instanceof Error ? err.message : undefined });
   }
 
@@ -71,7 +75,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   if (tenantId) {
     const tenant = await controlDb.tenant.findUnique({
       where: { id: tenantId },
-      select: { id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true },
+      select: {
+        id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true,
+        databaseConfig: { select: { updatedAt: true } },
+      },
     });
     if (!tenant) {
       return reply.status(404).send({ error: 'Not Found', message: 'Tenant not found' });
@@ -84,9 +91,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     if (tenant.provisioningStatus !== 'READY') {
       return reply.status(409).send({ error: 'Conflict', message: 'This tenant is not ready yet' });
     }
-    const { provisioningStatus: _, ...tenantInfo } = tenant;
+    const { provisioningStatus: _, databaseConfig, ...tenantInfo } = tenant;
     request.tenant = tenantInfo;
-    request.db = await dbForTenant(tenant.id);
+    // The config's version, so a change made on another server (rotated credentials) applies at once
+    request.db = await dbForTenant(tenant.id, databaseConfig?.updatedAt);
     return;
   }
 

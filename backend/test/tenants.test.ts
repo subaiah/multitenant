@@ -113,7 +113,7 @@ test("nobody signs in to a tenant that isn't provisioned yet", async () => {
   const t = await controlDb.tenant.create({
     data: {
       name: 'Pending Co', slug, plan: 'FREE', status: 'ACTIVE', provisioningStatus: 'PENDING',
-      databaseConfig: { create: { strategy: 'SHARED_TABLES', provider: 'POSTGRESQL', region: 'x', storageLimit: '1 GB' } },
+      databaseConfig: { create: { strategy: 'SHARED_TABLES', region: 'x', storageLimit: '1 GB' } },
     },
   });
   trackTenant(t.id);

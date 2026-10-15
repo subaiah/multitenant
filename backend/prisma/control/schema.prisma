@@ -97,7 +97,9 @@ model DatabaseConfig {
   id                String           @id @default(uuid())
   tenantId          String           @unique @map("tenant_id")
   strategy          DatabaseStrategy
-  provider          DatabaseProvider
+  /// Tenant data is always on PostgreSQL: isolation relies on its roles,
+  /// schemas and row-level security (see docs/tenant-isolation.md)
+  provider          DatabaseProvider @default(POSTGRESQL)
   region            String
   backupEnabled     Boolean          @default(false) @map("backup_enabled")
   encryptionAtRest  Boolean          @default(false) @map("encryption_at_rest")
@@ -131,11 +133,10 @@ enum DatabaseStrategy {
   SHARED_TABLES
 }
 
+// PostgreSQL only. Other engines would need their own isolation
+// implementation (MySQL has no row-level security at all).
 enum DatabaseProvider {
   POSTGRESQL
-  MYSQL
-  MONGODB
-  SQLSERVER
 }
 
 // People who run the platform. Tenant users are in the tenant plane.

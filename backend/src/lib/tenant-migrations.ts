@@ -50,6 +50,36 @@ export function loadMigrations(dir = migrationsDir()): Migration[] {
     });
 }
 
+let latestCache: { at: number; name: string | null } | null = null;
+
+/** Name of the newest tenant migration this server knows about (re-read every 30 s). */
+export function latestMigration(): string | null {
+  if (!latestCache || Date.now() - latestCache.at > 30_000) {
+    latestCache = { at: Date.now(), name: loadMigrations().at(-1)?.name ?? null };
+  }
+  return latestCache.name;
+}
+
+/** Ready tenants whose schema is older than the newest migration (or never recorded). */
+export async function tenantsBehind(): Promise<number> {
+  const latest = latestMigration();
+  if (!latest) return 0;
+  return controlDb.databaseConfig.count({
+    where: { tenant: { provisioningStatus: 'READY' }, OR: [{ lastMigration: null }, { lastMigration: { not: latest } }] },
+  });
+}
+
+let rollout: Promise<RolloutReport> | null = null;
+
+/** migrateAllTargets, at most one run per server at a time (null if one is running). */
+export function startRollout(): Promise<RolloutReport> | null {
+  if (rollout) return null;
+  rollout = migrateAllTargets().finally(() => {
+    rollout = null;
+  });
+  return rollout;
+}
+
 export async function withConnection<T>(url: string, fn: (c: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({ connectionString: url });
   await client.connect();

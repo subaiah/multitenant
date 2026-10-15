@@ -91,7 +91,7 @@ async function main() {
         name: t.name, slug: t.slug, plan: t.plan, status: t.status, primaryColor: t.color,
         loginTitle: t.loginTitle, loginSubtitle: t.loginSubtitle,
         databaseConfig: {
-          create: { strategy: t.strategy, provider: 'POSTGRESQL', region: 'US East', backupEnabled: true, encryptionAtRest: true, storageLimit: '50 GB' },
+          create: { strategy: t.strategy, region: 'US East', backupEnabled: true, encryptionAtRest: true, storageLimit: '50 GB' },
         },
       },
     });
