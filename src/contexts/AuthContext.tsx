@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import { apiGet, apiPost, logout as apiLogout, getCurrentUser, type CurrentUser } from '../lib/api-client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode, useRef } from 'react';
+import { SESSION_ENDED_EVENT, apiGet, apiPost, logout as apiLogout, getCurrentUser, type CurrentUser } from '../lib/api-client';
 import { permissionMatches, type Portal } from '../lib/permissions';
 
 type User = CurrentUser['user'];
@@ -18,6 +18,8 @@ interface AuthContextType {
   reload: () => Promise<Portal | null>;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
+  /** True after the server ended the session mid-use (see api-client) */
+  sessionEnded: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -27,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   const clear = useCallback(() => {
     setUser(null);
@@ -42,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me.user);
       setTenant(me.tenant);
       setPermissions(permissions);
+      setSessionEnded(false);
       return me.user.portal;
     } catch {
       // Not logged in (or the session expired): route guards send the user to /login
@@ -56,6 +60,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // A request found the session ended (deactivated, removed, signed out
+  // everywhere): drop the user but keep the tenant, so RequireAuth sends them
+  // to this tenant's sign-in page with an explanation.
+  const signedIn = useRef(false);
+  signedIn.current = !!user;
+  useEffect(() => {
+    const onEnded = () => {
+      // Only a session that existed can "end" (not the startup check while signed out)
+      if (!signedIn.current) return;
+      setSessionEnded(true);
+      setUser(null);
+      setPermissions([]);
+    };
+    window.addEventListener(SESSION_ENDED_EVENT, onEnded);
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, onEnded);
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string, tenantSlug: string): Promise<Portal> => {
@@ -81,8 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = useCallback((permission: string) => permissionMatches(granted, permission), [granted]);
 
   const value = useMemo(
-    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission }),
-    [user, tenant, permissions, loading, login, reload, logout, hasPermission],
+    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission, sessionEnded }),
+    [user, tenant, permissions, loading, login, reload, logout, hasPermission, sessionEnded],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

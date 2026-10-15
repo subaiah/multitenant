@@ -8,6 +8,7 @@ import { sendMail } from '../lib/mailer.js';
 import { otpEmail } from '../lib/email-templates.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
+import { endAllSessions, verifySession } from '../lib/sessions.js';
 import crypto from 'crypto';
 
 // Validation schemas
@@ -612,50 +613,31 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get current authenticated user',
     },
   }, async (request) => {
-    const accessToken = request.cookies.access_token;
-
-    if (!accessToken) {
+    const session = await verifySession(request);
+    const user = await prisma.user.findUnique({
+      where: { id: session.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        userType: true,
+        tenantId: true,
+        tenant: { select: { id: true, name: true, slug: true } },
+      },
+    });
+    if (!user) {
       throw new AppError('Not authenticated', 401);
     }
-
-    try {
-      const decoded = fastify.jwt.verify(accessToken) as any;
-
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          userType: true,
-          tenantId: true,
-          tenant: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-            },
-          },
-        },
-      });
-
-      if (!user) {
-        throw new AppError('User not found', 404);
-      }
-
-      return {
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          userType: user.userType,
-          portal: user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT',
-        },
-        tenant: user.tenant,
-      };
-    } catch (error) {
-      throw new AppError('Invalid or expired token', 401);
-    }
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        userType: user.userType,
+        portal: user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT',
+      },
+      tenant: user.tenant,
+    };
   });
 
   // Check authentication status
@@ -681,42 +663,19 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Revoke all active sessions for current user',
     },
   }, async (request, reply) => {
-    const accessToken = request.cookies.access_token;
+    const user = await verifySession(request);
 
-    if (!accessToken) {
-      throw new AppError('Not authenticated', 401);
-    }
+    // Ends every session, including access tokens already handed out
+    await prisma.$transaction(endAllSessions(user.id));
 
-    try {
-      const decoded = fastify.jwt.verify(accessToken) as any;
+    reply.clearCookie('access_token', { path: '/' });
+    reply.clearCookie('refresh_token', { path: '/' });
 
-      // Revoke all refresh tokens for this user
-      await prisma.refreshToken.updateMany({
-        where: { userId: decoded.userId },
-        data: { revokedAt: new Date() },
-      });
+    await prisma.activity.create({
+      data: { tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' },
+    });
 
-      // Clear cookies
-      reply.clearCookie('access_token', { path: '/' });
-      reply.clearCookie('refresh_token', { path: '/' });
-
-      // Log activity
-      await prisma.activity.create({
-        data: {
-          tenantId: decoded.tenantId,
-          userId: decoded.userId,
-          action: 'revoked all sessions',
-          target: 'system',
-          type: 'AUTH',
-        },
-      });
-
-      return {
-        message: 'All sessions revoked successfully',
-      };
-    } catch (error) {
-      throw new AppError('Invalid or expired token', 401);
-    }
+    return { message: 'All sessions revoked successfully' };
   });
 
   // Get active sessions for current user
@@ -726,15 +685,8 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get active sessions for current user',
     },
   }, async (request) => {
-    const accessToken = request.cookies.access_token;
-
-    if (!accessToken) {
-      throw new AppError('Not authenticated', 401);
-    }
-
+    const decoded = { userId: (await verifySession(request)).id };
     try {
-      const decoded = fastify.jwt.verify(accessToken) as any;
-
       const sessions = await prisma.refreshToken.findMany({
         where: {
           userId: decoded.userId,

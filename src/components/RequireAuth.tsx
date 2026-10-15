@@ -8,7 +8,7 @@ import { portalHome, type Portal } from '../lib/permissions';
  * users to /login, and sends users of the other portal to their own home.
  */
 export function RequireAuth({ portal, children }: { portal: Portal; children: ReactNode }) {
-  const { user, tenant, loading } = useAuth();
+  const { user, tenant, loading, sessionEnded } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -20,7 +20,8 @@ export function RequireAuth({ portal, children }: { portal: Portal; children: Re
   }
 
   if (!user) {
-    const loginPath = tenant?.slug ? `/${tenant.slug}/login` : '/login';
+    const base = tenant?.slug ? `/${tenant.slug}/login` : '/login';
+    const loginPath = sessionEnded ? `${base}?notice=signed-out` : base;
     return <Navigate to={loginPath} replace state={{ from: location.pathname }} />;
   }
 

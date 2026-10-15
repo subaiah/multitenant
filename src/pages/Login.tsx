@@ -239,7 +239,9 @@ export default function Login() {
     ? 'Your account is ready. Sign in with your new password.'
     : notice === 'password-reset'
       ? 'Your password has been changed. Sign in with your new password.'
-      : null;
+      : notice === 'signed-out'
+        ? 'You were signed out. Sign in again to continue.'
+        : null;
   const hasProviders = tenant?.authConfig?.providers && tenant.authConfig.providers.length > 0;
   const ssoOnly = tenant?.authConfig?.ssoOnly || false;
 

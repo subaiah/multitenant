@@ -6,6 +6,7 @@ import { INVITE_TTL_DAYS, issueUserToken } from '../lib/user-tokens.js';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { explainAccess } from '../lib/access.js';
+import { endAllSessions } from '../lib/sessions.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireCanManageUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
@@ -340,7 +341,7 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    const user = await prisma.user.update({
+    const update = prisma.user.update({
       where: {
         id,
         tenantId: request.tenant.id,
@@ -355,6 +356,10 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         updatedAt: true,
       },
     });
+    // Deactivating signs the person out everywhere, right away
+    const [user] = data.status && data.status !== 'ACTIVE'
+      ? await prisma.$transaction([update, ...endAllSessions(id)])
+      : [await update];
 
     // Log activity
     await prisma.activity.create({

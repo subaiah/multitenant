@@ -76,13 +76,25 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiOptions 
   }
 
   if (!(await refreshSession())) {
+    sessionEnded();
     throw new AuthError();
   }
   const retry = await send(url, fetchOptions);
   if (retry.status === 401) {
+    sessionEnded();
     throw new AuthError();
   }
   return parse<T>(retry);
+}
+
+/**
+ * The server refused the session and it couldn't be renewed: the account was
+ * deactivated or removed, or the user signed out everywhere. AuthContext
+ * listens for this and sends the user to the sign-in page.
+ */
+export const SESSION_ENDED_EVENT = 'auth:session-ended';
+function sessionEnded() {
+  window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
 }
 
 export function apiGet<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
