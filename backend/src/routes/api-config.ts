@@ -1,8 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const updateApiConfigSchema = z.object({
   bffEnabled: z.boolean().optional(),
@@ -24,7 +24,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get API configuration for current tenant',
     },
   }, async (request, reply) => {
-    const config = await prisma.apiConfig.findUnique({
+    const config = await request.db.apiConfig.findUnique({
       where: { tenantId: request.tenant.id },
     });
 
@@ -64,21 +64,19 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('BFF URL required when BFF is enabled', 400);
     }
 
-    const config = await prisma.apiConfig.update({
+    const config = await request.db.apiConfig.update({
       where: { tenantId: request.tenant.id },
       data,
     });
 
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'updated API configuration',
         target: 'api',
         type: 'API',
         metadata: data,
-      },
-    });
+      });
 
     return config;
   });

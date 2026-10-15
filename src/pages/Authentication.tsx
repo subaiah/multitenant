@@ -9,7 +9,7 @@ interface Provider {
   provider: string;
   enabled: boolean;
   clientId: string | null;
-  tenantId: string | null;
+  idpTenantId: string | null;
   domain: string | null;
   scopes: string[];
   autoProvision: boolean;
@@ -197,7 +197,7 @@ function AddProviderDialog({ catalog, onClose, onAdd }: {
         ...(clientId && { clientId }),
         ...(clientSecret && { clientSecret }),
         ...(domain && { domain }),
-        ...(directoryId && { tenantId: directoryId }),
+        ...(directoryId && { directoryId }),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add provider');

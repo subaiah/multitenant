@@ -7,7 +7,7 @@
  * Every `permission` must be in src/utils/permissions.ts (checked by
  * test/permissions.test.ts) and every `path` must be a route in src/App.tsx.
  */
-import { prisma, pool } from '../src/lib/prisma.js';
+import { controlDb as prisma, disconnectDatabases } from '../src/lib/prisma.js';
 
 import { MENUS, type MenuSeed, type Portal } from './menu-definitions.js';
 
@@ -58,6 +58,5 @@ seedMenuItems()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
-    await pool.end();
+    await disconnectDatabases();
   });

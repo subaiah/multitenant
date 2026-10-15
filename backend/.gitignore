@@ -41,3 +41,6 @@ lerna-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Generated Prisma clients (npm run prisma:generate)
+src/generated/

@@ -9,13 +9,15 @@
  * Rotating a key: add SECRETS_KEY_V2 next to V1, deploy, run this script, then
  * remove V1 once `--check` reports nothing left on it.
  */
-import { prisma, pool } from '../src/lib/prisma.js';
+import { controlDb, tenantDb, disconnectDatabases } from '../src/lib/prisma.js';
 import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretContext, secretKeyVersion, type SecretField } from '../src/lib/secrets.js';
 
-// Prisma delegate for each secret field's model
+// Prisma delegate for each secret field's model. SSO secrets are tenant data:
+// this covers the shared tenant database; tenants with their own schema or
+// database are covered when those modes land (the tenant migration runner).
 const delegates: Record<SecretField, { findMany: Function; update: Function }> = {
-  connectionString: prisma.databaseConfig,
-  clientSecret: prisma.authProvider,
+  connectionString: controlDb.databaseConfig,
+  clientSecret: tenantDb.authProvider,
 };
 
 /** `only` limits the run to the given row ids per field (used by tests, which share a database). */
@@ -67,7 +69,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exitCode = 1;
     })
     .finally(async () => {
-      await prisma.$disconnect();
-      await pool.end();
+      await disconnectDatabases();
     });
 }

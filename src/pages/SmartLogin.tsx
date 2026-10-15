@@ -114,10 +114,7 @@ export default function SmartLogin() {
 
           <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
             <p className="text-center text-sm text-slate-600 dark:text-slate-400">
-              Don't have an organization?{' '}
-              <a href="/register" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
-                Create one
-              </a>
+              Don't have an account? Ask your organization's administrator for an invitation.
             </p>
           </div>
         </div>

@@ -1,11 +1,11 @@
-import { prisma } from './prisma.js';
+import type { TenantDb } from './tenant-db.js';
 import { PERMISSIONS, USER_TYPE_PERMISSIONS, isTenantGrantable, permissionMatches } from '../utils/permissions.js';
 
-const permName = (rp: { permission: { resource: string; action: string } }) => `${rp.permission.resource}:${rp.permission.action}`;
+const permName = (rp: { permission: string }) => rp.permission;
 
 /** Permissions a role carries, as `resource:action` strings. */
-export async function rolePermissionNames(roleId: string): Promise<string[]> {
-  const rows = await prisma.rolePermission.findMany({ where: { roleId }, include: { permission: true } });
+export async function rolePermissionNames(db: TenantDb, roleId: string): Promise<string[]> {
+  const rows = await db.rolePermission.findMany({ where: { roleId } });
   return rows.map(permName);
 }
 
@@ -13,8 +13,8 @@ export async function rolePermissionNames(roleId: string): Promise<string[]> {
  * Permissions that membership of this group grants (through every role
  * assigned to the group, active or scheduled; expired ones are ignored).
  */
-export async function groupPermissionNames(groupId: string, tenantId: string): Promise<string[]> {
-  const assignments = await prisma.roleAssignment.findMany({
+export async function groupPermissionNames(db: TenantDb, groupId: string, tenantId: string): Promise<string[]> {
+  const assignments = await db.roleAssignment.findMany({
     where: {
       tenantId,
       groupId,
@@ -22,7 +22,7 @@ export async function groupPermissionNames(groupId: string, tenantId: string): P
       status: 'ACTIVE',
       OR: [{ validTo: null }, { validTo: { gt: new Date() } }],
     },
-    include: { role: { include: { permissions: { include: { permission: true } } } } },
+    include: { role: { include: { permissions: true } } },
   });
   return [...new Set(assignments.flatMap((a) => a.role.permissions.map(permName)))];
 }
@@ -90,22 +90,22 @@ function splitGrantable(perms: string[]) {
 
 const CATALOG = new Set<string>(PERMISSIONS);
 
-export async function explainAccess(userId: string, tenantId: string, tenantName: string, now = new Date()): Promise<AccessReview | null> {
-  const user = await prisma.user.findFirst({
+export async function explainAccess(db: TenantDb, userId: string, tenantId: string, tenantName: string, now = new Date()): Promise<AccessReview | null> {
+  const user = await db.user.findFirst({
     where: { id: userId, tenantId },
     select: { id: true, email: true, name: true, userType: true, status: true },
   });
   if (!user) return null;
 
-  const roleInclude = { role: { include: { permissions: { include: { permission: true } } } } } as const;
+  const roleInclude = { role: { include: { permissions: true } } } as const;
   const [direct, memberships, delegations] = await Promise.all([
-    prisma.roleAssignment.findMany({ where: { tenantId, userId, principalType: 'USER' }, include: roleInclude, orderBy: { createdAt: 'asc' } }),
-    prisma.groupMembership.findMany({
+    db.roleAssignment.findMany({ where: { tenantId, userId, principalType: 'USER' }, include: roleInclude, orderBy: { createdAt: 'asc' } }),
+    db.groupMembership.findMany({
       where: { tenantId, userId },
       include: { group: { include: { roleAssignments: { where: { principalType: 'GROUP' }, include: roleInclude, orderBy: { createdAt: 'asc' } } } } },
       orderBy: { createdAt: 'asc' },
     }),
-    prisma.delegation.findMany({
+    db.delegation.findMany({
       where: { tenantId, delegateId: userId },
       include: { delegator: { select: { name: true, email: true } }, roleAssignment: { include: roleInclude } },
       orderBy: { createdAt: 'asc' },
@@ -116,8 +116,8 @@ export async function explainAccess(userId: string, tenantId: string, tenantName
   const scopeIds = [...direct, ...memberships.flatMap((m) => m.group.roleAssignments), ...delegations.map((d) => d.roleAssignment)]
     .filter((a) => a.scopeType !== 'TENANT').map((a) => a.scopeId);
   const [orgs, units] = await Promise.all([
-    prisma.organization.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
-    prisma.orgUnit.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
+    db.organization.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
+    db.orgUnit.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
   ]);
   const scopeNames = new Map<string, string>([...orgs, ...units].map((x) => [x.id, x.name]));
   const scopeOf = (a: { scopeType: string; scopeId: string }) => ({
@@ -126,7 +126,7 @@ export async function explainAccess(userId: string, tenantId: string, tenantName
   });
   const assignmentReason = (a: { status: string; validFrom: Date; validTo: Date | null }, what: string) =>
     a.status !== 'ACTIVE' ? `${what} is ${a.status.toLowerCase()}` : windowReason(a.validFrom, a.validTo, now, what);
-  const rolePerms = (a: { role: { permissions: { permission: { resource: string; action: string } }[] } }) =>
+  const rolePerms = (a: { role: { permissions: { permission: string }[] } }) =>
     splitGrantable(a.role.permissions.map(permName));
 
   const sources: AccessSource[] = [];

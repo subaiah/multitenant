@@ -1,8 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const createPolicySchema = z.object({
   name: z.string().min(2).max(100),
@@ -51,17 +51,17 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
-    // Platform admins can see all policies, tenant users only see their tenant's policies
+    // Only the current tenant's policies (platform staff select a tenant with x-tenant-id)
     const where = {
       AND: [
-        isPlatformAdmin(userType) ? {} : { tenantId },
+        { tenantId },
         enabled ? { enabled: enabled === 'true' } : {},
         effect ? { effect } : {},
       ],
     };
     
     const [policies, total] = await Promise.all([
-      prisma.accessPolicy.findMany({
+      request.db.accessPolicy.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -72,7 +72,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.accessPolicy.count({ where }),
+      request.db.accessPolicy.count({ where }),
     ]);
     
     return {
@@ -105,10 +105,10 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     const { id } = request.params as { id: string };
     
-    const policy = await prisma.accessPolicy.findFirst({
+    const policy = await request.db.accessPolicy.findFirst({
       where: {
         id,
-        ...(isPlatformAdmin(userType) ? {} : { tenantId }),
+        tenantId,
       },
       include: {
         bindings: true,
@@ -149,7 +149,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = createPolicySchema.parse(request.body);
     
-    const policy = await prisma.accessPolicy.create({
+    const policy = await request.db.accessPolicy.create({
       data: {
         tenantId,
         ...data,
@@ -157,15 +157,13 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'created policy',
         target: policy.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(policy);
   });
@@ -204,21 +202,19 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updatePolicySchema.parse(request.body);
     
-    const policy = await prisma.accessPolicy.update({
+    const policy = await request.db.accessPolicy.update({
       where: { id, tenantId },
       data,
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'updated policy',
         target: policy.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return policy;
   });
@@ -244,20 +240,18 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const policy = await prisma.accessPolicy.delete({
+    const policy = await request.db.accessPolicy.delete({
       where: { id, tenantId },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'deleted policy',
         target: policy.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });
@@ -294,7 +288,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createBindingSchema.parse(request.body);
     
     // Verify policy exists
-    const policy = await prisma.accessPolicy.findFirst({
+    const policy = await request.db.accessPolicy.findFirst({
       where: { id, tenantId },
     });
     
@@ -303,7 +297,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check for existing binding
-    const existing = await prisma.policyBinding.findFirst({
+    const existing = await request.db.policyBinding.findFirst({
       where: {
         policyId: id,
         scopeType: data.scopeType,
@@ -315,8 +309,9 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Binding already exists', 409);
     }
     
-    const binding = await prisma.policyBinding.create({
+    const binding = await request.db.policyBinding.create({
       data: {
+        tenantId: request.tenant.id,
         policyId: id,
         ...data,
       },
@@ -346,7 +341,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const { id, bindingId } = request.params as { id: string; bindingId: string };
     
     
-    await prisma.policyBinding.delete({
+    await request.db.policyBinding.delete({
       where: { id: bindingId, policyId: id },
     });
     
@@ -375,7 +370,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const { userId, action, resource, context } = request.body as any;
     
     // Get all enabled policies for this tenant
-    const policies = await prisma.accessPolicy.findMany({
+    const policies = await request.db.accessPolicy.findMany({
       where: {
         tenantId,
         enabled: true,

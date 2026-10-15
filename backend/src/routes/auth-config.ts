@@ -1,8 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
@@ -18,7 +18,7 @@ const createAuthProviderSchema = z.object({
   enabled: z.boolean().default(false),
   clientId: z.string().optional(),
   clientSecret: z.string().min(1).optional(), // write-only: never returned
-  tenantId: z.string().optional(),
+  directoryId: z.string().optional(), // the identity provider's own tenant/directory id (e.g. Entra)
   domain: z.string().optional(),
   scopes: z.array(z.string()).default(['openid', 'profile', 'email']),
   autoProvision: z.boolean().default(false),
@@ -28,7 +28,7 @@ const updateAuthProviderSchema = z.object({
   enabled: z.boolean().optional(),
   clientId: z.string().optional(),
   clientSecret: z.string().min(1).optional(), // write-only: never returned
-  tenantId: z.string().optional(),
+  directoryId: z.string().optional(), // the identity provider's own tenant/directory id (e.g. Entra)
   domain: z.string().optional(),
   scopes: z.array(z.string()).optional(),
   autoProvision: z.boolean().optional(),
@@ -43,7 +43,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get authentication configuration for current tenant',
     },
   }, async (request, reply) => {
-    const config = await prisma.authConfig.findUnique({
+    const config = await request.db.authConfig.findUnique({
       where: { tenantId: request.tenant.id },
       include: {
         // Never return OAuth client secrets to the browser
@@ -80,21 +80,19 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
     const data = updateAuthConfigSchema.parse(request.body);
 
-    const config = await prisma.authConfig.update({
+    const config = await request.db.authConfig.update({
       where: { tenantId: request.tenant.id },
       data,
     });
 
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'updated authentication configuration',
         target: 'auth',
         type: 'CONFIG',
         metadata: data,
-      },
-    });
+      });
 
     return config;
   });
@@ -107,7 +105,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'List authentication providers for current tenant',
     },
   }, async (request, reply) => {
-    const config = await prisma.authConfig.findUnique({
+    const config = await request.db.authConfig.findUnique({
       where: { tenantId: request.tenant.id },
       include: {
         // Never return OAuth client secrets to the browser
@@ -132,7 +130,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
           enabled: { type: 'boolean', default: false },
           clientId: { type: 'string' },
           clientSecret: { type: 'string' },
-          tenantId: { type: 'string' },
+          directoryId: { type: 'string' },
           domain: { type: 'string' },
           scopes: { type: 'array', items: { type: 'string' } },
           autoProvision: { type: 'boolean', default: false },
@@ -143,7 +141,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
     const data = createAuthProviderSchema.parse(request.body);
 
-    const config = await prisma.authConfig.findUnique({
+    const config = await request.db.authConfig.findUnique({
       where: { tenantId: request.tenant.id },
     });
 
@@ -152,7 +150,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Check if provider already exists
-    const existing = await prisma.authProvider.findFirst({
+    const existing = await request.db.authProvider.findFirst({
       where: {
         authConfigId: config.id,
         provider: data.provider,
@@ -163,23 +161,24 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Provider already exists', 409);
     }
 
-    const provider = await prisma.authProvider.create({
+    const { directoryId, ...fields } = data;
+    const provider = await request.db.authProvider.create({
       data: {
-        ...data,
+        ...fields,
+        idpTenantId: directoryId,
+        tenantId: request.tenant.id,
         authConfigId: config.id,
       },
       omit: { clientSecret: true },
     });
 
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'added authentication provider',
         target: data.provider,
         type: 'AUTH',
-      },
-    });
+      });
 
     return reply.status(201).send(provider);
   });
@@ -203,7 +202,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
           enabled: { type: 'boolean' },
           clientId: { type: 'string' },
           clientSecret: { type: 'string' },
-          tenantId: { type: 'string' },
+          directoryId: { type: 'string' },
           domain: { type: 'string' },
           scopes: { type: 'array', items: { type: 'string' } },
           autoProvision: { type: 'boolean' },
@@ -216,22 +215,21 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateAuthProviderSchema.parse(request.body);
 
     // Scoped to the caller's tenant: another tenant's provider is a 404
-    const provider = await prisma.authProvider.update({
-      where: { id, authConfig: { tenantId: request.tenant.id } },
-      data,
+    const { directoryId, ...fields } = data;
+    const provider = await request.db.authProvider.update({
+      where: { id, tenantId: request.tenant.id },
+      data: { ...fields, ...(directoryId !== undefined && { idpTenantId: directoryId }) },
       omit: { clientSecret: true },
     });
 
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: request.tenant.id,
         userId: request.user.userId,
         action: 'updated authentication provider',
         target: provider.provider,
         type: 'AUTH',
         metadata: { ...data, clientSecret: data.clientSecret ? '[redacted]' : undefined }, // never log secrets
-      },
-    });
+      });
 
     return provider;
   });
@@ -254,7 +252,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { id } = request.params as { id: string };
 
-    await prisma.authProvider.delete({
+    await request.db.authProvider.delete({
       where: { id, authConfig: { tenantId: request.tenant.id } },
     });
 

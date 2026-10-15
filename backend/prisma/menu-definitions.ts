@@ -3,6 +3,8 @@
  * Every `permission` must be in src/utils/permissions.ts and every `path`
  * must be a route in src/App.tsx; test/permissions.test.ts checks both.
  */
+import { product } from '../src/product/index.js';
+
 export type Portal = 'PLATFORM' | 'TENANT';
 export interface MenuSeed {
   label: string;
@@ -43,6 +45,8 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
     { label: 'Data Isolation', path: '/data-isolation', icon: 'Database', permission: 'database:manage' },
     { label: 'Authentication', path: '/authentication', icon: 'KeyRound', permission: 'auth:manage' },
     { label: 'API', path: '/api', icon: 'Code', permission: 'api:manage' },
+    // The product's own screens (src/product), before Settings
+    ...product.tenantMenu,
     { label: 'Settings', path: '/settings', icon: 'Settings', permission: 'settings:read' },
   ],
 };

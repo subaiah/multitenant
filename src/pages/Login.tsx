@@ -551,10 +551,7 @@ export default function Login() {
         <div className="text-center mt-8">
           {!tenantSlug && (
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
-                Create one
-              </Link>
+              Don't have an account? Ask your organization's administrator for an invitation.
             </p>
           )}
           {tenantSlug && (

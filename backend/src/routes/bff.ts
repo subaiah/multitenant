@@ -1,10 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant } from '../lib/tenant-db.js';
 import { withActivityUsers } from '../lib/activity-users.js';
 import { activityByDay, countBy } from '../lib/stats.js';
-import { hasMinimumUserType, isPlatformUser } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
-import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { hasPermission } from '../middleware/authorize.js';
 
 /**
  * BFF (Backend for Frontend) Routes
@@ -27,11 +27,12 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const tenantId = request.tenant.id;
+    const db = request.db;
 
     // Aggregate multiple queries in parallel
     const [tenant, appStats, recentActivities, userCount, appsByEnv, groupCount, orgCount, entitledApps, perDay, activityTypes] = await Promise.all([
       // Get tenant info
-      prisma.tenant.findUnique({
+      controlDb.tenant.findUnique({
         where: { id: tenantId },
         select: {
           id: true,
@@ -41,27 +42,27 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
         },
       }),
       // Get application statistics
-      prisma.application.groupBy({
+      db.application.groupBy({
         by: ['status'],
         where: { tenantId },
         _count: true,
       }),
       // Get recent activities
-      prisma.activity.findMany({
+      db.activity.findMany({
         where: { tenantId },
         take: 8,
         orderBy: { createdAt: 'desc' },
-      }).then(withActivityUsers),
+      }).then((rows) => withActivityUsers(db, rows)),
       // Get user count
-      prisma.user.count({
+      db.user.count({
         where: { tenantId },
       }),
-      prisma.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
-      prisma.group.count({ where: { tenantId } }),
-      prisma.organization.count({ where: { tenantId } }),
-      prisma.tenantApplication.count({ where: { tenantId } }),
-      activityByDay(tenantId, 14),
-      prisma.activity.groupBy({ by: ['type'], where: { tenantId }, _count: true }),
+      db.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
+      db.group.count({ where: { tenantId } }),
+      db.organization.count({ where: { tenantId } }),
+      controlDb.tenantApplication.count({ where: { tenantId } }),
+      activityByDay(db, tenantId, 14),
+      db.activity.groupBy({ by: ['type'], where: { tenantId }, _count: true }),
     ]);
 
     // Transform data for frontend
@@ -163,30 +164,33 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(403).send({ error: 'Admin access required' });
     }
 
+    const tenantDb = dbForTenant(tenantId);
+
     // Aggregate data from multiple sources
     const [tenant, applications, users, activities, dbConfig, authConfig, apiConfig] = await Promise.all([
-      prisma.tenant.findUnique({
+      controlDb.tenant.findUnique({
         where: { id: tenantId },
       }),
-      prisma.application.findMany({
+      tenantDb.application.findMany({
         where: { tenantId },
       }),
-      prisma.user.findMany({
+      tenantDb.user.findMany({
         where: { tenantId },
       }),
-      prisma.activity.findMany({
+      tenantDb.activity.findMany({
         where: { tenantId },
         take: 10,
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.databaseConfig.findUnique({
+      controlDb.databaseConfig.findUnique({
         where: { tenantId },
+        omit: { connectionString: true },
       }),
-      prisma.authConfig.findUnique({
+      tenantDb.authConfig.findUnique({
         where: { tenantId },
-        include: { providers: true },
+        include: { providers: { omit: { clientSecret: true } } },
       }),
-      prisma.apiConfig.findUnique({
+      tenantDb.apiConfig.findUnique({
         where: { tenantId },
       }),
     ]);
@@ -251,7 +255,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
 
     // Get application details
-    const application = await prisma.application.findFirst({
+    const application = await request.db.application.findFirst({
       where: {
         id: appId,
         tenantId,
@@ -263,7 +267,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Get related activities
-    const activities = await prisma.activity.findMany({
+    const activities = await request.db.activity.findMany({
       where: {
         tenantId,
         target: application.name,

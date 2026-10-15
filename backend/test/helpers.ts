@@ -1,7 +1,8 @@
 /**
- * Shared harness for integration tests: starts the real server against a real
- * Postgres (DATABASE_URL, schema already pushed) and seeds isolated data with
- * unique names per run, so test files can run in parallel on one database.
+ * Shared harness for integration tests: starts the real server against real
+ * Postgres databases (DATABASE_URL for the control plane, TENANT_DATABASE_URL
+ * for the shared tenant database, both schemas already pushed) and seeds
+ * isolated data with unique names per run, so test files can run in parallel.
  */
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -10,7 +11,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 process.env.JWT_SECRET ??= 'test-jwt-secret-test-jwt-secret-1234';
 process.env.NODE_ENV = 'test';
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a test database');
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a test control-plane database');
+if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must point at a test tenant database');
 
 export const PASSWORD = 'correct-horse-battery';
 const PORT = 4000 + Math.floor(Math.random() * 1000);
@@ -40,11 +42,11 @@ export async function db() {
 }
 
 export async function seedTenant(label: string): Promise<TenantSeed> {
-  const { prisma } = await db();
+  const { controlDb, tenantDb } = await db();
   const { hashPassword } = await import('../src/utils/auth.js');
   const passwordHash = await hashPassword(PASSWORD);
   const slug = `t-${label}-${run}`;
-  const tenant = await prisma.tenant.create({ data: { name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE' } });
+  const tenant = await controlDb.tenant.create({ data: { name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE' } });
   created.tenants.push(tenant.id);
   const seed = {
     tenantId: tenant.id,
@@ -53,26 +55,26 @@ export async function seedTenant(label: string): Promise<TenantSeed> {
     managerEmail: `manager-${label}-${run}@test.local`,
     userEmail: `user-${label}-${run}@test.local`,
   };
-  await prisma.user.createMany({
+  await tenantDb.user.createMany({
     data: [
       { tenantId: tenant.id, email: seed.adminEmail, name: 'Admin', userType: 'TENANT_ADMIN', passwordHash },
       { tenantId: tenant.id, email: seed.managerEmail, name: 'Manager', userType: 'TENANT_MANAGER', passwordHash },
       { tenantId: tenant.id, email: seed.userEmail, name: 'User', userType: 'TENANT_USER', passwordHash },
     ],
   });
-  const authConfig = await prisma.authConfig.create({ data: { tenantId: tenant.id, otpEnabled: true } });
-  const provider = await prisma.authProvider.create({
-    data: { authConfigId: authConfig.id, provider: 'GOOGLE', clientId: 'cid', clientSecret: 'TOP-SECRET', scopes: ['email'] },
+  const authConfig = await tenantDb.authConfig.create({ data: { tenantId: tenant.id, otpEnabled: true } });
+  const provider = await tenantDb.authProvider.create({
+    data: { tenantId: tenant.id, authConfigId: authConfig.id, provider: 'GOOGLE', clientId: 'cid', clientSecret: 'TOP-SECRET', scopes: ['email'] },
   });
   return { ...seed, providerId: provider.id };
 }
 
 export async function seedPlatformUsers(): Promise<PlatformSeed> {
-  const { prisma } = await db();
+  const { controlDb } = await db();
   const { hashPassword } = await import('../src/utils/auth.js');
   const passwordHash = await hashPassword(PASSWORD);
   const seed = { adminEmail: `padmin-${run}@platform.test`, supportEmail: `psupport-${run}@platform.test` };
-  await prisma.user.createMany({
+  await controlDb.platformUser.createMany({
     data: [
       { email: seed.adminEmail, name: 'Platform Admin', userType: 'PLATFORM_ADMIN', passwordHash },
       { email: seed.supportEmail, name: 'Platform Support', userType: 'PLATFORM_USER', passwordHash },
@@ -100,16 +102,26 @@ export async function startServer() {
 
 export async function stopServerAndCleanUp() {
   server?.kill();
-  const { prisma, pool } = await db();
-  const platformUsers = await prisma.user.findMany({ where: { email: { in: created.platformEmails } }, select: { id: true } });
-  await prisma.refreshToken.deleteMany({ where: { userId: { in: platformUsers.map((u) => u.id) } } });
-  await prisma.activity.deleteMany({ where: { userId: { in: platformUsers.map((u) => u.id) } } });
-  await prisma.user.deleteMany({ where: { email: { in: created.platformEmails } } });
-  await prisma.refreshToken.deleteMany({ where: { tenantId: { in: created.tenants } } });
-  await prisma.otpCode.deleteMany({ where: { tenantId: { in: created.tenants } } });
-  await prisma.tenant.deleteMany({ where: { id: { in: created.tenants } } });
-  await prisma.$disconnect();
-  await pool.end();
+  const { controlDb, disconnectDatabases } = await db();
+  const { deleteTenantData } = await import('../src/lib/tenant-data.js');
+  const platformUsers = await controlDb.platformUser.findMany({ where: { email: { in: created.platformEmails } }, select: { id: true } });
+  const platformIds = platformUsers.map((u) => u.id);
+  await controlDb.platformRefreshToken.deleteMany({ where: { userId: { in: platformIds } } });
+  await controlDb.platformActivity.deleteMany({ where: { OR: [{ userId: { in: platformIds } }, { tenantId: { in: created.tenants } }] } });
+  await controlDb.platformUser.deleteMany({ where: { id: { in: platformIds } } });
+  // The tenant plane has no foreign keys to tenants: delete its rows explicitly
+  for (const id of created.tenants) await deleteTenantData(id);
+  const tenantIds = { tenantId: { in: created.tenants } };
+  await controlDb.supportSession.deleteMany({ where: tenantIds });
+  await controlDb.tenantApplication.deleteMany({ where: tenantIds });
+  await controlDb.databaseConfig.deleteMany({ where: tenantIds });
+  await controlDb.tenant.deleteMany({ where: { id: { in: created.tenants } } });
+  await disconnectDatabases();
+}
+
+/** Remember a tenant created through the API so cleanup removes it. */
+export function trackTenant(id: string) {
+  created.tenants.push(id);
 }
 
 export interface ApiOptions {

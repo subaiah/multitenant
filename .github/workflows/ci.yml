@@ -12,18 +12,19 @@ jobs:
       run:
         working-directory: backend
     env:
-      # prisma.config.ts reads DATABASE_URL; generate does not connect.
+      # The Prisma configs read these; generate does not connect.
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      TENANT_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_tenant
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - run: npx prisma generate
+      - run: npm run prisma:generate
       - run: npx tsc --noEmit
-      - name: Typecheck prisma scripts
-        run: npx tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict --skipLibCheck --esModuleInterop prisma/*.ts
+      - name: Typecheck scripts and tests
+        run: npx tsc -p tsconfig.check.json
       - run: npm run build
 
   backend-tests:
@@ -45,15 +46,19 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Control plane and the shared tenant database
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      TENANT_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_tenant
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - run: npx prisma generate
-      - run: npx prisma db push
+      - run: npm run prisma:generate
+      - name: Create the tenant database
+        run: PGPASSWORD=ci psql -h localhost -U ci -d ci -c 'CREATE DATABASE ci_tenant'
+      - run: npm run db:push
       - run: npm test
 
   frontend:

@@ -1,0 +1,99 @@
+// The tenant's apps, API settings and audit trail
+
+model Application {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  name            String
+  description     String?
+  status          ApplicationStatus
+  version         String
+  environment     Environment
+  url             String
+  cpu             Int               @default(0)
+  memory          Int               @default(0)
+  requests        Int               @default(0)
+  lastDeployedAt  DateTime?         @map("last_deployed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  @@index([tenantId, status])
+  @@index([environment])
+  @@map("applications")
+}
+
+enum ApplicationStatus {
+  RUNNING
+  STOPPED
+  DEPLOYING
+  ERROR
+}
+
+enum Environment {
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+}
+
+model ApiConfig {
+  id              String        @id @default(uuid())
+  tenantId        String        @unique @map("tenant_id")
+  bffEnabled      Boolean       @default(false) @map("bff_enabled")
+  bffUrl          String?       @map("bff_url")
+  apiGateway      ApiGateway    @map("api_gateway")
+  rateLimit       Int           @default(5000) @map("rate_limit")
+  corsEnabled     Boolean       @default(true) @map("cors_enabled")
+  allowedOrigins  String[]      @map("allowed_origins")
+  authType        ApiAuthType   @default(JWT) @map("auth_type")
+  versioning      ApiVersioning @default(URL)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@map("api_configs")
+}
+
+enum ApiGateway {
+  KONG
+  APIGEE
+  AWS_APIGATEWAY
+  AZURE_APIM
+  CUSTOM
+}
+
+enum ApiAuthType {
+  JWT
+  OAUTH2
+  API_KEY
+}
+
+enum ApiVersioning {
+  URL
+  HEADER
+  QUERY
+}
+
+// The tenant's audit trail. userId is a tenant user, or a platform user acting
+// inside the tenant (support); no foreign key, names are looked up per plane.
+model Activity {
+  id         String       @id @default(uuid())
+  tenantId   String       @map("tenant_id")
+  userId     String?      @map("user_id")
+  action     String
+  target     String
+  type       ActivityType
+  metadata   Json?
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, type])
+  @@map("activities")
+}
+
+enum ActivityType {
+  DEPLOY
+  CONFIG
+  USER
+  BILLING
+  ALERT
+  AUTH
+  API
+}

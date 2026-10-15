@@ -1,10 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const createCertificationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -59,7 +59,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [certifications, total] = await Promise.all([
-      prisma.accessCertification.findMany({
+      request.db.accessCertification.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -73,7 +73,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.accessCertification.count({ where }),
+      request.db.accessCertification.count({ where }),
     ]);
     
     return {
@@ -105,7 +105,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    const certification = await prisma.accessCertification.findFirst({
+    const certification = await request.db.accessCertification.findFirst({
       where: { id, tenantId },
       include: {
         reviewer: {
@@ -164,7 +164,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createCertificationSchema.parse(request.body);
     
     // Verify reviewer exists
-    const reviewer = await prisma.user.findFirst({
+    const reviewer = await request.db.user.findFirst({
       where: { id: data.reviewerId, tenantId },
     });
     
@@ -178,7 +178,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Due date must be in the future', 400);
     }
     
-    const certification = await prisma.accessCertification.create({
+    const certification = await request.db.accessCertification.create({
       data: {
         tenantId,
         ...data,
@@ -187,15 +187,13 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'created certification',
         target: certification.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(certification);
   });
@@ -230,7 +228,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = submitDecisionSchema.parse(request.body);
     
     // Verify certification exists and user is reviewer
-    const certification = await prisma.accessCertification.findFirst({
+    const certification = await request.db.accessCertification.findFirst({
       where: { id, tenantId, reviewerId: userId },
     });
     
@@ -243,7 +241,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Verify role assignment exists
-    const roleAssignment = await prisma.roleAssignment.findFirst({
+    const roleAssignment = await request.db.roleAssignment.findFirst({
       where: { id: data.roleAssignmentId, tenantId },
     });
     
@@ -252,7 +250,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check for existing decision
-    const existing = await prisma.certificationDecision.findFirst({
+    const existing = await request.db.certificationDecision.findFirst({
       where: {
         certificationId: id,
         roleAssignmentId: data.roleAssignmentId,
@@ -264,8 +262,9 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Create decision
-    const decision = await prisma.certificationDecision.create({
+    const decision = await request.db.certificationDecision.create({
       data: {
+        tenantId: request.tenant.id,
         certificationId: id,
         roleAssignmentId: data.roleAssignmentId,
         decision: data.decision,
@@ -275,14 +274,14 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // If REVOKE, deactivate the role assignment
     if (data.decision === 'REVOKE') {
-      await prisma.roleAssignment.update({
+      await request.db.roleAssignment.update({
         where: { id: data.roleAssignmentId },
         data: { status: 'REVOKED' },
       });
     }
     
     // Update certification status
-    await prisma.accessCertification.update({
+    await request.db.accessCertification.update({
       where: { id },
       data: { status: 'IN_PROGRESS' },
     });
@@ -310,7 +309,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     // Verify certification exists and user is reviewer
-    const certification = await prisma.accessCertification.findFirst({
+    const certification = await request.db.accessCertification.findFirst({
       where: { id, tenantId, reviewerId: userId },
       include: {
         decisions: true,
@@ -325,7 +324,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Certification is already completed', 400);
     }
     
-    const completed = await prisma.accessCertification.update({
+    const completed = await request.db.accessCertification.update({
       where: { id },
       data: {
         status: 'COMPLETED',
@@ -334,15 +333,13 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'completed certification',
         target: certification.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return completed;
   });
@@ -358,7 +355,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = request.tenant.id;
     
-    const certifications = await prisma.accessCertification.findMany({
+    const certifications = await request.db.accessCertification.findMany({
       where: {
         tenantId,
         reviewerId: userId,

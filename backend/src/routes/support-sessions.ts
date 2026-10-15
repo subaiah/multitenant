@@ -1,9 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const createSupportSessionSchema = z.object({
   tenantId: z.string().uuid(),
@@ -49,7 +50,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [sessions, total] = await Promise.all([
-      prisma.supportSession.findMany({
+      controlDb.supportSession.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -66,7 +67,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.supportSession.count({ where }),
+      controlDb.supportSession.count({ where }),
     ]);
     
     return {
@@ -105,7 +106,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createSupportSessionSchema.parse(request.body);
     
     // Verify tenant exists
-    const tenant = await prisma.tenant.findUnique({
+    const tenant = await controlDb.tenant.findUnique({
       where: { id: data.tenantId },
     });
     
@@ -120,7 +121,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Create pending session (requires approval)
-    const session = await prisma.supportSession.create({
+    const session = await controlDb.supportSession.create({
       data: {
         platformUserId: userId,
         tenantId: data.tenantId,
@@ -134,15 +135,13 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: data.tenantId,
         userId,
         action: 'created support session',
         target: `Support session for ${tenant.name}`,
         type: 'AUTH',
-      },
-    });
+      });
     
     return reply.status(201).send(session);
   });
@@ -167,7 +166,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const session = await prisma.supportSession.findUnique({
+    const session = await controlDb.supportSession.findUnique({
       where: { id },
     });
     
@@ -179,7 +178,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Support session is not active', 400);
     }
     
-    const revoked = await prisma.supportSession.update({
+    const revoked = await controlDb.supportSession.update({
       where: { id },
       data: {
         status: 'REVOKED',
@@ -188,15 +187,13 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: session.tenantId,
         userId,
         action: 'revoked support session',
         target: `Support session ${id}`,
         type: 'AUTH',
-      },
-    });
+      });
     
     return revoked;
   });
@@ -211,7 +208,7 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
     
-    const sessions = await prisma.supportSession.findMany({
+    const sessions = await controlDb.supportSession.findMany({
       where: {
         platformUserId: userId,
         status: 'ACTIVE',

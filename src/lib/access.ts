@@ -5,8 +5,8 @@ export interface Role {
   name: string;
   description: string | null;
   isSystem: boolean;
-  permissions: { permission: { name: string } }[];
-  _count: { users: number; roleAssignments: number };
+  permissions: { permission: string }[];
+  _count: { roleAssignments: number };
 }
 
 export interface Scopes {
@@ -17,7 +17,7 @@ export interface Scopes {
 export type ScopeType = 'TENANT' | 'ORGANIZATION' | 'ORG_UNIT' | 'RESOURCE';
 export type AssignmentState = 'ACTIVE' | 'SCHEDULED' | 'EXPIRED' | 'INACTIVE';
 
-export const rolePermissions = (role: Role) => role.permissions.map((p) => p.permission.name);
+export const rolePermissions = (role: Role) => role.permissions.map((p) => p.permission);
 
 export const SCOPE_LABEL: Record<ScopeType, string> = {
   TENANT: 'Entire tenant',

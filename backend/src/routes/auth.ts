@@ -1,6 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import { slugToken, tenantForSignIn, tokenSlug } from '../lib/auth-planes.js';
 import { verifySession } from '../lib/sessions.js';
 import { AppError } from '../middleware/error-handler.js';
 import { isPlatformSlug } from '../lib/platform.js';
@@ -10,19 +12,13 @@ import { generateOtp, verifyPassword, hashPassword, getOtpExpiration } from '../
 import { config } from '../config/env.js';
 import { sendMail } from '../lib/mailer.js';
 import { otpEmail } from '../lib/email-templates.js';
+import { logActivity } from '../lib/activity.js';
 
 // Validation schemas
 const loginSchema = z.object({
   email: z.string().email(),
   tenantId: z.string().uuid(),
   password: z.string().min(1),
-});
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(2),
-  tenantName: z.string().min(2),
-  tenantSlug: z.string().min(2).regex(/^[a-z0-9-]+$/),
 });
 
 const oauthInitiateSchema = z.object({
@@ -60,42 +56,27 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       };
     }
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug },
+    const { tenant, db } = await tenantForSignIn(slug);
+    const authConfig = await db.authConfig.findUnique({
+      where: { tenantId: tenant.id },
       select: {
-        id: true,
-        name: true,
-        slug: true,
-        logoUrl: true,
-        primaryColor: true,
-        loginTitle: true,
-        loginSubtitle: true,
-        status: true,
-        authConfig: {
-          select: {
-            ssoOnly: true,
-            otpEnabled: true,
-            providers: {
-              where: { enabled: true },
-              select: {
-                id: true,
-                provider: true,
-              },
-            },
-          },
-        },
+        ssoOnly: true,
+        otpEnabled: true,
+        providers: { where: { enabled: true }, select: { id: true, provider: true } },
       },
     });
 
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
-
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
-
-    return tenant;
+    return {
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      logoUrl: tenant.logoUrl,
+      primaryColor: tenant.primaryColor,
+      loginTitle: tenant.loginTitle,
+      loginSubtitle: tenant.loginSubtitle,
+      status: tenant.status,
+      authConfig,
+    };
   });
 
   // Verify organization exists and return portal info
@@ -124,7 +105,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Check if tenant exists
-    const tenant = await prisma.tenant.findUnique({
+    const tenant = await controlDb.tenant.findUnique({
       where: { slug },
       select: {
         id: true,
@@ -168,38 +149,16 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { slug } = request.params as { slug: string };
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug },
-      select: {
-        id: true,
-        status: true,
-        authConfig: {
-          select: {
-            ssoOnly: true,
-            providers: {
-              where: { enabled: true },
-              select: {
-                id: true,
-                provider: true,
-              },
-            },
-          },
-        },
-      },
+    const { tenant, db } = await tenantForSignIn(slug);
+    const authConfig = await db.authConfig.findUnique({
+      where: { tenantId: tenant.id },
+      select: { ssoOnly: true, providers: { where: { enabled: true }, select: { id: true, provider: true } } },
     });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
-
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
 
     return {
       tenantId: tenant.id,
-      ssoOnly: tenant.authConfig?.ssoOnly || false,
-      providers: tenant.authConfig?.providers || [],
+      ssoOnly: authConfig?.ssoOnly || false,
+      providers: authConfig?.providers || [],
     };
   });
 
@@ -225,41 +184,25 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       redirectUri: string;
     };
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-      include: {
-        authConfig: {
-          include: {
-            providers: {
-              where: {
-                provider: provider as any,
-                enabled: true,
-              },
-            },
-          },
-        },
-      },
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const authConfig = await db.authConfig.findUnique({
+      where: { tenantId: tenant.id },
+      include: { providers: { where: { provider: provider as any, enabled: true } } },
     });
 
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
-
-    if (!tenant.authConfig) {
+    if (!authConfig) {
       throw new AppError('Authentication not configured for this tenant', 400);
     }
 
-    const authProvider = tenant.authConfig.providers[0];
+    const authProvider = authConfig.providers[0];
     if (!authProvider) {
       throw new AppError('Provider not enabled for this tenant', 400);
     }
 
-    // Generate state for CSRF protection
-    const state = crypto.randomBytes(32).toString('hex');
+    // State for CSRF protection; starts with the slug so the callback finds the tenant's database
+    const state = slugToken(tenant.slug, 32);
 
-    // Store OAuth session
-    await prisma.oAuthSession.create({
+    await db.oAuthSession.create({
       data: {
         state,
         providerId: authProvider.id,
@@ -281,7 +224,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     switch (authProvider.provider) {
       case 'ENTRA':
-        authorizeUrl = `https://login.microsoftonline.com/${authProvider.tenantId || 'common'}/oauth2/v2.0/authorize?${params}`;
+        authorizeUrl = `https://login.microsoftonline.com/${authProvider.idpTenantId || 'common'}/oauth2/v2.0/authorize?${params}`;
         break;
       case 'GOOGLE':
         params.append('access_type', 'offline');
@@ -325,9 +268,15 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { code, state } = request.query as { code: string; state: string };
 
-    // Validate OAuth session
-    const oauthSession = await prisma.oAuthSession.findUnique({
-      where: { state },
+    // Validate OAuth session (in the database of the tenant the state names)
+    const slug = tokenSlug(state);
+    const stateTenant = slug ? await controlDb.tenant.findUnique({ where: { slug } }) : null;
+    if (!stateTenant || stateTenant.status === 'SUSPENDED') {
+      throw new AppError('Invalid or expired OAuth session', 400);
+    }
+    const db = dbForTenant(stateTenant.id);
+    const oauthSession = await db.oAuthSession.findFirst({
+      where: { state, tenantId: stateTenant.id },
     });
 
     if (!oauthSession) {
@@ -335,26 +284,19 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     if (oauthSession.expiresAt < new Date()) {
-      await prisma.oAuthSession.delete({ where: { id: oauthSession.id } });
+      await db.oAuthSession.delete({ where: { id: oauthSession.id } });
       throw new AppError('OAuth session expired', 400);
     }
 
     // OAuthSession has no Prisma relation to AuthProvider, so load it explicitly
-    const authProvider = await prisma.authProvider.findUnique({
-      where: { id: oauthSession.providerId },
-      include: {
-        authConfig: {
-          include: {
-            tenant: true,
-          },
-        },
-      },
+    const authProvider = await db.authProvider.findFirst({
+      where: { id: oauthSession.providerId, tenantId: stateTenant.id },
     });
 
-    if (!authProvider || authProvider.authConfig.tenantId !== oauthSession.tenantId) {
+    if (!authProvider) {
       throw new AppError('Invalid or expired OAuth session', 400);
     }
-    const tenant = authProvider.authConfig.tenant;
+    const tenant = stateTenant;
 
     // Exchange code for tokens (provider-specific)
     let userInfo: { email: string; name?: string; providerUserId: string };
@@ -379,7 +321,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Find or create user
-    let user = await prisma.user.findFirst({
+    let user = await db.user.findFirst({
       where: {
         tenantId: tenant.id,
         email: userInfo.email,
@@ -392,7 +334,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         throw new AppError('User not found and auto-provisioning is disabled', 404);
       }
 
-      user = await prisma.user.create({
+      user = await db.user.create({
         data: {
           tenantId: tenant.id,
           email: userInfo.email,
@@ -408,13 +350,13 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Update last login
-    await prisma.user.update({
+    await db.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
     // Delete OAuth session
-    await prisma.oAuthSession.delete({ where: { id: oauthSession.id } });
+    await db.oAuthSession.delete({ where: { id: oauthSession.id } });
 
     // Generate JWT token
     const token = fastify.jwt.sign({
@@ -425,15 +367,13 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: tenant.id,
         userId: user.id,
         action: 'logged in via OAuth',
         target: authProvider.provider,
         type: 'AUTH',
-      },
-    });
+      });
 
     // Redirect to frontend with token
     const redirectUrl = new URL(oauthSession.redirectUri);
@@ -462,8 +402,11 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { email, tenantId, password } = loginSchema.parse(request.body);
 
+    const tenantRow = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, status: true } });
+    const db = dbForTenant(tenantId);
+
     // Check if tenant requires SSO only
-    const authConfig = await prisma.authConfig.findUnique({
+    const authConfig = await db.authConfig.findUnique({
       where: { tenantId },
     });
 
@@ -472,23 +415,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Find user
-    const user = await prisma.user.findUnique({
-      where: {
-        tenantId_email: {
-          tenantId,
-          email,
-        },
-      },
-      include: {
-        tenant: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-      },
-    });
+    const found = tenantRow
+      ? await db.user.findUnique({ where: { tenantId_email: { tenantId, email } } })
+      : null;
+    const user = found && { ...found, tenant: tenantRow };
 
     // Verify the password before revealing anything else about the account
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
@@ -508,7 +438,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Update last login
-    await prisma.user.update({
+    await db.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
@@ -522,15 +452,13 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in',
         target: 'system',
         type: 'AUTH',
-      },
-    });
+      });
 
     return {
       token,
@@ -565,29 +493,16 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { email, tenantSlug } = request.body as { email: string; tenantSlug: string };
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-      include: {
-        authConfig: true,
-      },
-    });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
-
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
     // Check if OTP is enabled
-    if (!tenant.authConfig?.otpEnabled) {
+    if (!authConfig?.otpEnabled) {
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
     }
 
     // Check if user exists
-    const user = await prisma.user.findFirst({
+    const user = await db.user.findFirst({
       where: {
         tenantId: tenant.id,
         email,
@@ -610,7 +525,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Delete any existing OTPs for this email
-    await prisma.otpCode.deleteMany({
+    await db.otpCode.deleteMany({
       where: {
         tenantId: tenant.id,
         email,
@@ -619,10 +534,10 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Generate OTP
     const code = generateOtp();
-    const expiresAt = getOtpExpiration(tenant.authConfig.otpExpiry);
+    const expiresAt = getOtpExpiration(authConfig.otpExpiry);
 
     // Store OTP
-    await prisma.otpCode.create({
+    await db.otpCode.create({
       data: {
         tenantId: tenant.id,
         email,
@@ -631,7 +546,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    await sendMail(otpEmail(email, code, tenant.name, tenant.authConfig.otpExpiry));
+    await sendMail(otpEmail(email, code, tenant.name, authConfig.otpExpiry));
 
     // In development, return the OTP for testing
     if (config.devExposeOtp) {
@@ -672,17 +587,11 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       code: string;
     };
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-    });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
     // Find OTP
-    const otpRecord = await prisma.otpCode.findFirst({
+    const otpRecord = await db.otpCode.findFirst({
       where: {
         tenantId: tenant.id,
         email,
@@ -697,32 +606,25 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Check if OTP has expired
     if (new Date() > otpRecord.expiresAt) {
-      await prisma.otpCode.delete({ where: { id: otpRecord.id } });
+      await db.otpCode.delete({ where: { id: otpRecord.id } });
       throw new AppError('OTP has expired', 401);
     }
 
     // Mark OTP as verified
-    await prisma.otpCode.update({
+    await db.otpCode.update({
       where: { id: otpRecord.id },
       data: { verified: true },
     });
 
     // Find user
-    const user = await prisma.user.findFirst({
+    const found = await db.user.findFirst({
       where: {
         tenantId: tenant.id,
         email,
       },
-      include: {
-        tenant: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-      },
     });
+
+    const user = found && { ...found, tenant };
 
     if (!user) {
       throw new AppError('User not found', 404);
@@ -741,7 +643,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Update last login
-    await prisma.user.update({
+    await db.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
@@ -755,15 +657,13 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in via OTP',
         target: 'system',
         type: 'AUTH',
-      },
-    });
+      });
 
     return {
       token,
@@ -803,43 +703,23 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       tenantSlug: string;
     };
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-      include: {
-        authConfig: true,
-      },
-    });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
-    }
-
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
     // Check if SSO only
-    if (tenant.authConfig?.ssoOnly) {
+    if (authConfig?.ssoOnly) {
       throw new AppError('This tenant requires SSO authentication', 403);
     }
 
     // Find user
-    const user = await prisma.user.findFirst({
+    const found = await db.user.findFirst({
       where: {
         tenantId: tenant.id,
         email,
       },
-      include: {
-        tenant: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-      },
     });
+
+    const user = found && { ...found, tenant };
 
     if (!user) {
       throw new AppError('Invalid credentials', 401);
@@ -868,7 +748,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Update last login
-    await prisma.user.update({
+    await db.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
@@ -882,15 +762,13 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId: user.tenant.id,
         userId: user.id,
         action: 'logged in with password',
         target: 'system',
         type: 'AUTH',
-      },
-    });
+      });
 
     return {
       token,
@@ -923,14 +801,15 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    await verifySession(request);
+    const session = await verifySession(request);
 
     const { password, currentPassword } = request.body as { password: string; currentPassword?: string };
-    const userId = request.user.userId;
 
     // Changing an existing password requires the current one, so a stolen
     // session token can't be turned into a permanent account takeover.
-    const existing = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+    const existing = session.tenantId
+      ? await dbForTenant(session.tenantId).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select: { passwordHash: true } })
+      : await controlDb.platformUser.findUnique({ where: { id: session.id }, select: { passwordHash: true } });
     if (!existing) {
       throw new AppError('User not found', 404);
     }
@@ -940,192 +819,14 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // Hash password
     const passwordHash = await hashPassword(password);
-
-    // Update user
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash },
-    });
+    if (session.tenantId) {
+      await dbForTenant(session.tenantId).user.updateMany({ where: { id: session.id, tenantId: session.tenantId }, data: { passwordHash } });
+    } else {
+      await controlDb.platformUser.update({ where: { id: session.id }, data: { passwordHash } });
+    }
 
     return { message: 'Password set successfully' };
-  });
-
-  // Register (creates tenant and admin user)
-  fastify.post('/register', {
-    schema: {
-      tags: ['auth'],
-      summary: 'Register new tenant and admin user',
-      body: {
-        type: 'object',
-        required: ['email', 'name', 'tenantName', 'tenantSlug'],
-        properties: {
-          email: { type: 'string', format: 'email' },
-          name: { type: 'string', minLength: 2 },
-          tenantName: { type: 'string', minLength: 2 },
-          tenantSlug: { type: 'string', minLength: 2 },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { email, name, tenantName, tenantSlug } = registerSchema.parse(request.body);
-
-    if (isPlatformSlug(tenantSlug)) {
-      throw new AppError('This slug is reserved', 409);
-    }
-
-    // Check if slug is taken
-    const existingTenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-    });
-
-    if (existingTenant) {
-      throw new AppError('Tenant slug already exists', 409);
-    }
-
-    // Create tenant and user in a transaction
-    const result = await prisma.$transaction(async (tx) => {
-      // Create tenant
-      const tenant = await tx.tenant.create({
-        data: {
-          name: tenantName,
-          slug: tenantSlug,
-          plan: 'FREE',
-          status: 'TRIAL',
-          primaryColor: '#3b82f6',
-          loginTitle: `Welcome to ${tenantName}`,
-          loginSubtitle: 'Sign in to your account',
-        },
-      });
-
-      // Create admin user
-      const user = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          email,
-          name,
-          userType: 'TENANT_ADMIN',
-          status: 'ACTIVE',
-        },
-      });
-
-      // Create default roles for tenant
-      const tenantAdminRole = await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Tenant Admin',
-          description: 'Full access to tenant resources',
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Tenant Manager',
-          description: 'Can manage applications and users',
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Developer',
-          description: 'Can manage applications',
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'User',
-          description: 'Can view and use applications',
-          isSystem: true,
-        },
-      });
-
-      await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Viewer',
-          description: 'Read-only access',
-          isSystem: true,
-        },
-      });
-
-      // Assign Tenant Admin role to the admin user
-      await tx.userRole.create({
-        data: {
-          userId: user.id,
-          roleId: tenantAdminRole.id,
-        },
-      });
-
-      // Create default database config
-      await tx.databaseConfig.create({
-        data: {
-          tenantId: tenant.id,
-          strategy: 'SHARED_TABLES',
-          provider: 'POSTGRESQL',
-          region: 'US East',
-          storageLimit: '5 GB',
-          maxConnections: 20,
-        },
-      });
-
-      // Create default auth config
-      await tx.authConfig.create({
-        data: {
-          tenantId: tenant.id,
-          mfaEnabled: false,
-          sessionTimeout: 60,
-          passwordPolicy: 'STANDARD',
-          ssoOnly: false,
-        },
-      });
-
-      // Create default API config
-      await tx.apiConfig.create({
-        data: {
-          tenantId: tenant.id,
-          bffEnabled: false,
-          apiGateway: 'CUSTOM',
-          rateLimit: 1000,
-          corsEnabled: true,
-          allowedOrigins: [],
-          authType: 'JWT',
-          versioning: 'URL',
-        },
-      });
-
-      return { tenant, user };
-    });
-
-    // Generate JWT token
-    const token = fastify.jwt.sign({
-      userId: result.user.id,
-      tenantId: result.tenant.id,
-      userType: result.user.userType,
-      provider: 'PASSWORD',
-    });
-
-    return reply.status(201).send({
-      token,
-      tenant: {
-        id: result.tenant.id,
-        name: result.tenant.name,
-        slug: result.tenant.slug,
-      },
-      user: {
-        id: result.user.id,
-        email: result.user.email,
-        name: result.user.name,
-        userType: result.user.userType,
-      },
-    });
   });
 
   // Verify token

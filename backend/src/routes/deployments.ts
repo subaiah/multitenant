@@ -1,6 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { countBy } from '../lib/stats.js';
 
@@ -37,13 +36,13 @@ export const deploymentRoutes: FastifyPluginAsync = async (fastify) => {
       : {};
 
     const [deployments, byStatus, byEnvironment] = await Promise.all([
-      prisma.application.findMany({
+      request.db.application.findMany({
         where: { tenantId, ...(status ? { status } : {}), ...(environment ? { environment } : {}), ...searchFilter },
         orderBy: [{ status: 'asc' }, { name: 'asc' }],
       }),
       // Counts ignore the status filter so the status chips stay meaningful
-      prisma.application.groupBy({ by: ['status'], where: { tenantId, ...(environment ? { environment } : {}), ...searchFilter }, _count: true }),
-      prisma.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
+      request.db.application.groupBy({ by: ['status'], where: { tenantId, ...(environment ? { environment } : {}), ...searchFilter }, _count: true }),
+      request.db.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
     ]);
 
     return {
@@ -61,11 +60,11 @@ export const deploymentRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request) => {
     const { id } = request.params as { id: string };
-    const deployment = await prisma.application.findFirst({ where: { id, tenantId: request.tenant.id } });
+    const deployment = await request.db.application.findFirst({ where: { id, tenantId: request.tenant.id } });
     if (!deployment) {
       throw new AppError('Application not found', 404);
     }
-    const activity = await prisma.activity.findMany({
+    const activity = await request.db.activity.findMany({
       where: { tenantId: request.tenant.id, target: deployment.name },
       orderBy: { createdAt: 'desc' },
       take: 10,

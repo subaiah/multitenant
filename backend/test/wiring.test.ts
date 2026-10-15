@@ -52,15 +52,15 @@ test('/bff/auth/me and /auth/permissions work from the cookie', async () => {
 });
 
 test('tenant menu is filtered by permission, nested once, and limited to the own portal', async () => {
-  const { prisma } = await import('../src/lib/prisma.js');
+  const { controlDb } = await import('../src/lib/prisma.js');
   // Menu rows are global; make sure a known parent/child pair exists for this test
-  const parent = await prisma.menuItem.create({
+  const parent = await controlDb.menuItem.create({
     data: { portal: 'TENANT', label: `Parent ${A.slug}`, path: '/groups', permission: 'groups:read', order: 900, isActive: true },
   });
-  const child = await prisma.menuItem.create({
+  const child = await controlDb.menuItem.create({
     data: { portal: 'TENANT', parentId: parent.id, label: `Child ${A.slug}`, path: '/role-assignments', permission: 'roles:read', order: 0, isActive: true },
   });
-  const adminOnly = await prisma.menuItem.create({
+  const adminOnly = await controlDb.menuItem.create({
     data: { portal: 'TENANT', label: `Admin ${A.slug}`, path: '/settings', permission: 'settings:manage', order: 901, isActive: true },
   });
   try {
@@ -81,7 +81,7 @@ test('tenant menu is filtered by permission, nested once, and limited to the own
 
     assert.equal((await api('GET', '/menu-items/portal/PLATFORM', { cookie: admin.cookie })).status, 403);
   } finally {
-    await prisma.menuItem.deleteMany({ where: { id: { in: [child.id, parent.id, adminOnly.id] } } });
+    await controlDb.menuItem.deleteMany({ where: { id: { in: [child.id, parent.id, adminOnly.id] } } });
   }
 });
 
@@ -137,8 +137,8 @@ test('platform admin actions are logged without a tenant', async () => {
   const key = `app-${Math.random().toString(36).slice(2, 8)}`;
   const created = await api('POST', '/applications', { cookie, body: { key, name: 'Test App', description: 'x', version: '1.0.0' } });
   assert.equal(created.status, 201);
-  const { prisma } = await import('../src/lib/prisma.js');
-  await prisma.applicationRegistry.delete({ where: { id: created.json.id } });
+  const { controlDb } = await import('../src/lib/prisma.js');
+  await controlDb.applicationRegistry.delete({ where: { id: created.json.id } });
 });
 
 test('platform support (PLATFORM_USER) is read-only on tenants', async () => {
@@ -149,7 +149,7 @@ test('platform support (PLATFORM_USER) is read-only on tenants', async () => {
 
 // ------------------------------------------------------------- public endpoints
 
-test('login page info for the platform slug, and the slug is reserved', async () => {
+test('login page info for the platform slug; there is no self sign-up', async () => {
   const info = await api('GET', '/auth/tenant/platform');
   assert.equal(info.status, 200);
   assert.equal(info.json.id, null);
@@ -157,8 +157,9 @@ test('login page info for the platform slug, and the slug is reserved', async ()
   const tenantInfo = await api('GET', `/auth/tenant/${A.slug}`);
   assert.equal(tenantInfo.json.authConfig.otpEnabled, true, 'login page needs otpEnabled');
 
-  const reg = await api('POST', '/auth/register', { body: { email: 'x@y.test', name: 'X Y', tenantName: 'Platform', tenantSlug: 'platform' } });
-  assert.equal(reg.status, 409);
+  // Tenants are created by platform admins (POST /tenants, test/tenants.test.ts)
+  const reg = await api('POST', '/auth/register', { body: { email: 'x@y.test', name: 'X Y', tenantName: 'Mine', tenantSlug: 'mine' } });
+  assert.equal(reg.status, 404);
 });
 
 test('CORS preflight allows the methods the frontend uses', async () => {

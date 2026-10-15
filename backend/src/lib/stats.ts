@@ -1,5 +1,5 @@
-import { Prisma } from '@prisma/client';
-import { prisma } from './prisma.js';
+import { Prisma } from '../generated/tenant/index.js';
+import type { TenantDb } from './tenant-db.js';
 
 export interface DayCount {
   date: string; // YYYY-MM-DD (UTC)
@@ -8,16 +8,16 @@ export interface DayCount {
 
 /**
  * Activity counts per UTC day for the last `days` days, oldest first,
- * with zero-filled gaps. Scoped to one tenant, or all tenants when omitted.
+ * with zero-filled gaps. Scoped to one tenant, or every tenant in `db` when omitted.
  */
-export async function activityByDay(tenantId: string | undefined, days = 14): Promise<DayCount[]> {
+export async function activityByDay(db: TenantDb, tenantId: string | undefined, days = 14): Promise<DayCount[]> {
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
   start.setUTCDate(start.getUTCDate() - (days - 1));
 
   // Prisma stores UTC in timestamp columns; format in SQL so the server's
   // local timezone can't shift days when parsing.
-  const rows = await prisma.$queryRaw<{ day: string; count: bigint }[]>`
+  const rows = await db.$queryRaw<{ day: string; count: bigint }[]>`
     SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, count(*) AS count
     FROM activities
     WHERE created_at >= ${start}

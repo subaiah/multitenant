@@ -1,0 +1,172 @@
+// Tenant users, how they sign in, and their sessions
+
+model User {
+  id                 String     @id @default(uuid())
+  tenantId           String     @map("tenant_id")
+  email              String
+  name               String?
+  passwordHash       String?    @map("password_hash")
+  userType           UserType   @default(TENANT_USER) @map("user_type")
+  status             UserStatus @default(ACTIVE)
+  lastLoginAt        DateTime?  @map("last_login_at")
+  /// Access tokens issued before this are refused ("sign out everywhere")
+  sessionsValidAfter DateTime?  @map("sessions_valid_after")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  groupMemberships       GroupMembership[]
+  roleAssignments        RoleAssignment[]
+  orgMemberships         OrgMembership[]
+  delegationsAsDelegator Delegation[]          @relation("Delegator")
+  delegationsAsDelegate  Delegation[]          @relation("Delegate")
+  accessRequests         AccessRequest[]       @relation("AccessRequester")
+  accessApprovals        AccessRequest[]       @relation("AccessApprover")
+  certificationsToReview AccessCertification[] @relation("CertificationReviewer")
+  tokens                 UserToken[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, userType])
+  @@map("users")
+}
+
+enum UserType {
+  TENANT_ADMIN
+  TENANT_MANAGER
+  TENANT_USER
+  TENANT_DEVELOPER
+  TENANT_VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  userId     String    @map("user_id")
+  token      String    @unique
+  familyId   String    @map("family_id")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  userAgent  String?   @map("user_agent")
+  ipAddress  String?   @map("ip_address")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId, userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// Single-use emailed tokens (invitations, password resets). Hash only.
+model UserToken {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  userId      String        @map("user_id")
+  type        UserTokenType
+  tokenHash   String        @unique @map("token_hash")
+  expiresAt   DateTime      @map("expires_at")
+  usedAt      DateTime?     @map("used_at")
+  createdById String?       @map("created_by_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, type])
+  @@map("user_tokens")
+}
+
+enum UserTokenType {
+  INVITE
+  PASSWORD_RESET
+}
+
+model OtpCode {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  email      String
+  code       String
+  expiresAt  DateTime @map("expires_at")
+  verified   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, email, code])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+model OAuthSession {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  state        String   @unique
+  providerId   String   @map("provider_id")
+  redirectUri  String   @map("redirect_uri")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("oauth_sessions")
+}
+
+model AuthConfig {
+  id              String         @id @default(uuid())
+  tenantId        String         @unique @map("tenant_id")
+  mfaEnabled      Boolean        @default(false) @map("mfa_enabled")
+  sessionTimeout  Int            @default(60) @map("session_timeout")
+  passwordPolicy  PasswordPolicy @default(STANDARD) @map("password_policy")
+  ssoOnly         Boolean        @default(false) @map("sso_only")
+  otpEnabled      Boolean        @default(true) @map("otp_enabled")
+  otpExpiry       Int            @default(5) @map("otp_expiry")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  providers       AuthProvider[]
+
+  @@map("auth_configs")
+}
+
+enum PasswordPolicy {
+  STANDARD
+  STRONG
+  VERY_STRONG
+}
+
+model AuthProvider {
+  id             String           @id @default(uuid())
+  tenantId       String           @map("tenant_id")
+  authConfigId   String           @map("auth_config_id")
+  provider       AuthProviderType
+  enabled        Boolean          @default(false)
+  clientId       String?          @map("client_id")
+  /// Encrypted at rest (lib/secrets.ts)
+  clientSecret   String?          @map("client_secret")
+  /// The identity provider's own directory / tenant id (e.g. Entra), not ours
+  idpTenantId    String?          @map("idp_tenant_id")
+  domain         String?
+  scopes         String[]
+  autoProvision  Boolean          @default(false) @map("auto_provision")
+  authorizeUrl   String?          @map("authorize_url")
+  tokenUrl       String?          @map("token_url")
+  userInfoUrl    String?          @map("user_info_url")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  authConfig     AuthConfig       @relation(fields: [authConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+  @@index([authConfigId])
+  @@map("auth_providers")
+}
+
+enum AuthProviderType {
+  ENTRA
+  GOOGLE
+  GITHUB
+  OKTA
+  AUTH0
+  CUSTOM_OIDC
+}

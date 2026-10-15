@@ -1,8 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
-import { requireUserType, requireTenantAccess } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -53,7 +52,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [organizations, total] = await Promise.all([
-      prisma.organization.findMany({
+      request.db.organization.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -64,7 +63,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.organization.count({ where }),
+      request.db.organization.count({ where }),
     ]);
     
     return {
@@ -96,7 +95,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
     
-    const organization = await prisma.organization.findFirst({
+    const organization = await request.db.organization.findFirst({
       where: { id, tenantId },
       include: {
         units: {
@@ -156,7 +155,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createOrganizationSchema.parse(request.body);
     
     // Check if organization name already exists
-    const existing = await prisma.organization.findFirst({
+    const existing = await request.db.organization.findFirst({
       where: { tenantId, name: data.name },
     });
     
@@ -164,7 +163,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Organization name already exists', 409);
     }
     
-    const organization = await prisma.organization.create({
+    const organization = await request.db.organization.create({
       data: {
         tenantId,
         ...data,
@@ -172,15 +171,13 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'created organization',
         target: organization.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(organization);
   });
@@ -216,21 +213,19 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateOrganizationSchema.parse(request.body);
     
-    const organization = await prisma.organization.update({
+    const organization = await request.db.organization.update({
       where: { id, tenantId },
       data,
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'updated organization',
         target: organization.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return organization;
   });
@@ -257,7 +252,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     // Check if organization has units
-    const unitCount = await prisma.orgUnit.count({
+    const unitCount = await request.db.orgUnit.count({
       where: { organizationId: id },
     });
     
@@ -266,7 +261,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check if organization has members
-    const memberCount = await prisma.orgMembership.count({
+    const memberCount = await request.db.orgMembership.count({
       where: { organizationId: id },
     });
     
@@ -274,20 +269,18 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete organization with members. Remove all members first.', 400);
     }
     
-    const organization = await prisma.organization.delete({
+    const organization = await request.db.organization.delete({
       where: { id, tenantId },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'deleted organization',
         target: organization.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });
@@ -322,7 +315,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     // Verify organization exists
-    const organization = await prisma.organization.findFirst({
+    const organization = await request.db.organization.findFirst({
       where: { id: orgId, tenantId },
     });
     
@@ -331,7 +324,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Verify user exists and belongs to tenant
-    const user = await prisma.user.findFirst({
+    const user = await request.db.user.findFirst({
       where: { id: memberUserId, tenantId },
     });
     
@@ -340,7 +333,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check if already a member
-    const existing = await prisma.orgMembership.findFirst({
+    const existing = await request.db.orgMembership.findFirst({
       where: { organizationId: orgId, userId: memberUserId },
     });
     
@@ -348,7 +341,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User is already a member of this organization', 409);
     }
     
-    const membership = await prisma.orgMembership.create({
+    const membership = await request.db.orgMembership.create({
       data: {
         tenantId,
         userId: memberUserId,
@@ -357,15 +350,13 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'added member to organization',
         target: `${user.email} to ${organization.name}`,
         type: 'USER',
-      },
-    });
+      });
     
     return reply.status(201).send(membership);
   });
@@ -392,20 +383,18 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
-    await prisma.orgMembership.deleteMany({
+    await request.db.orgMembership.deleteMany({
       where: { organizationId: orgId, userId: memberUserId, tenantId },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'removed member from organization',
         target: `user ${memberUserId} from organization ${orgId}`,
         type: 'USER',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });

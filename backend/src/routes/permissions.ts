@@ -1,14 +1,8 @@
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { FastifyPluginAsync } from 'fastify';
-import { prisma } from '../lib/prisma.js';
-import { AppError } from '../middleware/error-handler.js';
-import { 
-  getEnhancedUserPermissions, 
-  getUserPermissions,
-  hasPermission,
-  requirePermission,
-  UserType 
-} from '../utils/authorization.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import { getEnhancedUserPermissions } from '../utils/authorization.js';
+import { permissionMatches } from '../utils/permissions.js';
 
 export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
   /**
@@ -86,10 +80,9 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const userId = (request.user as any).userId;
-    const tenantId = (request.user as any).tenantId;
+    const { userId, tenantId, userType } = request.user as any;
 
-    const permissions = await getUserPermissions(userId, tenantId);
+    const { permissions } = await getEnhancedUserPermissions(userId, tenantId, userType);
 
     return { permissions };
   });
@@ -125,16 +118,17 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
   }, async (request, reply) => {
-    const userId = (request.user as any).userId;
-    const tenantId = (request.user as any).tenantId;
-    const { resource, action, scopeType, scopeId } = request.query as {
+    const { userId, tenantId, userType } = request.user as any;
+    const { resource, action } = request.query as {
       resource: string;
       action: string;
       scopeType?: string;
       scopeId?: string;
     };
 
-    const hasPerm = await hasPermission(userId, tenantId, resource, action, scopeType, scopeId);
+    // Scopes are recorded on assignments but not yet enforced, so this is tenant-wide
+    const { permissions } = await getEnhancedUserPermissions(userId, tenantId, userType);
+    const hasPerm = permissionMatches(permissions, `${resource}:${action}`);
 
     return {
       hasPermission: hasPerm,
@@ -204,10 +198,12 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
-    const tenantId = (request.user as any).tenantId;
+    const tenantId = (request.user as any).tenantId as string | undefined;
+    if (!tenantId) return { directRoles: [], groupRoles: [], delegatedRoles: [] }; // platform users hold no tenant roles
+    const db = dbForTenant(tenantId);
 
     // Get direct role assignments
-    const directAssignments = await prisma.roleAssignment.findMany({
+    const directAssignments = await db.roleAssignment.findMany({
       where: {
         userId,
         tenantId,
@@ -225,7 +221,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     // Get group memberships
-    const groupMemberships = await prisma.groupMembership.findMany({
+    const groupMemberships = await db.groupMembership.findMany({
       where: {
         userId,
         tenantId,
@@ -245,7 +241,7 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     // Get group-based role assignments
     let groupAssignments: any[] = [];
     if (groupIds.length > 0) {
-      groupAssignments = await prisma.roleAssignment.findMany({
+      groupAssignments = await db.roleAssignment.findMany({
         where: {
           groupId: { in: groupIds },
           tenantId,
@@ -265,11 +261,12 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Get delegations
-    const delegations = await prisma.delegation.findMany({
+    const delegations = await db.delegation.findMany({
       where: {
         delegateId: userId,
         tenantId,
         status: 'ACTIVE',
+        validFrom: { lte: new Date() },
         validTo: { gt: new Date() },
       },
       include: {
@@ -349,9 +346,11 @@ export const permissionRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const userId = (request.user as any).userId;
-    const tenantId = (request.user as any).tenantId;
+    const tenantId = (request.user as any).tenantId as string | undefined;
+    if (!tenantId) return { groups: [] };
+    const db = dbForTenant(tenantId);
 
-    const groupMemberships = await prisma.groupMembership.findMany({
+    const groupMemberships = await db.groupMembership.findMany({
       where: {
         userId,
         tenantId,

@@ -1,6 +1,12 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { controlDb } from '../lib/prisma.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import {
+  activeSessions, findRefreshToken, issueRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
+  type SessionOwner,
+} from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/rate-limits.js';
 import { config } from '../config/env.js';
@@ -8,8 +14,8 @@ import { sendMail } from '../lib/mailer.js';
 import { otpEmail } from '../lib/email-templates.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
-import { endAllSessions, verifySession } from '../lib/sessions.js';
-import crypto from 'crypto';
+import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
+import { logActivity } from '../lib/activity.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -29,11 +35,6 @@ const otpVerifySchema = z.object({
   code: z.string().length(6),
 });
 
-// Helper function to generate secure random token
-function generateSecureToken(): string {
-  return crypto.randomBytes(64).toString('hex');
-}
-
 // Helper function to parse expiry string to milliseconds
 function parseExpiryToMs(expiry: string): number {
   const match = expiry.match(/^(\d+)([smhd])$/);
@@ -50,6 +51,43 @@ function parseExpiryToMs(expiry: string): number {
     default: throw new Error('Invalid expiry unit');
   }
 }
+
+/**
+ * Start a session: short-lived access token and a refresh token (stored in
+ * the account's own plane), both as httpOnly cookies.
+ */
+async function startSession(
+  fastify: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  owner: SessionOwner,
+  user: { id: string; userType: string },
+  familyId?: string,
+) {
+  const tenantId = owner === 'platform' ? undefined : owner.tenantId;
+  const accessToken = fastify.jwt.sign(
+    { userId: user.id, tenantId, userType: user.userType as never, type: 'access' },
+    { expiresIn: config.accessTokenExpiry },
+  );
+  const refreshExpiryMs = parseExpiryToMs(config.refreshTokenExpiry);
+  const refreshToken = await issueRefreshToken(
+    owner,
+    user.id,
+    new Date(Date.now() + refreshExpiryMs),
+    { userAgent: request.headers['user-agent'], ipAddress: request.ip },
+    familyId,
+  );
+
+  const secure = config.nodeEnv === 'production';
+  reply.setCookie('access_token', accessToken, {
+    httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: parseExpiryToMs(config.accessTokenExpiry) / 1000,
+  });
+  reply.setCookie('refresh_token', refreshToken, {
+    httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: refreshExpiryMs / 1000,
+  });
+}
+
+const portalOf = (userType: string) => (userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT');
 
 export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
   // Login endpoint - sets httpOnly cookies
@@ -70,133 +108,50 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, tenantSlug, password } = loginSchema.parse(request.body);
-    const platformLogin = isPlatformSlug(tenantSlug);
 
-    // Platform users have no tenant; tenant users log in through their tenant's slug
-    const tenant = platformLogin
-      ? null
-      : await prisma.tenant.findUnique({
-          where: { slug: tenantSlug },
-          include: { authConfig: true },
-        });
-
-    if (!platformLogin) {
-      if (!tenant) {
-        throw new AppError('Tenant not found', 404);
+    // Platform users sign in on a platform slug and live in the control plane;
+    // tenant users through their tenant's slug, in its database
+    if (isPlatformSlug(tenantSlug)) {
+      const user = await controlDb.platformUser.findUnique({ where: { email } });
+      if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+        throw new AppError('Invalid credentials', 401);
       }
-      if (tenant.status === 'SUSPENDED') {
-        throw new AppError('Tenant is suspended', 403);
+      if (user.status !== 'ACTIVE') {
+        throw new AppError('User account is not active', 403);
       }
+      await startSession(fastify, request, reply, 'platform', user);
+      await controlDb.platformUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+      await logActivity({ tenantId: null, userId: user.id, action: 'logged in via BFF', target: 'system', type: 'AUTH' });
+      return {
+        message: 'Login successful',
+        user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: 'PLATFORM' },
+        tenant: null,
+      };
     }
 
-    const user = await prisma.user.findFirst({
-      where: tenant
-        ? { tenantId: tenant.id, email }
-        : { tenantId: null, email, userType: { in: ['PLATFORM_ADMIN', 'PLATFORM_USER'] } },
-    });
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
 
     // Password is required. Verify it before revealing anything else about the account.
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       throw new AppError('Invalid credentials', 401);
     }
-
-    if (tenant) {
-      if (user.tenantId !== tenant.id) {
-        throw new AppError('Invalid credentials', 401);
-      }
-      if (tenant.authConfig?.ssoOnly) {
-        throw new AppError('SSO authentication required', 403);
-      }
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
+    if (authConfig?.ssoOnly) {
+      throw new AppError('SSO authentication required', 403);
     }
-
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
 
-    const tenantId = user.tenantId ?? undefined;
-
-    // Generate access token (short-lived)
-    const accessToken = fastify.jwt.sign({
-      userId: user.id,
-      tenantId,
-      userType: user.userType,
-      type: 'access',
-    }, {
-      expiresIn: config.accessTokenExpiry,
-    });
-
-    // Generate refresh token (longer-lived)
-    const refreshTokenValue = generateSecureToken();
-    const familyId = generateSecureToken();
-    const refreshExpiryMs = parseExpiryToMs(config.refreshTokenExpiry);
-    const refreshExpiresAt = new Date(Date.now() + refreshExpiryMs);
-
-    // Store refresh token in database
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tenantId: tenantId ?? null,
-        token: refreshTokenValue,
-        familyId,
-        expiresAt: refreshExpiresAt,
-        userAgent: request.headers['user-agent'],
-        ipAddress: request.ip,
-      },
-    });
-
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
-
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId,
-        userId: user.id,
-        action: 'logged in via BFF',
-        target: 'system',
-        type: 'AUTH',
-      },
-    });
-
-    // Set httpOnly cookies
-    const isProduction = config.nodeEnv === 'production';
-    
-    reply.setCookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: parseExpiryToMs(config.accessTokenExpiry) / 1000,
-    });
-
-    reply.setCookie('refresh_token', refreshTokenValue, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: refreshExpiryMs / 1000,
-    });
-
-    // Determine portal based on user type
-    const portal = user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+    await startSession(fastify, request, reply, { tenantId: tenant.id, tenantSlug: tenant.slug }, user);
+    await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await logActivity({ tenantId: tenant.id, userId: user.id, action: 'logged in via BFF', target: 'system', type: 'AUTH' });
 
     return {
       message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        userType: user.userType,
-        portal,
-      },
-      tenant: tenant ? {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-      } : null,
+      user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: portalOf(user.userType) },
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
     };
   });
 
@@ -218,27 +173,19 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request) => {
     const { email, tenantSlug } = otpRequestSchema.parse(request.body);
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-      include: { authConfig: true },
-    });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
+    if (isPlatformSlug(tenantSlug)) {
+      throw new AppError('OTP authentication is not available for platform accounts', 400);
     }
-
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
     // Check if OTP is enabled
-    if (!tenant.authConfig?.otpEnabled) {
+    if (!authConfig?.otpEnabled) {
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
     }
 
     // Find user
-    const user = await prisma.user.findFirst({
+    const user = await db.user.findFirst({
       where: {
         tenantId: tenant.id,
         email,
@@ -252,17 +199,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       return { message: 'If an active account exists for this email, a sign-in code has been sent' };
     }
 
-    if (user.tenantId !== tenant.id) {
-      throw new AppError('User is not associated with this tenant', 403);
-    }
-
     // Only active accounts can sign in; answer the same way as for unknown emails
     if (user.status !== 'ACTIVE') {
       return { message: 'If an active account exists for this email, a sign-in code has been sent' };
     }
 
     // Delete any existing OTPs for this email
-    await prisma.otpCode.deleteMany({
+    await db.otpCode.deleteMany({
       where: {
         tenantId: tenant.id,
         email,
@@ -272,10 +215,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // Generate OTP
     const { generateOtp, getOtpExpiration } = await import('../utils/auth.js');
     const code = generateOtp();
-    const expiresAt = getOtpExpiration(tenant.authConfig.otpExpiry);
+    const expiresAt = getOtpExpiration(authConfig.otpExpiry);
 
     // Store OTP
-    await prisma.otpCode.create({
+    await db.otpCode.create({
       data: {
         tenantId: tenant.id,
         email,
@@ -284,7 +227,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    await sendMail(otpEmail(email, code, tenant.name, tenant.authConfig.otpExpiry));
+    await sendMail(otpEmail(email, code, tenant.name, authConfig.otpExpiry));
 
     // In development, return the OTP for testing
     if (config.devExposeOtp) {
@@ -319,149 +262,39 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, tenantSlug, code } = otpVerifySchema.parse(request.body);
-
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: tenantSlug },
-    });
-
-    if (!tenant) {
-      throw new AppError('Tenant not found', 404);
+    if (isPlatformSlug(tenantSlug)) {
+      throw new AppError('Invalid OTP', 401);
     }
+    const { tenant, db } = await tenantForSignIn(tenantSlug);
 
-    // Find OTP
-    const otpRecord = await prisma.otpCode.findFirst({
-      where: {
-        tenantId: tenant.id,
-        email,
-        code,
-        verified: false,
-      },
+    const otpRecord = await db.otpCode.findFirst({
+      where: { tenantId: tenant.id, email, code, verified: false },
     });
-
     if (!otpRecord) {
       throw new AppError('Invalid OTP', 401);
     }
-
-    // Check if OTP has expired
     if (new Date() > otpRecord.expiresAt) {
-      await prisma.otpCode.delete({ where: { id: otpRecord.id } });
+      await db.otpCode.delete({ where: { id: otpRecord.id } });
       throw new AppError('OTP has expired', 401);
     }
+    await db.otpCode.update({ where: { id: otpRecord.id }, data: { verified: true } });
 
-    // Mark OTP as verified
-    await prisma.otpCode.update({
-      where: { id: otpRecord.id },
-      data: { verified: true },
-    });
-
-    // Find user
-    const user = await prisma.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        email,
-      },
-    });
-
+    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
     if (!user) {
       throw new AppError('User not found', 404);
     }
-
-    const tenantId = user.tenantId;
-    if (!tenantId || tenantId !== tenant.id) {
-      throw new AppError('User is not associated with this tenant', 403);
-    }
-
     if (user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
 
-    if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Tenant is suspended', 403);
-    }
-
-    // Generate access token
-    const accessToken = fastify.jwt.sign({
-      userId: user.id,
-      tenantId,
-      userType: user.userType,
-      type: 'access',
-    }, {
-      expiresIn: config.accessTokenExpiry,
-    });
-
-    // Generate refresh token
-    const refreshTokenValue = generateSecureToken();
-    const familyId = generateSecureToken();
-    const refreshExpiryMs = parseExpiryToMs(config.refreshTokenExpiry);
-    const refreshExpiresAt = new Date(Date.now() + refreshExpiryMs);
-
-    // Store refresh token
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tenantId: tenantId ?? null,
-        token: refreshTokenValue,
-        familyId,
-        expiresAt: refreshExpiresAt,
-        userAgent: request.headers['user-agent'],
-        ipAddress: request.ip,
-      },
-    });
-
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
-
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId,
-        userId: user.id,
-        action: 'logged in via OTP',
-        target: 'system',
-        type: 'AUTH',
-      },
-    });
-
-    // Set httpOnly cookies
-    const isProduction = config.nodeEnv === 'production';
-    
-    reply.setCookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: parseExpiryToMs(config.accessTokenExpiry) / 1000,
-    });
-
-    reply.setCookie('refresh_token', refreshTokenValue, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: refreshExpiryMs / 1000,
-    });
-
-    // Determine portal based on user type
-    const portal = user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT';
+    await startSession(fastify, request, reply, { tenantId: tenant.id, tenantSlug: tenant.slug }, user);
+    await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    await logActivity({ tenantId: tenant.id, userId: user.id, action: 'logged in via OTP', target: 'system', type: 'AUTH' });
 
     return {
       message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        userType: user.userType,
-        portal,
-      },
-      tenant: tenant ? {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-      } : null,
+      user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: portalOf(user.userType) },
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
     };
   });
 
@@ -478,102 +311,26 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Refresh token not found', 401);
     }
 
-    // Find refresh token in database
-    const storedToken = await prisma.refreshToken.findUnique({
-      where: { token: refreshTokenValue },
-    });
-
-    if (!storedToken) {
+    const storedToken = await findRefreshToken(refreshTokenValue);
+    if (!storedToken || !storedToken.user) {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: storedToken.userId },
-      select: {
-        id: true,
-        tenantId: true,
-        userType: true,
-        status: true,
-      },
-    });
-
-    if (!user || user.tenantId !== storedToken.tenantId) {
-      throw new AppError('Invalid refresh token', 401);
-    }
-
-    // Check if token is revoked
+    // Token reuse: someone presented a rotated-out token. Revoke the whole family.
     if (storedToken.revokedAt) {
-      // Token reuse detected - revoke entire family
-      await prisma.refreshToken.updateMany({
-        where: { familyId: storedToken.familyId },
-        data: { revokedAt: new Date() },
-      });
-
+      await revokeRefreshToken(storedToken, 'family');
       throw new AppError('Token reuse detected - all sessions revoked', 401);
     }
-
-    // Check if token is expired
     if (storedToken.expiresAt < new Date()) {
       throw new AppError('Refresh token expired', 401);
     }
-
-    // Check if user is still active
-    if (user.status !== 'ACTIVE') {
+    if (storedToken.user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
 
-    // Rotate refresh token (issue new one, revoke old one)
-    const newRefreshTokenValue = generateSecureToken();
-    const refreshExpiryMs = parseExpiryToMs(config.refreshTokenExpiry);
-    const refreshExpiresAt = new Date(Date.now() + refreshExpiryMs);
-
-    // Revoke old token
-    await prisma.refreshToken.update({
-      where: { id: storedToken.id },
-      data: { revokedAt: new Date() },
-    });
-
-    // Create new refresh token with same family
-    await prisma.refreshToken.create({
-      data: {
-        userId: storedToken.userId,
-        tenantId: storedToken.tenantId,
-        token: newRefreshTokenValue,
-        familyId: storedToken.familyId,
-        expiresAt: refreshExpiresAt,
-        userAgent: request.headers['user-agent'],
-        ipAddress: request.ip,
-      },
-    });
-
-    // Generate new access token
-    const newAccessToken = fastify.jwt.sign({
-      userId: user.id,
-      tenantId: storedToken.tenantId ?? undefined,
-      userType: user.userType,
-      type: 'access',
-    }, {
-      expiresIn: config.accessTokenExpiry,
-    });
-
-    // Set new cookies
-    const isProduction = config.nodeEnv === 'production';
-    
-    reply.setCookie('access_token', newAccessToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: parseExpiryToMs(config.accessTokenExpiry) / 1000,
-    });
-
-    reply.setCookie('refresh_token', newRefreshTokenValue, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: refreshExpiryMs / 1000,
-    });
+    // Rotate: revoke the old token, issue a new one in the same family
+    await revokeRefreshToken(storedToken);
+    await startSession(fastify, request, reply, storedToken.owner, storedToken.user, storedToken.familyId);
 
     return {
       message: 'Token refreshed successfully',
@@ -590,11 +347,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const refreshTokenValue = request.cookies.refresh_token;
 
     if (refreshTokenValue) {
-      // Revoke refresh token
-      await prisma.refreshToken.updateMany({
-        where: { token: refreshTokenValue },
-        data: { revokedAt: new Date() },
-      });
+      await revokeRefreshTokenValue(refreshTokenValue);
     }
 
     // Clear cookies
@@ -614,29 +367,19 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request) => {
     const session = await verifySession(request);
-    const user = await prisma.user.findUnique({
-      where: { id: session.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        userType: true,
-        tenantId: true,
-        tenant: { select: { id: true, name: true, slug: true } },
-      },
-    });
+    const select = { id: true, email: true, name: true, userType: true } as const;
+    const [user, tenant] = session.tenantId
+      ? await Promise.all([
+          dbForTenant(session.tenantId).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select }),
+          controlDb.tenant.findUnique({ where: { id: session.tenantId }, select: { id: true, name: true, slug: true } }),
+        ])
+      : [await controlDb.platformUser.findUnique({ where: { id: session.id }, select }), null];
     if (!user) {
       throw new AppError('Not authenticated', 401);
     }
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        userType: user.userType,
-        portal: user.userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT',
-      },
-      tenant: user.tenant,
+      user: { ...user, portal: portalOf(user.userType) },
+      tenant,
     };
   });
 
@@ -666,14 +409,17 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const user = await verifySession(request);
 
     // Ends every session, including access tokens already handed out
-    await prisma.$transaction(endAllSessions(user.id));
+    if (user.tenantId) {
+      const db = dbForTenant(user.tenantId);
+      await db.$transaction(endAllSessions(db, user.id));
+    } else {
+      await controlDb.$transaction(endAllPlatformSessions(user.id));
+    }
 
     reply.clearCookie('access_token', { path: '/' });
     reply.clearCookie('refresh_token', { path: '/' });
 
-    await prisma.activity.create({
-      data: { tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' },
-    });
+    await logActivity({ tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' });
 
     return { message: 'All sessions revoked successfully' };
   });
@@ -685,36 +431,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       summary: 'Get active sessions for current user',
     },
   }, async (request) => {
-    const decoded = { userId: (await verifySession(request)).id };
-    try {
-      const sessions = await prisma.refreshToken.findMany({
-        where: {
-          userId: decoded.userId,
-          revokedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        select: {
-          id: true,
-          userAgent: true,
-          ipAddress: true,
-          createdAt: true,
-          expiresAt: true,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      return {
-        sessions: sessions.map(session => ({
-          id: session.id,
-          userAgent: session.userAgent,
-          ipAddress: session.ipAddress,
-          createdAt: session.createdAt,
-          expiresAt: session.expiresAt,
-          isCurrent: false, // Will be set by frontend based on current session
-        })),
-      };
-    } catch (error) {
-      throw new AppError('Invalid or expired token', 401);
-    }
+    const user = await verifySession(request);
+    const sessions = await activeSessions(user);
+    return {
+      sessions: sessions.map((session) => ({
+        ...session,
+        isCurrent: false, // Will be set by frontend based on current session
+      })),
+    };
   });
 };

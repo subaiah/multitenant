@@ -1,10 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
+import { logActivity } from '../lib/activity.js';
 
 const createAccessRequestSchema = z.object({
   roleId: z.string().uuid(),
@@ -56,7 +56,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [requests, total] = await Promise.all([
-      prisma.accessRequest.findMany({
+      request.db.accessRequest.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -73,7 +73,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.accessRequest.count({ where }),
+      request.db.accessRequest.count({ where }),
     ]);
     
     return {
@@ -112,7 +112,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createAccessRequestSchema.parse(request.body);
     
     // Verify role exists
-    const role = await prisma.role.findFirst({
+    const role = await request.db.role.findFirst({
       where: { id: data.roleId, tenantId },
     });
     
@@ -121,7 +121,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check for existing pending request
-    const existing = await prisma.accessRequest.findFirst({
+    const existing = await request.db.accessRequest.findFirst({
       where: {
         tenantId,
         requesterId: userId,
@@ -134,7 +134,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Pending request already exists for this role', 409);
     }
     
-    const accessRequest = await prisma.accessRequest.create({
+    const accessRequest = await request.db.accessRequest.create({
       data: {
         tenantId,
         requesterId: userId,
@@ -147,15 +147,13 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: 'requested access',
         target: `Access request for ${role.name}`,
         type: 'USER',
-      },
-    });
+      });
     
     return reply.status(201).send(accessRequest);
   });
@@ -190,7 +188,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const { approved, reason } = approveAccessRequestSchema.parse(request.body);
     
     
-    const accessRequest = await prisma.accessRequest.findFirst({
+    const accessRequest = await request.db.accessRequest.findFirst({
       where: { id, tenantId },
     });
     
@@ -205,7 +203,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const now = new Date();
     const validTo = new Date(now.getTime() + accessRequest.duration * 60 * 60 * 1000);
     
-    const updated = await prisma.accessRequest.update({
+    const updated = await request.db.accessRequest.update({
       where: { id },
       data: {
         status: approved ? 'APPROVED' : 'DENIED',
@@ -220,7 +218,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     
     // If approved, create temporary role assignment
     if (approved) {
-      await prisma.roleAssignment.create({
+      await request.db.roleAssignment.create({
         data: {
           tenantId,
           roleId: accessRequest.roleId,
@@ -236,15 +234,13 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Log activity
-    await prisma.activity.create({
-      data: {
+    await logActivity({
         tenantId,
         userId,
         action: approved ? 'approved access request' : 'denied access request',
         target: `Access request ${id}`,
         type: 'USER',
-      },
-    });
+      });
     
     return updated;
   });
@@ -260,7 +256,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = request.tenant.id;
     
-    const requests = await prisma.accessRequest.findMany({
+    const requests = await request.db.accessRequest.findMany({
       where: {
         tenantId,
         requesterId: userId,

@@ -5,6 +5,9 @@
  */
 export const PLATFORM_SLUGS = ['platform', 'admin'] as const;
 
+/** The canonical platform slug (links and tokens use this one). */
+export const PLATFORM_SLUG = 'platform';
+
 export function isPlatformSlug(slug: string): boolean {
   return (PLATFORM_SLUGS as readonly string[]).includes(slug.toLowerCase());
 }

@@ -15,10 +15,11 @@ const ids: Record<string, string> = {};
 const roles: Record<string, string> = {};
 const as = (who: string) => ({ token: tok[who] });
 const DAY = 24 * 3600 * 1000;
-let prisma: Awaited<ReturnType<typeof db>>['prisma'];
+let tenantDb: Awaited<ReturnType<typeof db>>['tenantDb'];
+let controlDb: Awaited<ReturnType<typeof db>>['controlDb'];
 
 before(async () => {
-  ({ prisma } = await db());
+  ({ tenantDb, controlDb } = await db());
   A = await seedTenant('rev');
   B = await seedTenant('rev-b');
   await startServer();
@@ -26,21 +27,21 @@ before(async () => {
   tok.manager = await login(A, A.managerEmail);
   tok.adminB = await login(B, B.adminEmail);
   assert.equal((await api('POST', `/roles/initialize/${A.tenantId}`, as('admin'))).status, 200);
-  for (const u of await prisma.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
+  for (const u of await tenantDb.user.findMany({ where: { tenantId: A.tenantId } })) ids[u.email] = u.id;
   for (const r of (await api('GET', '/roles', as('admin'))).json.roles) roles[r.name] = r.id;
 
   const user = ids[A.userEmail];
   const now = Date.now();
   const t = A.tenantId;
   const assign = (data: Record<string, unknown>) =>
-    prisma.roleAssignment.create({ data: { tenantId: t, scopeType: 'TENANT', scopeId: t, ...data } as any });
+    tenantDb.roleAssignment.create({ data: { tenantId: t, scopeType: 'TENANT', scopeId: t, ...data } as any });
 
   // Direct: Viewer now, Developer from next week
   await assign({ roleId: roles['Viewer'], principalType: 'USER', userId: user });
   await assign({ roleId: roles['Developer'], principalType: 'USER', userId: user, validFrom: new Date(now + 7 * DAY) });
 
   // Groups: an active one with Tenant Manager, an inactive one, and an ended membership
-  const mk = (name: string, status = 'ACTIVE') => prisma.group.create({ data: { tenantId: t, name, status } });
+  const mk = (name: string, status = 'ACTIVE') => tenantDb.group.create({ data: { tenantId: t, name, status } });
   const support = await mk('Support');
   const paused = await mk('Paused', 'INACTIVE');
   const former = await mk('Former team');
@@ -48,7 +49,7 @@ before(async () => {
   await assign({ roleId: roles['Tenant Manager'], principalType: 'GROUP', groupId: support.id });
   await assign({ roleId: roles['Tenant Admin'], principalType: 'GROUP', groupId: paused.id });
   await assign({ roleId: roles['Tenant Admin'], principalType: 'GROUP', groupId: former.id });
-  await prisma.groupMembership.createMany({
+  await tenantDb.groupMembership.createMany({
     data: [
       { tenantId: t, groupId: support.id, userId: user },
       { tenantId: t, groupId: paused.id, userId: user },
@@ -58,18 +59,17 @@ before(async () => {
   });
 
   // Delegations from the admin: one active, one that hasn't started yet
-  const catalog = await prisma.permission.findMany({ where: { name: { in: ['activity:read', 'database:manage', 'tenants:manage'] } } });
-  const byName = (n: string) => catalog.find((p) => p.name === n)!.id;
-  const auditor = await prisma.role.create({ data: { tenantId: t, name: 'Auditor', permissions: { create: [{ permissionId: byName('activity:read') }] } } });
-  const dba = await prisma.role.create({ data: { tenantId: t, name: 'DBA', permissions: { create: [{ permissionId: byName('database:manage') }] } } });
+  const grant = (...names: string[]) => ({ create: names.map((permission) => ({ tenantId: t, permission })) });
+  const auditor = await tenantDb.role.create({ data: { tenantId: t, name: 'Auditor', permissions: grant('activity:read') } });
+  const dba = await tenantDb.role.create({ data: { tenantId: t, name: 'DBA', permissions: grant('database:manage') } });
   const admin = ids[A.adminEmail];
   const auditorA = await assign({ roleId: auditor.id, principalType: 'USER', userId: admin });
   const dbaA = await assign({ roleId: dba.id, principalType: 'USER', userId: admin });
-  await prisma.delegation.create({ data: { tenantId: t, delegatorId: admin, delegateId: user, roleAssignmentId: auditorA.id, validTo: new Date(now + 3 * DAY) } });
-  await prisma.delegation.create({ data: { tenantId: t, delegatorId: admin, delegateId: user, roleAssignmentId: dbaA.id, validFrom: new Date(now + 2 * DAY), validTo: new Date(now + 9 * DAY) } });
+  await tenantDb.delegation.create({ data: { tenantId: t, delegatorId: admin, delegateId: user, roleAssignmentId: auditorA.id, validTo: new Date(now + 3 * DAY) } });
+  await tenantDb.delegation.create({ data: { tenantId: t, delegatorId: admin, delegateId: user, roleAssignmentId: dbaA.id, validFrom: new Date(now + 2 * DAY), validTo: new Date(now + 9 * DAY) } });
 
   // Older data: a role carrying a platform permission
-  const legacy = await prisma.role.create({ data: { tenantId: t, name: 'Legacy', permissions: { create: [{ permissionId: byName('tenants:manage') }, { permissionId: byName('activity:read') }] } } });
+  const legacy = await tenantDb.role.create({ data: { tenantId: t, name: 'Legacy', permissions: grant('tenants:manage', 'activity:read') } });
   await assign({ roleId: legacy.id, principalType: 'USER', userId: user });
 
   tok.user = await login(A, A.userEmail);
@@ -77,7 +77,7 @@ before(async () => {
   // A plain viewer, without roles:read
   const { hashPassword } = await import('../src/utils/auth.js');
   const { PASSWORD } = await import('./helpers.js');
-  const viewer = await prisma.user.create({
+  const viewer = await tenantDb.user.create({
     data: { tenantId: t, email: `viewer-rev-${now}@test.local`, name: 'Viewer', userType: 'TENANT_VIEWER', passwordHash: await hashPassword(PASSWORD) },
   });
   ids.viewer = viewer.id;

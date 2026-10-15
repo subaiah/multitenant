@@ -5,6 +5,9 @@ import { z } from 'zod';
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
+  // The shared tenant database: tenant users, roles and data for every tenant on
+  // SHARED_TABLES. Must be a different database from DATABASE_URL (the control plane).
+  TENANT_DATABASE_URL: z.string().url(),
 
   // Server
   // Defaults to production so a deployment that forgets NODE_ENV gets secure behaviour.
@@ -54,6 +57,9 @@ const envSchema = z.object({
   if (env.EMAIL_TRANSPORT === 'file' && !env.MAIL_OUTBOX_FILE) {
     ctx.addIssue({ code: 'custom', path: ['MAIL_OUTBOX_FILE'], message: 'MAIL_OUTBOX_FILE is required when EMAIL_TRANSPORT=file' });
   }
+  if (env.TENANT_DATABASE_URL === env.DATABASE_URL) {
+    ctx.addIssue({ code: 'custom', path: ['TENANT_DATABASE_URL'], message: 'TENANT_DATABASE_URL must be a different database from DATABASE_URL' });
+  }
   if (env.NODE_ENV === 'production' && !env.COOKIE_SECRET) {
     ctx.addIssue({ code: 'custom', path: ['COOKIE_SECRET'], message: 'COOKIE_SECRET is required in production' });
   }
@@ -93,6 +99,7 @@ const env = envSchema.parse(process.env);
 export const config = {
   // Database
   databaseUrl: env.DATABASE_URL,
+  tenantDatabaseUrl: env.TENANT_DATABASE_URL,
 
   // Server
   nodeEnv: env.NODE_ENV,

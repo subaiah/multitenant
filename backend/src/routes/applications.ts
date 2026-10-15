@@ -1,8 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { controlDb, tenantDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
+import { logActivity } from '../lib/activity.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -62,7 +63,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     };
     
     const [applications, total] = await Promise.all([
-      prisma.applicationRegistry.findMany({
+      controlDb.applicationRegistry.findMany({
         where,
         skip,
         take: parseInt(limit),
@@ -73,7 +74,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
           },
         },
       }),
-      prisma.applicationRegistry.count({ where }),
+      controlDb.applicationRegistry.count({ where }),
     ]);
     
     return {
@@ -104,7 +105,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const application = await prisma.applicationRegistry.findUnique({
+    const application = await controlDb.applicationRegistry.findUnique({
       where: { id },
       include: {
         permissions: true,
@@ -154,7 +155,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createApplicationSchema.parse(request.body);
     
     // Check if key already exists
-    const existing = await prisma.applicationRegistry.findUnique({
+    const existing = await controlDb.applicationRegistry.findUnique({
       where: { key: data.key },
     });
     
@@ -162,22 +163,20 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Application key already exists', 409);
     }
     
-    const application = await prisma.applicationRegistry.create({
+    const application = await controlDb.applicationRegistry.create({
       data: {
         ...data,
       },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'created application',
         target: application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(application);
   });
@@ -213,21 +212,19 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateApplicationSchema.parse(request.body);
     
-    const application = await prisma.applicationRegistry.update({
+    const application = await controlDb.applicationRegistry.update({
       where: { id },
       data,
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'updated application',
         target: application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return application;
   });
@@ -253,7 +250,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     // Check if application has permissions
-    const permissionCount = await prisma.permission.count({
+    const permissionCount = await controlDb.permission.count({
       where: { applicationId: id },
     });
     
@@ -262,7 +259,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check if application has tenant entitlements
-    const entitlementCount = await prisma.tenantApplication.count({
+    const entitlementCount = await controlDb.tenantApplication.count({
       where: { applicationId: id },
     });
     
@@ -270,20 +267,18 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete application with tenant entitlements. Remove all entitlements first.', 400);
     }
     
-    const application = await prisma.applicationRegistry.delete({
+    const application = await controlDb.applicationRegistry.delete({
       where: { id },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'deleted application',
         target: application.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });
@@ -305,7 +300,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const application = await prisma.applicationRegistry.findUnique({
+    const application = await controlDb.applicationRegistry.findUnique({
       where: { id },
     });
     
@@ -313,7 +308,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Application not found', 404);
     }
     
-    const permissions = await prisma.permission.findMany({
+    const permissions = await controlDb.permission.findMany({
       where: { applicationId: id },
       orderBy: [{ resource: 'asc' }, { action: 'asc' }],
     });
@@ -354,7 +349,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = createPermissionSchema.parse(request.body);
     
     // Verify application exists
-    const application = await prisma.applicationRegistry.findUnique({
+    const application = await controlDb.applicationRegistry.findUnique({
       where: { id },
     });
     
@@ -363,7 +358,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Check if permission name already exists
-    const existing = await prisma.permission.findUnique({
+    const existing = await controlDb.permission.findUnique({
       where: { name: data.name },
     });
     
@@ -371,7 +366,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Permission name already exists', 409);
     }
     
-    const permission = await prisma.permission.create({
+    const permission = await controlDb.permission.create({
       data: {
         applicationId: id,
         ...data,
@@ -379,15 +374,13 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'created permission',
         target: `${permission.name} for ${application.name}`,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(201).send(permission);
   });
@@ -412,29 +405,29 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const { permissionId } = request.params as { permissionId: string };
     
     
-    // Check if permission is used in any roles
-    const rolePermissionCount = await prisma.rolePermission.count({
-      where: { permissionId },
-    });
+    // Check if permission is used in any tenant's roles (roles reference permissions by name)
+    const existing = await controlDb.permission.findUnique({ where: { id: permissionId }, select: { name: true } });
+    if (!existing) {
+      throw new AppError('Permission not found', 404);
+    }
+    const rolePermissionCount = await tenantDb.rolePermission.count({ where: { permission: existing.name } });
     
     if (rolePermissionCount > 0) {
       throw new AppError('Cannot delete permission that is used in roles. Remove from all roles first.', 400);
     }
     
-    const permission = await prisma.permission.delete({
+    const permission = await controlDb.permission.delete({
       where: { id: permissionId },
     });
     
     // Log activity
-    await prisma.activity.create({
-      data: {
-        tenantId: request.tenant?.id ?? null, // null for platform-level actions
+    await logActivity({
+        tenantId: null, // platform-level: the platform activity log
         userId,
         action: 'deleted permission',
         target: permission.name,
         type: 'CONFIG',
-      },
-    });
+      });
     
     return reply.status(204).send();
   });

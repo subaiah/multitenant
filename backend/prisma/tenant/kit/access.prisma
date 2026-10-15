@@ -1,0 +1,238 @@
+// Roles, groups and everything that grants access inside a tenant
+
+model Role {
+  id              String           @id @default(uuid())
+  tenantId        String           @map("tenant_id")
+  name            String
+  description     String?
+  isSystem        Boolean          @default(false) @map("is_system")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  permissions     RolePermission[]
+  roleAssignments RoleAssignment[]
+  accessRequests  AccessRequest[]
+
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+// A permission a role grants, by name (`resource:action`); the catalogue is in code
+model RolePermission {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  roleId      String   @map("role_id")
+  permission  String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@index([tenantId])
+  @@map("role_permissions")
+}
+
+model RoleAssignment {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  roleId        String    @map("role_id")
+  principalType String    @map("principal_type") // USER, GROUP
+  userId        String?   @map("user_id")
+  groupId       String?   @map("group_id")
+  scopeType     String    @default("TENANT") @map("scope_type") // TENANT, ORGANIZATION, ORG_UNIT, RESOURCE
+  scopeId       String    @map("scope_id")
+  validFrom     DateTime  @default(now()) @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  role          Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group         Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  delegations            Delegation[]
+  certificationDecisions CertificationDecision[]
+
+  @@index([tenantId, userId, status])
+  @@index([tenantId, groupId, status])
+  @@index([roleId])
+  @@index([scopeType, scopeId])
+  @@index([validFrom, validTo])
+  @@map("role_assignments")
+}
+
+model Group {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  name            String
+  description     String?
+  groupType       String            @default("MANUAL") @map("group_type") // MANUAL, SYNCED, RULE_BASED
+  status          String            @default("ACTIVE")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  members         GroupMembership[]
+  roleAssignments RoleAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, status])
+  @@map("groups")
+}
+
+model GroupMembership {
+  id        String    @id @default(uuid())
+  tenantId  String    @map("tenant_id")
+  groupId   String    @map("group_id")
+  userId    String    @map("user_id")
+  validFrom DateTime  @default(now()) @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, groupId, userId])
+  @@index([tenantId, userId])
+  @@index([groupId])
+  @@map("group_memberships")
+}
+
+model Delegation {
+  id               String         @id @default(uuid())
+  tenantId         String         @map("tenant_id")
+  delegatorId      String         @map("delegator_id")
+  delegateId       String         @map("delegate_id")
+  roleAssignmentId String         @map("role_assignment_id")
+  reason           String?
+  validFrom        DateTime       @default(now()) @map("valid_from")
+  validTo          DateTime       @map("valid_to")
+  status           String         @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  revokedAt        DateTime?      @map("revoked_at")
+  revokedBy        String?        @map("revoked_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  delegator        User           @relation("Delegator", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegate         User           @relation("Delegate", fields: [delegateId], references: [id], onDelete: Cascade)
+  roleAssignment   RoleAssignment @relation(fields: [roleAssignmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, delegateId, status])
+  @@index([delegatorId])
+  @@map("delegations")
+}
+
+model AccessPolicy {
+  id          String          @id @default(uuid())
+  tenantId    String          @map("tenant_id")
+  name        String
+  description String?
+  effect      String          // ALLOW, DENY
+  conditions  Json
+  priority    Int             @default(0)
+  enabled     Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  bindings    PolicyBinding[]
+
+  @@index([tenantId, enabled, priority])
+  @@map("access_policies")
+}
+
+model PolicyBinding {
+  id         String       @id @default(uuid())
+  tenantId   String       @map("tenant_id")
+  policyId   String       @map("policy_id")
+  scopeType  String       @map("scope_type")
+  scopeId    String       @map("scope_id")
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  policy     AccessPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, scopeType, scopeId])
+  @@index([tenantId, scopeType, scopeId])
+  @@map("policy_bindings")
+}
+
+model AccessRequest {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  requesterId  String    @map("requester_id")
+  approverId   String?   @map("approver_id")
+  roleId       String    @map("role_id")
+  scopeType    String    @map("scope_type")
+  scopeId      String    @map("scope_id")
+  reason       String
+  duration     Int
+  status       String    @default("PENDING") // PENDING, APPROVED, DENIED, EXPIRED
+  approvedAt   DateTime? @map("approved_at")
+  deniedAt     DateTime? @map("denied_at")
+  denialReason String?   @map("denial_reason")
+  validFrom    DateTime? @map("valid_from")
+  validTo      DateTime? @map("valid_to")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  requester    User      @relation("AccessRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  approver     User?     @relation("AccessApprover", fields: [approverId], references: [id], onDelete: Cascade)
+  role         Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([requesterId])
+  @@index([approverId])
+  @@map("access_requests")
+}
+
+model AccessCertification {
+  id          String                  @id @default(uuid())
+  tenantId    String                  @map("tenant_id")
+  name        String
+  description String?
+  reviewType  String                  @map("review_type")
+  scopeType   String                  @map("scope_type")
+  scopeId     String                  @map("scope_id")
+  reviewerId  String                  @map("reviewer_id")
+  dueDate     DateTime                @map("due_date")
+  status      String                  @default("PENDING")
+  completedAt DateTime?               @map("completed_at")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  reviewer    User                    @relation("CertificationReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  decisions   CertificationDecision[]
+
+  @@index([tenantId, status, dueDate])
+  @@index([reviewerId])
+  @@map("access_certifications")
+}
+
+model CertificationDecision {
+  id               String              @id @default(uuid())
+  tenantId         String              @map("tenant_id")
+  certificationId  String              @map("certification_id")
+  roleAssignmentId String              @map("role_assignment_id")
+  decision         String              // APPROVE, REVOKE
+  reason           String?
+  decidedAt        DateTime            @default(now()) @map("decided_at")
+  createdAt        DateTime            @default(now()) @map("created_at")
+
+  certification    AccessCertification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  roleAssignment   RoleAssignment      @relation(fields: [roleAssignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([certificationId, roleAssignmentId])
+  @@index([tenantId])
+  @@map("certification_decisions")
+}
+
+// Maps a tenant's Postgres role to its tenant id, for row-level security.
+// Written only by the migration owner (phase 3 of the isolation design).
+model TenantDbRole {
+  roleName  String   @id @map("role_name")
+  tenantId  String   @map("tenant_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@map("tenant_roles")
+}
