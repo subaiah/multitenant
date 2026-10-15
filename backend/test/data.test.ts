@@ -77,10 +77,14 @@ test('tenant list includes status counts and usage from the periodic snapshot', 
   assert.deepEqual(a._count, { users: 3, applications: 2 });
   assert.ok(a.usageRefreshedAt);
 
-  // The platform dashboard adds the snapshots up
+  // The snapshot of B, which the platform dashboard adds up with everyone else's
+  // (other test files run in parallel, so the dashboard's latest-8 list may not show it)
+  const usageB = await controlDb.tenantUsage.findUniqueOrThrow({ where: { tenantId: B.tenantId } });
+  assert.deepEqual(usageB.appsByStatus, { RUNNING: 1, ERROR: 1 });
+  assert.ok((usageB.recentActivity as { target: string }[]).some((r) => r.target === 'Beta Web'));
   const stats = (await api('GET', '/platform/stats', { cookie })).json;
+  assert.equal(stats.status ?? 200, 200);
   assert.ok(stats.applications.byStatus.ERROR >= 2, 'both tenants have an app in error');
-  assert.ok(stats.recentActivity.some((r: { tenant: string; target: string }) => r.tenant === 'Test data-b' && r.target === 'Beta Web'));
 });
 
 test('deployed apps are scoped to the tenant, filterable and counted', async () => {
