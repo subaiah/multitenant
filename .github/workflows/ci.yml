@@ -60,6 +60,9 @@ jobs:
       TENANT_PROVISIONER_URL: postgresql://tenant_provisioner:prov@localhost:5432/postgres
       TENANT_PLATFORM_URL: postgresql://tenant_platform:plat@localhost:5432/ci_tenant
       TEST_TENANT_MODE: ${{ matrix.tenant-mode }}
+      # Scripts read the same config as the server, which defaults to production
+      NODE_ENV: test
+      JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
