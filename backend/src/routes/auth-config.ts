@@ -9,12 +9,15 @@ const updateAuthConfigSchema = z.object({
   sessionTimeout: z.number().min(5).max(1440).optional(),
   passwordPolicy: z.enum(['STANDARD', 'STRONG', 'VERY_STRONG']).optional(),
   ssoOnly: z.boolean().optional(),
+  otpEnabled: z.boolean().optional(),
+  otpExpiry: z.number().int().min(1).max(60).optional(),
 });
 
 const createAuthProviderSchema = z.object({
   provider: z.enum(['ENTRA', 'GOOGLE', 'GITHUB', 'OKTA', 'AUTH0', 'CUSTOM_OIDC']),
   enabled: z.boolean().default(false),
   clientId: z.string().optional(),
+  clientSecret: z.string().min(1).optional(), // write-only: never returned
   tenantId: z.string().optional(),
   domain: z.string().optional(),
   scopes: z.array(z.string()).default(['openid', 'profile', 'email']),
@@ -24,6 +27,7 @@ const createAuthProviderSchema = z.object({
 const updateAuthProviderSchema = z.object({
   enabled: z.boolean().optional(),
   clientId: z.string().optional(),
+  clientSecret: z.string().min(1).optional(), // write-only: never returned
   tenantId: z.string().optional(),
   domain: z.string().optional(),
   scopes: z.array(z.string()).optional(),
@@ -65,6 +69,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
           sessionTimeout: { type: 'number', minimum: 5, maximum: 1440 },
           passwordPolicy: { type: 'string', enum: ['STANDARD', 'STRONG', 'VERY_STRONG'] },
           ssoOnly: { type: 'boolean' },
+          otpEnabled: { type: 'boolean' },
+          otpExpiry: { type: 'integer', minimum: 1, maximum: 60 },
         },
       },
     },
@@ -124,6 +130,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
           provider: { type: 'string', enum: ['ENTRA', 'GOOGLE', 'GITHUB', 'OKTA', 'AUTH0', 'CUSTOM_OIDC'] },
           enabled: { type: 'boolean', default: false },
           clientId: { type: 'string' },
+          clientSecret: { type: 'string' },
           tenantId: { type: 'string' },
           domain: { type: 'string' },
           scopes: { type: 'array', items: { type: 'string' } },
@@ -196,6 +203,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         properties: {
           enabled: { type: 'boolean' },
           clientId: { type: 'string' },
+          clientSecret: { type: 'string' },
           tenantId: { type: 'string' },
           domain: { type: 'string' },
           scopes: { type: 'array', items: { type: 'string' } },
@@ -225,7 +233,7 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         action: 'updated authentication provider',
         target: provider.provider,
         type: 'AUTH',
-        metadata: data,
+        metadata: { ...data, clientSecret: data.clientSecret ? '[redacted]' : undefined }, // never log secrets
       },
     });
 

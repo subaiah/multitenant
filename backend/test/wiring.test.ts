@@ -6,7 +6,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  api, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp,
+  api, baseUrl, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp,
   PASSWORD, type PlatformSeed, type TenantSeed,
 } from './helpers.js';
 
@@ -159,4 +159,19 @@ test('login page info for the platform slug, and the slug is reserved', async ()
 
   const reg = await api('POST', '/auth/register', { body: { email: 'x@y.test', name: 'X Y', tenantName: 'Platform', tenantSlug: 'platform' } });
   assert.equal(reg.status, 409);
+});
+
+test('CORS preflight allows the methods the frontend uses', async () => {
+  // Browsers send a preflight before PATCH/PUT/DELETE; if the method is not
+  // allowed, every edit and delete fails in the UI while API tests still pass.
+  const origin = (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',')[0];
+  for (const method of ['PATCH', 'PUT', 'DELETE']) {
+    const res = await fetch(`${baseUrl()}/tenants/x`, {
+      method: 'OPTIONS',
+      headers: { Origin: origin, 'Access-Control-Request-Method': method },
+    });
+    assert.ok(res.status < 300, `preflight status ${res.status}`);
+    assert.ok((res.headers.get('access-control-allow-methods') ?? '').includes(method), `${method} not allowed by CORS`);
+    assert.equal(res.headers.get('access-control-allow-credentials'), 'true');
+  }
 });

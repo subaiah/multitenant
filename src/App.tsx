@@ -1,14 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { LayoutProvider } from './context/LayoutContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { PermissionGuard } from './components/PermissionGuard';
 import { RequireAuth } from './components/RequireAuth';
-import Layout from './components/Layout';
 import PlatformLayout from './layouts/PlatformLayout';
 import TenantLayout from './layouts/TenantLayout';
 import SmartLogin from './pages/SmartLogin';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import PlatformDashboard from './pages/PlatformDashboard';
+import PlatformUsers from './pages/PlatformUsers';
 import Tenants from './pages/Tenants';
 import Applications from './pages/Applications';
 import ActivityLog from './pages/ActivityLog';
@@ -53,7 +53,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <LayoutProvider>
+        <>
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<SmartLogin />} />
@@ -65,7 +65,7 @@ export default function App() {
             <Route element={<RequireAuth portal="PLATFORM"><PlatformLayout /></RequireAuth>}>
               <Route path="/platform/dashboard" element={
                 <PermissionGuard permission="platform:read" redirectTo="/unauthorized">
-                  <PlaceholderPage title="Platform Dashboard" description="Overview of all tenants and platform metrics" />
+                  <PlatformDashboard />
                 </PermissionGuard>
               } />
               <Route path="/platform/tenants" element={
@@ -80,7 +80,7 @@ export default function App() {
               } />
               <Route path="/platform/users" element={
                 <PermissionGuard permission="platform-users:read" redirectTo="/unauthorized">
-                  <PlaceholderPage title="Platform Users" description="Manage platform-level users" />
+                  <PlatformUsers />
                 </PermissionGuard>
               } />
               <Route path="/platform/policies" element={
@@ -164,7 +164,7 @@ export default function App() {
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </LayoutProvider>
+        </>
       </AuthProvider>
     </BrowserRouter>
   );

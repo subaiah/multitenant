@@ -30,6 +30,11 @@ export type PlatformSeed = { adminEmail: string; supportEmail: string };
 let server: ChildProcess | undefined;
 const created = { tenants: [] as string[], platformEmails: [] as string[] };
 
+/** Base URL of the server under test. */
+export function baseUrl() {
+  return BASE;
+}
+
 export async function db() {
   return import('../src/lib/prisma.js');
 }
