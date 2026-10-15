@@ -101,3 +101,12 @@ test("a delegated role editor can't build or edit roles beyond their own access"
 
   assert.equal((await api('POST', '/roles', { ...as('manager'), body: { name: 'Nope' } })).status, 403, 'managers lack roles:manage');
 });
+
+test('setting up default roles is safe to run concurrently', async () => {
+  const C = await seedTenant('roled-race');
+  const t = await login(C, C.adminEmail);
+  const results = await Promise.all(Array.from({ length: 4 }, () => api('POST', `/roles/initialize/${C.tenantId}`, { token: t })));
+  assert.deepEqual(results.map((r) => r.status), [200, 200, 200, 200], JSON.stringify(results.map((r) => r.json)));
+  const names = (await api('GET', '/roles', { token: t })).json.roles.map((r: any) => r.name).sort();
+  assert.deepEqual(names, ['Developer', 'Tenant Admin', 'Tenant Manager', 'User', 'Viewer']);
+});

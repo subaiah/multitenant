@@ -469,15 +469,20 @@ export async function createDefaultTenantRoles(tenantId: string): Promise<void> 
     const granted = catalog.filter(
       (p) => isTenantGrantable(p.name) && permissionMatches(USER_TYPE_PERMISSIONS[template.userType], p.name),
     );
-    await prisma.role.create({
-      data: {
-        tenantId,
-        name: template.name,
-        description: template.description,
-        isSystem: true,
-        permissions: { create: granted.map((p) => ({ permissionId: p.id })) },
-      },
-    });
+    try {
+      await prisma.role.create({
+        data: {
+          tenantId,
+          name: template.name,
+          description: template.description,
+          isSystem: true,
+          permissions: { create: granted.map((p) => ({ permissionId: p.id })) },
+        },
+      });
+    } catch (err) {
+      // Created by a concurrent call in the meantime: that's the outcome we want
+      if ((err as { code?: string }).code !== 'P2002') throw err;
+    }
   }
 }
 
@@ -489,16 +494,18 @@ export async function createDefaultTenantRoles(tenantId: string): Promise<void> 
  * roles can be built from any catalog permission. Idempotent.
  */
 export async function createDefaultPermissions(): Promise<void> {
-  for (const name of PERMISSIONS) {
-    const i = name.indexOf(':');
-    const resource = name.slice(0, i);
-    const action = name.slice(i + 1);
-    await prisma.permission.upsert({
-      where: { name },
-      update: {},
-      create: { name, resource, action, description: `${action} ${resource}` },
-    });
-  }
+  // One INSERT ... ON CONFLICT DO NOTHING: safe when several requests (or
+  // tenants being created at the same time) seed the catalog concurrently.
+  // Per-row upserts raced and failed with unique-constraint errors.
+  await prisma.permission.createMany({
+    data: PERMISSIONS.map((name) => {
+      const i = name.indexOf(':');
+      const resource = name.slice(0, i);
+      const action = name.slice(i + 1);
+      return { name, resource, action, description: `${action} ${resource}` };
+    }),
+    skipDuplicates: true,
+  });
 }
 
 /**
