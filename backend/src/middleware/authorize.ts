@@ -72,3 +72,17 @@ export async function authorize(request: FastifyRequest, reply: FastifyReply) {
     return reply.status(403).send({ error: 'Forbidden', message: `Missing permission: ${anyOf.join(' or ')}` });
   }
 }
+
+/**
+ * "You can't hand out what you don't have." Refuses (403) when the caller's
+ * effective permissions don't cover every permission in `granted`. Used when
+ * assigning roles and changing group membership, so e.g. a manager (groups:*)
+ * can't add themselves to a group that holds the Tenant Admin role.
+ */
+export async function requireCanGrant(request: FastifyRequest, granted: Iterable<string>, what: string): Promise<void> {
+  const mine = await loadPermissions(request);
+  const missing = [...new Set(granted)].filter((p) => !permissionMatches(mine, p));
+  if (missing.length > 0) {
+    throw new AppError(`You can't ${what}: it grants permissions you don't have (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''})`, 403);
+  }
+}

@@ -2,7 +2,8 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
-import { requireUserType, requireTenantAccess } from '../utils/authorization.js';
+import { requireCanGrant } from '../middleware/authorize.js';
+import { assignmentState, groupPermissionNames } from '../lib/access.js';
 
 const createGroupSchema = z.object({
   name: z.string().min(2).max(100),
@@ -61,15 +62,19 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
-            select: { members: true },
+            select: { members: true, roleAssignments: true },
           },
+          roleAssignments: { select: { role: { select: { name: true } } } },
         },
       }),
       prisma.group.count({ where }),
     ]);
     
     return {
-      groups,
+      groups: groups.map(({ roleAssignments, ...g }) => ({
+        ...g,
+        roles: [...new Set(roleAssignments.map((a) => a.role.name))],
+      })),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -108,9 +113,15 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
                 email: true,
                 name: true,
                 userType: true,
+                status: true,
               },
             },
           },
+          orderBy: { createdAt: 'asc' },
+        },
+        roleAssignments: {
+          include: { role: { select: { id: true, name: true, description: true, permissions: { select: { permission: { select: { name: true } } } } } } },
+          orderBy: { createdAt: 'asc' },
         },
         _count: {
           select: { members: true, roleAssignments: true },
@@ -122,7 +133,31 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Group not found', 404);
     }
     
-    return group;
+    const { roleAssignments, ...rest } = group;
+    const scopeIds = roleAssignments.filter((a) => a.scopeType !== 'TENANT').map((a) => a.scopeId);
+    const [orgs, units] = await Promise.all([
+      prisma.organization.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
+      prisma.orgUnit.findMany({ where: { tenantId, id: { in: scopeIds } }, select: { id: true, name: true } }),
+    ]);
+    const scopeNames = new Map<string, string>([...orgs, ...units].map((x) => [x.id, x.name]));
+    return {
+      ...rest,
+      roleAssignments: roleAssignments.map((a) => ({
+        id: a.id,
+        roleId: a.roleId,
+        roleName: a.role.name,
+        roleDescription: a.role.description,
+        scopeType: a.scopeType,
+        scopeId: a.scopeId,
+        scopeName: a.scopeType === 'TENANT' ? request.tenant.name : (scopeNames.get(a.scopeId) ?? a.scopeId),
+        permissions: a.role.permissions.map((rp) => rp.permission.name),
+        validFrom: a.validFrom,
+        validTo: a.validTo,
+        state: assignmentState(a),
+      })),
+      // What membership grants, so the UI can tell whether the caller may change it
+      grants: await groupPermissionNames(id, tenantId),
+    };
   });
 
   // Create group
@@ -211,8 +246,21 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateGroupSchema.parse(request.body);
     
+    const current = await prisma.group.findFirst({ where: { id, tenantId } });
+    if (!current) {
+      throw new AppError('Group not found', 404);
+    }
+    if (data.name && data.name !== current.name) {
+      const clash = await prisma.group.findFirst({ where: { tenantId, name: data.name } });
+      if (clash) throw new AppError('Group name already exists', 409);
+    }
+    // Turning a group on or off changes what its members can do
+    if (data.status && data.status !== current.status) {
+      await requireCanGrant(request, await groupPermissionNames(id, tenantId), `${data.status === 'ACTIVE' ? 'activate' : 'deactivate'} this group`);
+    }
+    
     const group = await prisma.group.update({
-      where: { id, tenantId },
+      where: { id },
       data,
     });
     
@@ -251,6 +299,11 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
+    const existing = await prisma.group.findFirst({ where: { id, tenantId } });
+    if (!existing) {
+      throw new AppError('Group not found', 404);
+    }
+    
     // Check if group has members
     const memberCount = await prisma.groupMembership.count({
       where: { groupId: id },
@@ -270,7 +323,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const group = await prisma.group.delete({
-      where: { id, tenantId },
+      where: { id },
     });
     
     // Log activity
@@ -336,6 +389,12 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User not found', 404);
     }
     
+    await requireCanGrant(request, await groupPermissionNames(groupId, tenantId), `add members to ${group.name}`);
+    
+    if (validTo && new Date(validTo) <= (validFrom ? new Date(validFrom) : new Date())) {
+      throw new AppError('Membership end date must be after its start', 400);
+    }
+    
     // Check if already a member
     const existing = await prisma.groupMembership.findFirst({
       where: { groupId, userId: memberUserId },
@@ -391,9 +450,17 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
-    await prisma.groupMembership.deleteMany({
+    const membership = await prisma.groupMembership.findFirst({
       where: { groupId, userId: memberUserId, tenantId },
+      include: { group: { select: { name: true } }, user: { select: { email: true } } },
     });
+    if (!membership) {
+      throw new AppError('This user is not a member of the group', 404);
+    }
+    
+    await requireCanGrant(request, await groupPermissionNames(groupId, tenantId), `remove members from ${membership.group.name}`);
+    
+    await prisma.groupMembership.delete({ where: { id: membership.id } });
     
     // Log activity
     await prisma.activity.create({
@@ -401,7 +468,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         tenantId,
         userId,
         action: 'removed member from group',
-        target: `user ${memberUserId} from group ${groupId}`,
+        target: `${membership.user.email} from ${membership.group.name}`,
         type: 'USER',
       },
     });

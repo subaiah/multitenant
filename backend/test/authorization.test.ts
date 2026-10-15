@@ -95,8 +95,20 @@ test('default roles carry the permissions of their user type', async () => {
 
 test('tenant roles cannot grant platform permissions, even with wildcards', async () => {
   await prisma.permission.upsert({ where: { name: '*:read' }, update: {}, create: { name: '*:read', resource: '*', action: 'read' } });
-  const roleId = await createRole('Sneaky', ['tenants:read', 'tenants:manage', 'platform:read', '*:read']);
-  await assign(roleId, { userId: (await prisma.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id });
+  const sneaky = ['tenants:read', 'tenants:manage', 'platform:read', '*:read'];
+  // The API refuses to build such a role...
+  const refused = await api('POST', '/roles', { cookie: adminCookie, body: { name: 'Sneaky', permissions: sneaky } });
+  assert.equal(refused.status, 400);
+  // ...and one that already exists in the database (older data) still grants nothing
+  const catalog = await prisma.permission.findMany({ where: { name: { in: sneaky } } });
+  const { id: roleId } = await prisma.role.create({
+    data: { tenantId: A.tenantId, name: 'Sneaky', permissions: { create: catalog.map((p) => ({ permissionId: p.id })) } },
+  });
+  const adminId = (await prisma.user.findFirstOrThrow({ where: { email: A.adminEmail } })).id;
+  // Nobody can assign it through the API either (the admin doesn't hold these)
+  const assignRes = await api('POST', '/roles/assign', { cookie: adminCookie, body: { roleId, principalType: 'USER', userId: adminId } });
+  assert.equal(assignRes.status, 403);
+  await prisma.roleAssignment.create({ data: { tenantId: A.tenantId, roleId, principalType: 'USER', userId: adminId, scopeType: 'TENANT', scopeId: A.tenantId } });
 
   const admin = await cookieFor(A.adminEmail);
   assert.equal((await api('GET', '/tenants', { cookie: admin })).status, 403);
