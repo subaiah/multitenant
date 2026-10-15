@@ -294,6 +294,9 @@ export async function migrateAllTargets({ concurrency = 10 } = {}): Promise<Roll
           data: { lastMigration: result.last, migratedAt: new Date(), migrationError: null },
         });
       } catch (err) {
+        // A tenant deleted during the run isn't a failure: its target is gone on purpose
+        const still = job.target.kind === 'shared' ? 1 : await controlDb.tenant.count({ where: { id: { in: ids }, provisioningStatus: { not: 'DEPROVISIONING' } } });
+        if (still === 0) continue;
         const error = (err as Error).message;
         report.failed.push({ target: name, error });
         await controlDb.databaseConfig.updateMany({ where: { tenantId: { in: ids } }, data: { migrationError: error } });
