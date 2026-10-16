@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
+import { PREVIEW_DATABASE_FIELDS, previewEnabled } from '../lib/preview.js';
 
 // Where the data lives (isolation mode, role, schema or database, connection
 // string) is set by provisioning and can't change once a tenant has data;
@@ -66,6 +67,10 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(`Where this tenant's data lives is fixed once it's set up (${locked.join(', ')} can't be changed)`, 400);
     }
     const data = updateDatabaseConfigSchema.parse(request.body);
+    const preview = Object.keys(data).filter((k) => PREVIEW_DATABASE_FIELDS.includes(k));
+    if (preview.length && !previewEnabled()) {
+      throw new AppError(`${preview.join(' and ')} can't be changed here yet: backups and encryption are set up by the platform operator`, 400);
+    }
 
     const before = await controlDb.databaseConfig.findUnique({ where: { tenantId: request.tenant.id }, omit: { connectionString: true } });
     const config = await controlDb.databaseConfig.update({

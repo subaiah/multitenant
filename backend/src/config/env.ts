@@ -35,6 +35,20 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
   PORT: z.string().default('4000').transform(Number),
   HOST: z.string().default('0.0.0.0'),
+  // Proxies in front of the server (load balancer, Caddy/nginx, Cloudflare),
+  // whose X-Forwarded-For the server believes: how many hops ("1"), or which
+  // addresses ("10.0.0.0/8,172.16.0.0/12"). Without it every request seems to
+  // come from the proxy, so per-IP limits and audit addresses are wrong.
+  // "false" (the default) when clients connect directly.
+  TRUST_PROXY: z.string().default('false'),
+  // The interactive API reference at /docs: always outside production, and in
+  // production only when turned on here
+  API_DOCS: z.enum(['true', 'false']).optional(),
+  // Pages that show sample data rather than real measurements (deployed
+  // applications and their resource use, the API gateway settings, backup and
+  // encryption switches). Shown outside production unless turned off; hidden
+  // in production unless turned on.
+  PREVIEW_FEATURES: z.enum(['true', 'false']).optional(),
 
   // JWT
   JWT_SECRET: z.string().min(32),
@@ -151,6 +165,20 @@ const readSecretKeys = (nodeEnv: string) => readKeys('SECRETS_KEY', nodeEnv, 'ZG
  */
 const readAuditKeys = (nodeEnv: string) => readKeys('AUDIT_KEY', nodeEnv, 'ZGV2LW9ubHktYXVkaXQta2V5LWRvLW5vdC11c2UtISE=');
 
+/** TRUST_PROXY as Fastify's trustProxy option: false, the nearest N hops, or addresses */
+function parseTrustProxy(value: string): false | string[] | ((address: string, hop: number) => boolean) {
+  const v = value.trim().toLowerCase();
+  if (v === '' || v === 'false') return false;
+  if (v === 'true') {
+    throw new Error('TRUST_PROXY=true would believe any client that sends X-Forwarded-For; give the number of proxies (e.g. 1) or their addresses');
+  }
+  if (/^\d+$/.test(v)) {
+    const hops = Number(v);
+    return (_address, hop) => hop < hops;
+  }
+  return v.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 // Parse and validate environment variables
 const env = envSchema.parse(process.env);
 
@@ -173,6 +201,9 @@ export const config = {
   nodeEnv: env.NODE_ENV,
   port: env.PORT,
   host: env.HOST,
+  trustProxy: parseTrustProxy(env.TRUST_PROXY),
+  apiDocs: env.API_DOCS ? env.API_DOCS === 'true' : env.NODE_ENV !== 'production',
+  previewFeatures: env.PREVIEW_FEATURES ? env.PREVIEW_FEATURES === 'true' : env.NODE_ENV !== 'production',
 
   // JWT
   jwtSecret: env.JWT_SECRET,

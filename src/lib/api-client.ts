@@ -152,6 +152,8 @@ export interface CurrentUser {
     portal: 'PLATFORM' | 'TENANT';
   };
   tenant: { id: string; name: string; slug: string } | null;
+  /** Optional parts of the app this server shows (PREVIEW_FEATURES) */
+  features?: { preview: boolean };
 }
 
 export function getCurrentUser() {

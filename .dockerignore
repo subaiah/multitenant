@@ -1,0 +1,9 @@
+# Build context for deploy/web.Dockerfile (the repository root)
+node_modules
+dist
+backend
+.git
+.github
+*.log
+.env
+.env.*

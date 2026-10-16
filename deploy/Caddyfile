@@ -1,0 +1,54 @@
+# The single public address: the app at /, the API at /api.
+#
+# SITE_ADDRESS is a domain name for real deployments (Caddy then gets and
+# renews an HTTPS certificate on its own: ports 80 and 443 must reach this
+# container), or ":80" to serve plain HTTP behind another proxy or locally.
+{
+	# Caddy's own log as JSON lines. Access logs are off: the API logs every
+	# request it gets, without headers or cookies.
+	log {
+		format json
+	}
+}
+
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# The API. Stripping /api means the server's routes stay as they are;
+	# BFF_URL must be this address plus /api (single sign-on callbacks use it).
+	handle_path /api/* {
+		# Caddy sends the client's address in X-Forwarded-For, replacing any
+		# the client sent itself; the API trusts this one hop (TRUST_PROXY=1).
+		# Behind a CDN or load balancer as well, see docs/DEPLOYMENT.md.
+		reverse_proxy {$API_UPSTREAM:api:4000}
+	}
+
+	# The app: files from the build, everything else is a client-side route
+	handle {
+		root * /srv
+		# Built files have content hashes in their names; the page itself
+		# (index.html, served for every app route) is checked each time
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@page not path /assets/*
+		header @page Cache-Control "no-cache"
+		header {
+			# What the app may load: only itself, with two exceptions: inline
+			# styles (React and the charts set style attributes) and images from
+			# any https address (tenants brand their sign-in page with a logo URL).
+			# The API sets its own, stricter one.
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		}
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Every response
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}

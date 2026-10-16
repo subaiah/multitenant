@@ -76,7 +76,7 @@ export function decryptSecret(stored: string, context: string, keys: Map<number,
  * Every column that holds a secret, by field name (each name is used by one
  * model only; test/secrets.test.ts checks that against the schema). The Prisma
  * extension in lib/prisma.ts encrypts these on every write, nested writes
- * included; scripts/encrypt-secrets.ts converts and re-keys existing rows.
+ * included; src/cli/encrypt-secrets.ts (npm run secrets:encrypt) converts and re-keys existing rows.
  */
 export const SECRET_FIELDS = {
   connectionString: { model: 'DatabaseConfig', table: 'database_configs', column: 'connection_string' },

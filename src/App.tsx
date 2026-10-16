@@ -1,39 +1,41 @@
+import { Suspense, lazy, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { LoadingState } from './components/ui';
 import { PermissionGuard } from './components/PermissionGuard';
 import { RequireAuth } from './components/RequireAuth';
 import PlatformLayout from './layouts/PlatformLayout';
 import TenantLayout from './layouts/TenantLayout';
 import SmartLogin from './pages/SmartLogin';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import PlatformDashboard from './pages/PlatformDashboard';
-import PlatformUsers from './pages/PlatformUsers';
-import Tenants from './pages/Tenants';
-import Applications from './pages/Applications';
-import ActivityLog from './pages/ActivityLog';
-import AuditLog from './pages/AuditLog';
-import Notifications from './pages/Notifications';
-import Support from './pages/Support';
-import SupportWorkspace from './pages/SupportWorkspace';
-import SettingsPage from './pages/Settings';
-import Infrastructure from './pages/Infrastructure';
-import DataIsolation from './pages/DataIsolation';
-import Authentication from './pages/Authentication';
-import ApiManagement from './pages/ApiManagement';
-import Profile from './pages/Profile';
-import Groups from './pages/Groups';
-import RoleAssignments from './pages/RoleAssignments';
-import RoleEditor from './pages/RoleEditor';
-import AccessReview from './pages/AccessReview';
-import Organizations from './pages/Organizations';
-import ApplicationsManagement from './pages/ApplicationsManagement';
-import TenantEntitlements from './pages/TenantEntitlements';
-import Unauthorized from './pages/Unauthorized';
-import Users from './pages/Users';
-import AcceptInvite from './pages/AcceptInvite';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
+const PlatformUsers = lazy(() => import('./pages/PlatformUsers'));
+const Tenants = lazy(() => import('./pages/Tenants'));
+const Applications = lazy(() => import('./pages/Applications'));
+const ActivityLog = lazy(() => import('./pages/ActivityLog'));
+const AuditLog = lazy(() => import('./pages/AuditLog'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Support = lazy(() => import('./pages/Support'));
+const SupportWorkspace = lazy(() => import('./pages/SupportWorkspace'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const Infrastructure = lazy(() => import('./pages/Infrastructure'));
+const DataIsolation = lazy(() => import('./pages/DataIsolation'));
+const Authentication = lazy(() => import('./pages/Authentication'));
+const ApiManagement = lazy(() => import('./pages/ApiManagement'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Groups = lazy(() => import('./pages/Groups'));
+const RoleAssignments = lazy(() => import('./pages/RoleAssignments'));
+const RoleEditor = lazy(() => import('./pages/RoleEditor'));
+const AccessReview = lazy(() => import('./pages/AccessReview'));
+const Organizations = lazy(() => import('./pages/Organizations'));
+const ApplicationsManagement = lazy(() => import('./pages/ApplicationsManagement'));
+const TenantEntitlements = lazy(() => import('./pages/TenantEntitlements'));
+const Unauthorized = lazy(() => import('./pages/Unauthorized'));
+const Users = lazy(() => import('./pages/Users'));
+const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -59,11 +61,22 @@ function PlaceholderPage({ title, description }: { title: string; description: s
   );
 }
 
+/**
+ * Pages that show sample data rather than real measurements: only when the
+ * server has preview features on (backend/src/lib/preview.ts). Otherwise the
+ * address leads to the dashboard.
+ */
+function Preview({ children, home }: { children: ReactNode; home: string }) {
+  const { previewFeatures } = useAuth();
+  return previewFeatures ? <>{children}</> : <Navigate to={home} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <>
+        {/* Pages load on first visit; the layouts show this while one does */}
+        <Suspense fallback={<LoadingState />}>
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<SmartLogin />} />
@@ -114,14 +127,18 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/platform/policies" element={
-                <PermissionGuard permission="policies:read" redirectTo="/unauthorized">
-                  <PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />
-                </PermissionGuard>
+                <Preview home="/platform/dashboard">
+                  <PermissionGuard permission="policies:read" redirectTo="/unauthorized">
+                    <PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />
+                  </PermissionGuard>
+                </Preview>
               } />
               <Route path="/platform/settings" element={
-                <PermissionGuard permission="platform-settings:manage" redirectTo="/unauthorized">
-                  <PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />
-                </PermissionGuard>
+                <Preview home="/platform/dashboard">
+                  <PermissionGuard permission="platform-settings:manage" redirectTo="/unauthorized">
+                    <PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />
+                  </PermissionGuard>
+                </Preview>
               } />
             </Route>
             
@@ -137,9 +154,11 @@ export default function App() {
               {/* Everyone has an inbox and preferences */}
               <Route path="/notifications" element={<Notifications scope="tenant" />} />
               <Route path="/applications" element={
-                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
-                  <Applications />
-                </PermissionGuard>
+                <Preview home="/dashboard">
+                  <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                    <Applications />
+                  </PermissionGuard>
+                </Preview>
               } />
               <Route path="/activity" element={
                 <PermissionGuard permission="activity:read" redirectTo="/unauthorized">
@@ -152,9 +171,11 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/infrastructure" element={
-                <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
-                  <Infrastructure />
-                </PermissionGuard>
+                <Preview home="/dashboard">
+                  <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
+                    <Infrastructure />
+                  </PermissionGuard>
+                </Preview>
               } />
               <Route path="/data-isolation" element={
                 <PermissionGuard permission="database:manage" redirectTo="/unauthorized">
@@ -167,9 +188,11 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/api" element={
-                <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
-                  <ApiManagement />
-                </PermissionGuard>
+                <Preview home="/dashboard">
+                  <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
+                    <ApiManagement />
+                  </PermissionGuard>
+                </Preview>
               } />
               <Route path="/users" element={
                 <PermissionGuard permission="users:read" redirectTo="/unauthorized">
@@ -219,7 +242,7 @@ export default function App() {
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );

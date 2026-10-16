@@ -435,6 +435,8 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       user: { ...user, portal: portalOf(user.userType) },
       tenant,
+      // Which optional parts of the app to show (lib/preview.ts)
+      features: { preview: config.previewFeatures },
     };
   });
 

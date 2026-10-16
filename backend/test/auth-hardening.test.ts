@@ -352,13 +352,6 @@ test('session settings are validated and saved', async () => {
   await setAuth({ sessionTimeout: 60, maxSessionHours: 12 });
 });
 
-test('a service token from /bff/token/exchange is not a session', async () => {
-  const s = await loginSession(A.slug, A.adminEmail);
-  const ex = await api('POST', '/bff/token/exchange', { cookie: s.cookie, body: { service: 'reports' } });
-  assert.equal(ex.status, 200);
-  assert.equal((await api('GET', '/users', { token: ex.json.token })).status, 401);
-});
-
 // ------------------------------------------------------------ single sign-on
 
 let providerId: string;

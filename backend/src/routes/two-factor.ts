@@ -11,6 +11,7 @@ import { newRecoveryCodes } from '../lib/mfa.js';
 import { consumeMfaCode, getMfaState, mfaRequired, readMfaToken, saveMfaState } from '../lib/sign-in.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { signedInCodeRateLimit } from '../lib/rate-limits.js';
 import { codeSchema, enrollment, finishEnrollment, mfaRateLimit } from './mfa.js';
 
 /** The signed-in caller as a session owner. */
@@ -78,7 +79,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
   }
 
   fastify.post('/disable', {
-    config: { permission: AUTHENTICATED, rateLimit: { max: 5, timeWindow: '15 minutes' } },
+    config: { permission: AUTHENTICATED, rateLimit: signedInCodeRateLimit('disable') },
   }, async (request) => {
     const owner = ownerOfRequest(request);
     if (await mfaRequired(owner)) {
@@ -92,7 +93,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/recovery-codes', {
-    config: { permission: AUTHENTICATED, rateLimit: { max: 5, timeWindow: '15 minutes' } },
+    config: { permission: AUTHENTICATED, rateLimit: signedInCodeRateLimit('recovery-codes') },
   }, async (request) => {
     const owner = await checkCode(request);
     const { codes, hashes } = newRecoveryCodes();

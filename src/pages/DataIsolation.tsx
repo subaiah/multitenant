@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Database, ShieldCheck, HardDrive, Plug, Lock } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
+import { useAuth } from '../contexts/AuthContext';
 import { apiPatch } from '../lib/api-client';
 import { Card, DataView, PageHeader, StatCard, formatRelative, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -36,6 +37,8 @@ const PROVIDER_NAMES: Record<string, string> = { POSTGRESQL: 'PostgreSQL' };
 export default function DataIsolation() {
   const config = useApi<DatabaseConfig>('/database');
   const strategies = useApi<Strategy[]>('/database/strategies');
+  // The backup and encryption switches don't do anything yet (preview only)
+  const { previewFeatures } = useAuth();
 
   return (
     <div className="p-6 space-y-6">
@@ -43,14 +46,16 @@ export default function DataIsolation() {
       <DataView {...config}>
         {(c) => (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${previewFeatures ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
               <StatCard label="Isolation strategy" value={strategies.data?.find((s) => s.id === c.strategy)?.name ?? humanize(c.strategy)} icon={Database} tone="blue" />
               <StatCard label="Database" value={PROVIDER_NAMES[c.provider] ?? c.provider} icon={Plug} tone="purple" hint={c.region} />
               <StatCard label="Storage limit" value={c.storageLimit} icon={HardDrive} tone="amber" />
-              <StatCard label="Protection" value={[c.backupEnabled && 'Backups', c.encryptionAtRest && 'Encrypted'].filter(Boolean).join(' · ') || 'None'}
-                icon={ShieldCheck} tone={c.backupEnabled && c.encryptionAtRest ? 'green' : 'red'} />
+              {previewFeatures && (
+                <StatCard label="Protection" value={[c.backupEnabled && 'Backups', c.encryptionAtRest && 'Encrypted'].filter(Boolean).join(' · ') || 'None'}
+                  icon={ShieldCheck} tone={c.backupEnabled && c.encryptionAtRest ? 'green' : 'red'} />
+              )}
             </div>
-            <DatabaseForm config={c} strategies={strategies.data ?? []} onSaved={config.reload} />
+            <DatabaseForm config={c} strategies={strategies.data ?? []} onSaved={config.reload} protectionSwitches={previewFeatures} />
           </>
         )}
       </DataView>
@@ -94,11 +99,12 @@ function Placement({ config, strategy }: { config: DatabaseConfig; strategy?: St
   );
 }
 
-function DatabaseForm({ config, strategies, onSaved }: { config: DatabaseConfig; strategies: Strategy[]; onSaved: () => Promise<void> }) {
+function DatabaseForm({ config, strategies, onSaved, protectionSwitches }: {
+  config: DatabaseConfig; strategies: Strategy[]; onSaved: () => Promise<void>; protectionSwitches: boolean;
+}) {
   const initial = {
-    backupEnabled: config.backupEnabled,
-    encryptionAtRest: config.encryptionAtRest,
     storageLimit: config.storageLimit,
+    ...(protectionSwitches && { backupEnabled: config.backupEnabled, encryptionAtRest: config.encryptionAtRest }),
   };
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -128,8 +134,12 @@ function DatabaseForm({ config, strategies, onSaved }: { config: DatabaseConfig;
           <label className="block text-sm"><span className="text-slate-600 dark:text-slate-300">Storage limit</span>
             <input value={form.storageLimit} onChange={(e) => setForm({ ...form, storageLimit: e.target.value })} placeholder="50 GB" className={`${inputClass} mt-1`} /></label>
           <div />
-          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.backupEnabled} onChange={(e) => setForm({ ...form, backupEnabled: e.target.checked })} /> Automated backups</label>
-          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={form.encryptionAtRest} onChange={(e) => setForm({ ...form, encryptionAtRest: e.target.checked })} /> Encryption at rest</label>
+          {protectionSwitches && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={!!form.backupEnabled} onChange={(e) => setForm({ ...form, backupEnabled: e.target.checked })} /> Automated backups</label>
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"><input type="checkbox" checked={!!form.encryptionAtRest} onChange={(e) => setForm({ ...form, encryptionAtRest: e.target.checked })} /> Encryption at rest</label>
+            </>
+          )}
         </div>
         {error && <p className="text-sm text-red-600 mt-3" role="alert">{error}</p>}
         <div className="flex justify-end gap-2 mt-4">

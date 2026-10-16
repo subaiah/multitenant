@@ -11,7 +11,7 @@
  * Managing your own two-factor once signed in: routes/two-factor.ts.
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import type { RateLimitOptions } from '@fastify/rate-limit';
+import type { SharedRateLimit } from '../lib/rate-limits.js';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import type { SessionOwner } from '../lib/auth-planes.js';
@@ -37,7 +37,8 @@ function tokenSubject(token: unknown): string {
 }
 
 /** Codes are 6 digits: keep guesses per account very low, however many MFA tokens are fetched. */
-export const mfaRateLimit = (route: string): RateLimitOptions => ({
+export const mfaRateLimit = (route: string): SharedRateLimit => ({
+  shared: true,
   max: 5,
   timeWindow: '15 minutes',
   hook: 'preHandler',

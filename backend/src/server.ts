@@ -50,9 +50,14 @@ import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 import { authorize } from './middleware/authorize.js';
 import { emailDeliveryWarning } from './lib/mailer.js';
+import { RateLimitStore, startRateLimitCleanup, stopRateLimitCleanup } from './lib/rate-limit-store.js';
+import { pendingControlMigrations } from './lib/control-migrations.js';
 
 // Create Fastify instance
 const fastify = Fastify({
+  // Behind a proxy, request.ip (rate limits, audit, sign-in history) comes
+  // from X-Forwarded-For, believed only for the configured hops
+  trustProxy: config.trustProxy,
   logger: {
     level: config.logLevel,
     transport: config.nodeEnv === 'development' 
@@ -72,9 +77,13 @@ async function registerPlugins() {
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
 
-  // Security headers
+  // Security headers. The API only returns JSON, so its content policy allows
+  // nothing to load or frame it; the API reference sets its own (below).
   await fastify.register(helmet, {
-    contentSecurityPolicy: false, // Disable for API
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] },
+    },
   });
 
   // JWT authentication
@@ -108,16 +117,20 @@ async function registerPlugins() {
     },
   });
 
-  // Rate limiting
+  // Rate limiting: a per-IP flood limit counted in each server's memory, and
+  // per-account limits on credentials (lib/rate-limits.ts) counted in the
+  // database so they hold across servers (lib/rate-limit-store.ts)
   await fastify.register(rateLimit, {
     max: config.rateLimitMax,
     timeWindow: config.rateLimitTimeWindow,
     // Key on IP only: the tenant header is client-controlled, so including it
     // let clients get a fresh budget per header value.
     keyGenerator: (request) => request.ip,
+    store: RateLimitStore,
   });
 
-  // Swagger documentation
+  // The interactive API reference: not in production unless API_DOCS=true
+  if (!config.apiDocs) return;
   await fastify.register(swagger, {
     openapi: {
       info: {
@@ -125,12 +138,7 @@ async function registerPlugins() {
         description: 'Backend for Frontend and API services for multi-tenant application management',
         version: '1.0.0',
       },
-      servers: [
-        {
-          url: `http://localhost:${config.port}`,
-          description: 'Development server',
-        },
-      ],
+      servers: [{ url: config.bffUrl }],
       components: {
         securitySchemes: {
           bearerAuth: {
@@ -145,6 +153,8 @@ async function registerPlugins() {
 
   await fastify.register(swaggerUi, {
     routePrefix: '/docs',
+    // Its own content policy, replacing the API's (which allows nothing)
+    staticCSP: true,
   });
 }
 
@@ -213,8 +223,8 @@ async function registerRoutes() {
     // Auth configuration
     await protectedRoutes.register(authConfigRoutes, { prefix: '/auth-config' });
 
-    // API configuration
-    await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
+    // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
+    if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
 
     // Role management
     await protectedRoutes.register(roleRoutes, { prefix: '/roles' });
@@ -250,8 +260,9 @@ async function registerRoutes() {
     await protectedRoutes.register(platformScoped(platformRoutes), { prefix: '/platform' });
     await protectedRoutes.register(platformScoped(platformRoleRoutes), { prefix: '/platform-roles' });
 
-    // Current tenant's deployed applications
-    await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
+    // Current tenant's deployed applications: sample data until deployments
+    // are reported by something real (PREVIEW_FEATURES)
+    if (config.previewFeatures) await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
 
     // Managing your own two-factor sign-in
     await protectedRoutes.register(platformScoped(twoFactorRoutes), { prefix: '/bff/two-factor' });
@@ -278,6 +289,14 @@ async function start() {
     // Test database connection
     await controlDb.$connect();
     fastify.log.info('Database connected successfully');
+    // New code on an old control-plane schema fails in odd ways: run the
+    // release step (node dist/cli/migrate.js, or npm run migrate) first
+    const pending = await pendingControlMigrations();
+    if (pending.length) {
+      const message = `The control-plane database is missing migrations: ${pending.join(', ')}. Run the migrate step (npm run migrate) before starting this version.`;
+      if (config.nodeEnv === 'production') throw new Error(message);
+      fastify.log.warn(message);
+    }
     // Built-in platform roles exist and are current
     await ensurePlatformRoles();
 
@@ -300,7 +319,7 @@ async function start() {
     });
 
     fastify.log.info(`Server started on http://${config.host}:${config.port}`);
-    fastify.log.info(`API documentation available at http://localhost:${config.port}/docs`);
+    if (config.apiDocs) fastify.log.info(`API reference at http://localhost:${config.port}/docs`);
 
     // Background work: finish provisioning interrupted by a restart, and keep
     // platform usage snapshots fresh
@@ -308,6 +327,7 @@ async function start() {
     startUsageRefresh((msg) => fastify.log.warn(msg), resumeProvisioning);
     startAuditArchiving((msg, err) => fastify.log.error({ err }, msg));
     startNotifications((msg, err) => fastify.log.error({ err }, msg));
+    startRateLimitCleanup((err) => fastify.log.warn({ err }, 'Removing expired rate-limit counters failed'));
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -320,6 +340,7 @@ const shutdown = async () => {
   stopUsageRefresh();
   stopAuditArchiving();
   stopNotifications();
+  stopRateLimitCleanup();
   // Let notification work in progress finish (a few seconds at most)
   await Promise.race([notificationsSettled(), new Promise((r) => setTimeout(r, 5000))]);
   await disconnectDatabases();

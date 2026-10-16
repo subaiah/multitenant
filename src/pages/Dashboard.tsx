@@ -7,8 +7,9 @@ import { Badge, Card, CHART_TOOLTIP, DataView, EmptyState, PageHeader, StatCard,
 
 interface TenantDashboard {
   tenant: { name: string; plan: string; status: string };
-  applications: { total: number; byStatus: Record<string, number> };
-  applicationsByEnvironment: Record<string, number>;
+  /** Deployed applications: null unless preview features are on (sample data) */
+  applications: { total: number; byStatus: Record<string, number> } | null;
+  applicationsByEnvironment: Record<string, number> | null;
   users: { total: number };
   counts: { groups: number; organizations: number; entitledApplications: number };
   activityByDay: { date: string; count: number }[];
@@ -26,8 +27,9 @@ export default function Dashboard() {
     <div className="p-6 space-y-6">
       <DataView {...dashboard}>
         {(d) => {
-          const running = d.applications.byStatus.RUNNING ?? 0;
-          const failing = d.applications.byStatus.ERROR ?? 0;
+          const apps = d.applications;
+          const running = apps?.byStatus.RUNNING ?? 0;
+          const failing = apps?.byStatus.ERROR ?? 0;
           const days = d.activityByDay.map((x) => ({ ...x, label: x.date.slice(5) }));
           const types = Object.entries(d.activityByType).sort((a, b) => b[1] - a[1]);
           const totalEvents = types.reduce((sum, [, n]) => sum + n, 0);
@@ -47,9 +49,9 @@ export default function Dashboard() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${apps ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
                 <StatCard label="Users" value={d.users.total} icon={Users} tone="purple" />
-                <StatCard label="Apps running" value={`${running}/${d.applications.total}`} icon={Package} tone={failing ? 'red' : 'green'} />
+                {apps && <StatCard label="Apps running" value={`${running}/${apps.total}`} icon={Package} tone={failing ? 'red' : 'green'} />}
                 <StatCard label="Groups" value={d.counts.groups} icon={UsersRound} tone="blue" />
                 <StatCard label="Organizations" value={d.counts.organizations} icon={Building2} tone="amber"
                   hint={`${d.counts.entitledApplications} entitled app${d.counts.entitledApplications === 1 ? '' : 's'}`} />
@@ -90,15 +92,15 @@ export default function Dashboard() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <Card title="Deployed applications" description="By environment">
-                  {d.applications.total === 0 ? (
+                {apps && <Card title="Deployed applications" description="By environment">
+                  {apps.total === 0 ? (
                     <EmptyState icon={Package} title="No deployed applications" />
                   ) : (
                     <ul className="space-y-2">
                       {ENVIRONMENTS.map((env) => (
                         <li key={env} className="flex items-center justify-between text-sm">
                           <span className="text-slate-600 dark:text-slate-300">{humanize(env)}</span>
-                          <span className="font-medium text-slate-800 dark:text-white tabular-nums">{d.applicationsByEnvironment[env] ?? 0}</span>
+                          <span className="font-medium text-slate-800 dark:text-white tabular-nums">{d.applicationsByEnvironment?.[env] ?? 0}</span>
                         </li>
                       ))}
                     </ul>
@@ -106,9 +108,9 @@ export default function Dashboard() {
                   {hasPermission('applications:read') && (
                     <Link to="/applications" className="inline-block mt-4 text-xs font-medium text-blue-600 hover:text-blue-700">View applications</Link>
                   )}
-                </Card>
+                </Card>}
 
-                <Card title="Recent activity" className="lg:col-span-2"
+                <Card title="Recent activity" className={apps ? 'lg:col-span-2' : 'lg:col-span-3'}
                   actions={hasPermission('activity:read') ? <Link to="/activity" className="text-xs font-medium text-blue-600 hover:text-blue-700">View all</Link> : undefined}>
                   {d.recentActivities.length === 0 ? (
                     <EmptyState title="No activity yet" />

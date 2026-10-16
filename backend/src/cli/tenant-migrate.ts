@@ -5,8 +5,8 @@
  *
  *   npm run tenant:migrate
  */
-import { migrateAllTargets } from '../src/lib/tenant-migrations.js';
-import { disconnectDatabases } from '../src/lib/prisma.js';
+import { migrateAllTargets } from '../lib/tenant-migrations.js';
+import { disconnectDatabases } from '../lib/prisma.js';
 
 migrateAllTargets()
   .then(({ succeeded, failed }) => {

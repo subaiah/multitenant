@@ -7,13 +7,23 @@
  *
  * Needs an empty control plane and the roles from prisma/tenant/setup-roles.sql.
  * Tenant data is written as each tenant's own database role.
+ *
+ * Development only: every account has a published password. A new
+ * installation starts with `npm run platform:admin -- <email>` instead.
  */
+import { config } from '../src/config/env.js';
 import { ensurePlatformRoles } from '../src/lib/platform-roles.js';
 import { controlDb, disconnectDatabases } from '../src/lib/prisma.js';
 import { provisionTenant } from '../src/lib/provisioning.js';
 import { dbForTenant } from '../src/lib/tenant-db.js';
 import { refreshTenantUsage } from '../src/lib/tenant-usage.js';
 import { hashPassword } from '../src/utils/auth.js';
+
+if (config.nodeEnv === 'production') {
+  console.error('The demo seed creates accounts with published passwords and is not for production (NODE_ENV=production).');
+  console.error('Create the first administrator with: npm run platform:admin -- you@example.com');
+  process.exit(1);
+}
 
 type Strategy = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
 

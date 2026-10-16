@@ -102,5 +102,5 @@ How:
 - The browser goes to the sign-in page with a notice (*signed out after a period of
   inactivity* / *reached its maximum length*).
 
-Access tokens must be session tokens (`type: 'access'`): other tokens signed with the same
-key, such as the `/bff/token/exchange` service tokens, are refused as sessions.
+Access tokens must be session tokens (`type: 'access'`): any other token signed with the
+same key is refused as a session.

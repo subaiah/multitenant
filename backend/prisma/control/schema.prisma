@@ -554,3 +554,15 @@ model NotificationWork {
   @@index([dueAt])
   @@map("notification_work")
 }
+
+// Request counters for the rate limits that must hold across every server
+// (sign-in, one-time and two-factor codes): lib/rate-limit-store.ts. The key
+// is a hash, so no email addresses are stored here.
+model RateLimitHit {
+  key       String   @id
+  count     Int
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("rate_limit_hits")
+}
