@@ -45,3 +45,13 @@ CREATE INDEX "audit_events_tenant_id_actor_id_idx" ON "audit_events"("tenant_id"
 
 -- CreateIndex
 CREATE UNIQUE INDEX "audit_events_tenant_id_seq_key" ON "audit_events"("tenant_id", "seq");
+
+-- Append-only (added by hand; Prisma doesn't model triggers): no entry may be
+-- changed, by anyone. Tenant roles also lack UPDATE/DELETE (migration runner).
+CREATE FUNCTION "audit_append_only"() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  RAISE EXCEPTION 'audit entries cannot be changed' USING ERRCODE = 'insufficient_privilege';
+END
+$fn$;
+CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON "audit_events" FOR EACH ROW EXECUTE FUNCTION "audit_append_only"();
+CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON "audit_events" FOR EACH STATEMENT EXECUTE FUNCTION "audit_append_only"();

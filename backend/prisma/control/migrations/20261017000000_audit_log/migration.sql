@@ -78,3 +78,13 @@ CREATE INDEX "audit_archives_tenant_id_idx" ON "audit_archives"("tenant_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "audit_archives_chain_from_seq_key" ON "audit_archives"("chain", "from_seq");
+
+-- Append-only (added by hand; Prisma doesn't model triggers): no entry may be
+-- changed. Archiving removes old entries with DELETE.
+CREATE FUNCTION "audit_append_only"() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  RAISE EXCEPTION 'audit entries cannot be changed' USING ERRCODE = 'insufficient_privilege';
+END
+$fn$;
+CREATE TRIGGER platform_audit_events_no_update BEFORE UPDATE ON "platform_audit_events" FOR EACH ROW EXECUTE FUNCTION "audit_append_only"();
+CREATE TRIGGER platform_audit_events_no_truncate BEFORE TRUNCATE ON "platform_audit_events" FOR EACH STATEMENT EXECUTE FUNCTION "audit_append_only"();
