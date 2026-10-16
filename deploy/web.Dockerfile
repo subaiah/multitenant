@@ -8,7 +8,8 @@
 ARG NODE_VERSION=24
 ARG CADDY_VERSION=2.10
 
-FROM node:${NODE_VERSION}-alpine AS build
+# Debian (glibc): the lockfile's native build tools are resolved for it
+FROM node:${NODE_VERSION}-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund

@@ -176,7 +176,14 @@ jobs:
           MAIL_FROM="Smoke Test <no-reply@example.com>"
           ENV
       - name: Build and start
-        run: $COMPOSE up -d --build
+        run: |
+          # Job logs can't always be fetched: failures go into annotations too
+          set +e
+          $COMPOSE up -d --build > up.log 2>&1
+          rc=$?
+          cat up.log
+          if [ $rc -ne 0 ]; then grep -vE '^\s*$' up.log | tail -25 | while IFS= read -r l; do echo "::error::$l"; done; fi
+          exit $rc
       - name: Wait for the API through the front door
         run: |
           for i in $(seq 90); do
@@ -204,7 +211,7 @@ jobs:
         env:
           APP: http://localhost
           MAIL_CMD: docker compose -f ../deploy/docker-compose.yml logs --no-color api
-        run: node smoke.mjs
+        run: node smoke.mjs | tee smoke.txt; s=${PIPESTATUS[0]}; grep '^FAIL' smoke.txt | while IFS= read -r l; do echo "::error::$l"; done; exit $s
       - name: Backup
         run: |
           deploy/backup.sh "$PWD/backups"
@@ -215,7 +222,10 @@ jobs:
         run: $COMPOSE run --rm --no-deps api node dist/cli/audit.js verify
       - name: Logs
         if: failure()
-        run: $COMPOSE logs --no-color --tail=300
+        run: |
+          $COMPOSE ps -a
+          $COMPOSE logs --no-color --tail=300
+          $COMPOSE logs --no-color --tail=15 migrate api web | while IFS= read -r l; do echo "::warning::$l"; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

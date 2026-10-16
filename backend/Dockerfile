@@ -10,8 +10,12 @@
 
 ARG NODE_VERSION=24
 
+# Debian (glibc) throughout: the lockfile's native packages are resolved for it.
+
 # ---- build: compile TypeScript and generate the Prisma clients
-FROM node:${NODE_VERSION}-alpine AS build
+FROM node:${NODE_VERSION}-slim AS build
+# prisma generate looks for OpenSSL to pick its engine build
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -24,13 +28,13 @@ RUN DATABASE_URL=postgresql://build@localhost/build TENANT_DATABASE_URL=postgres
 # ---- production dependencies only. --omit=optional also drops the Prisma
 # CLI and TypeScript, which npm otherwise installs as optional peers of
 # @prisma/client; the runtime needs neither (migrations run through dist/cli).
-FROM node:${NODE_VERSION}-alpine AS deps
+FROM node:${NODE_VERSION}-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --omit=optional --no-audit --no-fund && npm cache clean --force
 
 # ---- runtime
-FROM node:${NODE_VERSION}-alpine
+FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production \
     PORT=4000 \
     AUDIT_ARCHIVE_DIR=/data/audit-archive
