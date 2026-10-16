@@ -1,0 +1,81 @@
+// Notifications (src/lib/notifications.ts): in-app messages and emails to the
+// tenant's users, mostly raised by audit events (src/kit/notification-types.ts).
+
+// A user's in-app inbox
+model Notification {
+  id        String    @id @default(uuid())
+  tenantId  String    @map("tenant_id")
+  userId    String    @map("user_id")
+  /// Notification type key
+  type      String
+  title     String
+  body      String?
+  /// A path in the frontend to open
+  link      String?
+  data      Json?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId, userId, createdAt])
+  @@index([tenantId, userId, readAt])
+  @@map("notifications")
+}
+
+// Work still to do: fanning an event out to its recipients (EVENT), or an
+// email to send (EMAIL). Written with the audit entry, so nothing is lost if
+// the server stops; retried with backoff.
+model NotificationOutbox {
+  id            String                   @id @default(uuid())
+  tenantId      String                   @map("tenant_id")
+  kind          NotificationOutboxKind
+  status        NotificationOutboxStatus @default(PENDING)
+  payload       Json
+  attempts      Int                      @default(0)
+  nextAttemptAt DateTime                 @default(now()) @map("next_attempt_at")
+  claimedAt     DateTime?                @map("claimed_at")
+  lastError     String?                  @map("last_error")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+
+  @@index([tenantId, status, nextAttemptAt])
+  @@map("notification_outbox")
+}
+
+enum NotificationOutboxKind {
+  EVENT
+  EMAIL
+}
+
+enum NotificationOutboxStatus {
+  PENDING
+  PROCESSING
+  FAILED
+}
+
+// What each user wants, per notification type (absent = the type's default)
+model NotificationPreference {
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  userId   String  @map("user_id")
+  type     String
+  inApp    Boolean @map("in_app")
+  email    Boolean
+
+  @@unique([tenantId, userId, type])
+  @@map("notification_preferences")
+}
+
+// The organization's rules per notification type (absent = the type's default):
+// off altogether, which channels may be used, and whether people may opt out
+model NotificationSetting {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  type      String
+  enabled   Boolean  @default(true)
+  inApp     Boolean  @default(true) @map("in_app")
+  email     Boolean  @default(true)
+  mandatory Boolean  @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, type])
+  @@map("notification_settings")
+}

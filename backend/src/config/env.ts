@@ -73,6 +73,12 @@ const envSchema = z.object({
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
 
+  // Notifications (lib/notifications.ts): how often to look for due work
+  // (retries, work left by a stopped server; 0 = only right after events)
+  NOTIFICATION_POLL_MS: z.string().default('15000').transform(Number),
+  // In-app notifications older than this are removed
+  NOTIFICATION_RETENTION_DAYS: z.string().default('90').transform(Number),
+
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
   DEV_EXPOSE_OTP: z.enum(['true', 'false']).default('false'),
@@ -203,6 +209,8 @@ export const config = {
   auditRetentionDays: env.AUDIT_RETENTION_DAYS,
   auditArchiveDir: env.AUDIT_ARCHIVE_DIR,
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
+  notificationPollMs: env.NOTIFICATION_POLL_MS,
+  notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,
 
   /** Encryption keys for stored secrets, by version; see readSecretKeys */
   secretKeys: readSecretKeys(env.NODE_ENV),

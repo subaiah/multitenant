@@ -12,6 +12,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { TenantDb } from '../lib/tenant-db.js';
 import type { UserType } from '../utils/authorization.js';
 import type { AuditEventDefinition } from './audit-events.js';
+import type { NotificationType } from './notification-types.js';
 
 export interface ProductPermission {
   /** `resource:action`. The resource must not be a kit or platform resource. */
@@ -57,6 +58,13 @@ export interface ProductModule {
    * they must not reuse a kit key.
    */
   auditEvents?: Record<string, AuditEventDefinition>;
+
+  /**
+   * The product's notifications (lib/notifications.ts). A key that is also
+   * an audit event is sent when that entry is recorded; any key can also be
+   * sent directly with notify(). Keys must not reuse a kit key.
+   */
+  notificationTypes?: Record<string, NotificationType>;
 
   /** Runs when a tenant is created, after the kit's defaults (seed product data here). */
   onTenantCreated?: (tenantId: string, db: TenantDb) => Promise<void>;

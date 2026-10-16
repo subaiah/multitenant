@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound } from 'lucide-react';
+import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound, Bell } from 'lucide-react';
 import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
 
@@ -242,6 +242,18 @@ export default function Profile() {
               Two-factor sign-in
             </h3>
             <TwoFactorSettings />
+          </div>
+
+          {/* Notifications */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
+              <Bell size={20} className="text-blue-500" />
+              Notifications
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Choose which notifications you get in the app and by email.{' '}
+              <Link to="/notifications?tab=preferences" className="text-blue-600 hover:text-blue-700 font-medium">Notification preferences</Link>
+            </p>
           </div>
 
           {/* Group Memberships */}

@@ -137,6 +137,7 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             <li><Link className="text-blue-600 hover:underline" to="/authentication">Sign-in methods and security</Link></li>
             <li><Link className="text-blue-600 hover:underline" to="/api">API access</Link></li>
             <li><Link className="text-blue-600 hover:underline" to="/data-isolation">Data isolation</Link></li>
+            <li><Link className="text-blue-600 hover:underline" to="/notifications?tab=organization">Notifications your organization sends</Link></li>
           </ul>
         </Card>
       </div>

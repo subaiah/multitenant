@@ -93,6 +93,7 @@ export const KIT_AUDIT_EVENTS = {
   'database_config.updated': t('Database settings changed', 'config'),
   'entitlement.updated': t('Application entitlement changed', 'config'),
   'tenant_profile.updated': t('Organization profile changed', 'config'),
+  'notification_settings.updated': t('Notification settings changed', 'config'),
   // Platform support working in this tenant (also in the platform's log)
   'support.session_started': t('Platform support session started', 'security'),
   'support.session_ended': t('Platform support session ended', 'security'),

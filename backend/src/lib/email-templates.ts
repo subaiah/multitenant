@@ -49,3 +49,21 @@ ${button(link, 'Choose a new password')}
 <p style="color:#475569">This link expires in ${minutes} minutes and can be used once. If it wasn't you, ignore this email; your password is unchanged.</p>`),
   };
 }
+
+/** A notification by email (lib/notifications.ts). */
+export function notificationEmail(
+  to: string,
+  n: { title: string; body?: string | null; link?: string | null; from: string; mandatory: boolean; settingsLink: string },
+): Mail {
+  const footer = n.mandatory
+    ? 'This is a security notice; it can’t be turned off.'
+    : `Choose which emails you get: ${n.settingsLink}`;
+  return {
+    to,
+    subject: `[${n.from}] ${n.title}`,
+    text: `${n.title}\n\n${n.body ? `${n.body}\n\n` : ''}${n.link ? `Open: ${n.link}\n\n` : ''}${footer}`,
+    html: layout(n.title, `${n.body ? `<p>${escape(n.body)}</p>` : ''}
+${n.link ? button(n.link, 'Open') : ''}
+<p style="font-size:12px;color:#64748b;margin-top:24px">${n.mandatory ? escape(footer) : `<a href="${escape(n.settingsLink)}" style="color:#64748b">Choose which emails you get</a>`}</p>`),
+  };
+}

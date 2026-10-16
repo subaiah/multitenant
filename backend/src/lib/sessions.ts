@@ -3,6 +3,9 @@ import { controlDb } from './prisma.js';
 import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
 import { touchSession } from './sign-in.js';
+
+/** Sent by the frontend on requests the user didn't make (polling) */
+export const BACKGROUND_HEADER = 'x-background-request';
 import { USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 
 /**
@@ -85,7 +88,8 @@ export async function verifySession(request: FastifyRequest): Promise<SessionUse
   const problem = sessionProblem(token, user);
   if (problem) throw new AppError(problem, 401);
   request.user.userType = user!.userType as typeof request.user.userType;
-  // Activity keeps the session alive (idle timeout, lib/sign-in.ts)
-  await touchSession(token).catch(() => {});
+  // Activity keeps the session alive (idle timeout, lib/sign-in.ts). Requests
+  // the page makes by itself (polling the notification count) don't count.
+  if (request.headers[BACKGROUND_HEADER] !== '1') await touchSession(token).catch(() => {});
   return user!;
 }

@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import DynamicMenu from '../components/DynamicMenu';
+import NotificationBell from '../components/NotificationBell';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, User, Building2 } from 'lucide-react';
 
@@ -14,6 +15,7 @@ export default function TenantLayout() {
           <div className="flex items-center gap-2 mb-2">
             <Building2 size={24} className="text-blue-600" />
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">Tenant Portal</h1>
+            <div className="ml-auto"><NotificationBell allPath="/notifications" /></div>
           </div>
           {tenant && (
             <p className="text-sm text-slate-500 dark:text-slate-400">{tenant.name}</p>

@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import DynamicMenu from '../components/DynamicMenu';
+import NotificationBell from '../components/NotificationBell';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, User } from 'lucide-react';
 
@@ -11,7 +12,10 @@ export default function PlatformLayout() {
       {/* Sidebar */}
       <aside className="w-64 bg-slate-800 text-white flex flex-col">
         <div className="p-4 border-b border-slate-700">
-          <h1 className="text-xl font-bold">Platform Admin</h1>
+          <div className="flex items-center">
+            <h1 className="text-xl font-bold">Platform Admin</h1>
+            <div className="ml-auto"><NotificationBell allPath="/platform/notifications" dark /></div>
+          </div>
           <p className="text-sm text-slate-400">Multi-Tenant Management</p>
         </div>
         
