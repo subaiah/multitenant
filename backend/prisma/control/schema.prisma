@@ -162,6 +162,7 @@ model PlatformUser {
   tokens             PlatformUserToken[]
   supportSessions    SupportSession[] @relation("SupportPlatformUser")
   approvedSupport    SupportSession[] @relation("SupportApprover")
+  platformRoles      PlatformRoleAssignment[]
 
   @@map("platform_users")
   @@index([userType])
@@ -305,28 +306,84 @@ model TenantApplication {
 }
 
 // A platform user's time-limited access into a tenant
+// A platform user's time-limited access to one tenant's data (lib/support.ts).
+// Without an active session, platform users can't work inside a tenant at all.
+// Requested with a reason, approved by someone else with support:manage
+// (unless SUPPORT_SELF_APPROVAL is on), read-only unless approved otherwise,
+// and visible to the tenant (audit log and notifications).
 model SupportSession {
-  id              String       @id @default(uuid())
-  platformUserId  String       @map("platform_user_id")
-  tenantId        String       @map("tenant_id")
-  approvedBy      String       @map("approved_by")
+  id              String               @id @default(uuid())
+  platformUserId  String               @map("platform_user_id")
+  tenantId        String               @map("tenant_id")
+  approvedBy      String?              @map("approved_by")
+  approvedAt      DateTime?            @map("approved_at")
   reason          String
+  access          SupportAccess        @default(READ_ONLY)
+  /// READ_WRITE: the tenant permissions granted (reading is always included)
   permissions     Json
-  validFrom       DateTime     @default(now()) @map("valid_from")
-  validTo         DateTime     @map("valid_to")
-  status          String       @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
-  revokedAt       DateTime?    @map("revoked_at")
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
+  /// How long the session lasts once approved
+  durationMinutes Int                  @default(60) @map("duration_minutes")
+  validFrom       DateTime?            @map("valid_from")
+  validTo         DateTime?            @map("valid_to")
+  status          SupportSessionStatus @default(PENDING)
+  decisionNote    String?              @map("decision_note")
+  revokedAt       DateTime?            @map("revoked_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
 
-  platformUser    PlatformUser @relation("SupportPlatformUser", fields: [platformUserId], references: [id], onDelete: Cascade)
-  approver        PlatformUser @relation("SupportApprover", fields: [approvedBy], references: [id], onDelete: Cascade)
-  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  platformUser    PlatformUser  @relation("SupportPlatformUser", fields: [platformUserId], references: [id], onDelete: Cascade)
+  approver        PlatformUser? @relation("SupportApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, status])
-  @@index([platformUserId])
-  @@index([validFrom, validTo])
+  @@index([platformUserId, tenantId, status])
   @@map("support_sessions")
+}
+
+enum SupportAccess {
+  READ_ONLY
+  READ_WRITE
+}
+
+enum SupportSessionStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  REVOKED
+  EXPIRED
+}
+
+// Platform roles: sets of platform permissions given to platform users, on
+// top of what their user type grants (utils/authorization.ts). Only platform
+// permissions can be in them; built-in roles (isSystem) are kept up to date
+// at start-up and can't be edited.
+model PlatformRole {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String[]
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  assignments PlatformRoleAssignment[]
+
+  @@map("platform_roles")
+}
+
+model PlatformRoleAssignment {
+  id             String       @id @default(uuid())
+  platformUserId String       @map("platform_user_id")
+  roleId         String       @map("role_id")
+  assignedBy     String?      @map("assigned_by")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  platformUser   PlatformUser @relation(fields: [platformUserId], references: [id], onDelete: Cascade)
+  role           PlatformRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([platformUserId, roleId])
+  @@index([roleId])
+  @@map("platform_role_assignments")
 }
 
 // Database-driven navigation for both portals

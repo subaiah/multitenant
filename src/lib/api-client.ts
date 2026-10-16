@@ -59,8 +59,18 @@ function refreshSession(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/**
+ * Platform staff working in a tenant through a support session: every request
+ * names that tenant (x-tenant-id) while the support workspace is open.
+ */
+let actingTenantId: string | null = null;
+export function setActingTenant(tenantId: string | null) {
+  actingTenantId = tenantId;
+}
+
 async function send(url: string, options: RequestInit): Promise<Response> {
   const headers = new Headers(options.headers);
+  if (actingTenantId && !headers.has('x-tenant-id')) headers.set('x-tenant-id', actingTenantId);
   if (options.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }

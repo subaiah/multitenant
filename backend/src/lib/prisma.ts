@@ -78,9 +78,9 @@ export const controlDb: ControlDb = g.planes.controlDb;
  * platform role on some target) and schema. Clients are cached; the least
  * recently used is closed once more than TENANT_CLIENT_CACHE_MAX are open.
  */
-export function tenantClient(connectionString: string, schema = 'public'): TenantDb {
+export function tenantClient(connectionString: string, schema = 'public', { readOnly = false } = {}): TenantDb {
   const tenants = g.planes!.tenants;
-  const key = `${schema}\u0000${connectionString}`;
+  const key = `${schema}\u0000${connectionString}${readOnly ? '\u0000ro' : ''}`;
   const hit = tenants.get(key);
   if (hit) {
     // Map keeps insertion order: re-insert to mark as most recently used
@@ -88,7 +88,13 @@ export function tenantClient(connectionString: string, schema = 'public'): Tenan
     tenants.set(key, hit);
     return hit.db;
   }
-  const pool = new pg.Pool({ connectionString, max: config.tenantPoolMax, idleTimeoutMillis: 30_000 });
+  const pool = new pg.Pool({
+    connectionString,
+    max: config.tenantPoolMax,
+    idleTimeoutMillis: 30_000,
+    // Read-only support sessions: Postgres itself refuses any write on these connections
+    ...(readOnly && { options: '-c default_transaction_read_only=on' }),
+  });
   // A tenant database going away must not crash the server
   pool.on('error', () => {});
   const entry = { db: createTenant(pool, schema), pool };

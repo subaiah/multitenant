@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
+import { SupportAccessCard } from '../components/SupportAccessCard';
 import { apiPatch } from '../lib/api-client';
 import { Badge, Card, DataView, PageHeader, formatDate, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -132,6 +133,7 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
           </dl>
           <p className="text-xs text-slate-500 mt-4">Plan changes are handled by the platform team.</p>
         </Card>
+        <SupportAccessCard />
         <Card title="Related settings">
           <ul className="space-y-2 text-sm">
             <li><Link className="text-blue-600 hover:underline" to="/authentication">Sign-in methods and security</Link></li>

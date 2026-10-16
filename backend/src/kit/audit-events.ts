@@ -122,7 +122,14 @@ export const KIT_AUDIT_EVENTS = {
   'permission.created': p('Permission added', 'platform'),
   'permission.deleted': p('Permission removed', 'platform'),
   'platform_user.mfa_reset': p('Platform user two-factor reset', 'security'),
-  'support_session.created': p('Support session started', 'security'),
+  'platform_role.created': p('Platform role created', 'platform'),
+  'platform_role.updated': p('Platform role changed', 'platform'),
+  'platform_role.deleted': p('Platform role deleted', 'platform'),
+  'platform_role.assigned': p('Platform role given', 'security'),
+  'platform_role.unassigned': p('Platform role taken away', 'security'),
+  'support_session.requested': p('Support session requested', 'security'),
+  'support_session.approved': p('Support session approved (started)', 'security'),
+  'support_session.rejected': p('Support session rejected', 'security'),
   'support_session.revoked': p('Support session ended', 'security'),
 } satisfies Record<string, AuditEventDefinition>;
 

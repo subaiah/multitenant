@@ -14,6 +14,8 @@ import Applications from './pages/Applications';
 import ActivityLog from './pages/ActivityLog';
 import AuditLog from './pages/AuditLog';
 import Notifications from './pages/Notifications';
+import Support from './pages/Support';
+import SupportWorkspace from './pages/SupportWorkspace';
 import SettingsPage from './pages/Settings';
 import Infrastructure from './pages/Infrastructure';
 import DataIsolation from './pages/DataIsolation';
@@ -96,6 +98,16 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/platform/notifications" element={<Notifications scope="platform" />} />
+              <Route path="/platform/support" element={
+                <PermissionGuard permission="support:request" redirectTo="/unauthorized">
+                  <Support />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/support/:id" element={
+                <PermissionGuard permission="support:request" redirectTo="/unauthorized">
+                  <SupportWorkspace />
+                </PermissionGuard>
+              } />
               <Route path="/platform/audit" element={
                 <PermissionGuard permission="platform-audit:read" redirectTo="/unauthorized">
                   <AuditLog scope="platform" />

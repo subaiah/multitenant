@@ -22,12 +22,13 @@ export const KIT_PERMISSIONS = [
   'tenants:read',
   'tenants:manage',
   'platform-users:read',
+  'platform-users:manage', // platform roles: create them, give them to platform users
   'policies:read',
   'platform-settings:manage',
   'app-registry:manage', // create/edit applications in the platform registry
   'menus:manage',
   'support:request', // ask for a time-limited support session into a tenant
-  'support:manage', // list and revoke support sessions
+  'support:manage', // approve, list and end support sessions
   'platform-audit:read', // the platform's audit log
   'platform-audit:manage', // verify, export and archive audit logs
 
@@ -183,7 +184,7 @@ export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = Object.fromEntr
 ) as Record<UserType, string[]>;
 
 /** Resources that exist only at platform level. */
-const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support', 'platform-audit']);
+export const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support', 'platform-audit']);
 
 /**
  * Can a tenant-scoped role (or group role, or delegation) grant this to a
@@ -192,6 +193,22 @@ const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'pl
  * and assign it to themselves. Wildcard resources are refused because they
  * would also cover platform resources.
  */
+/**
+ * Can a platform role grant this? Platform permissions only, plus the shared
+ * catalogue (applications) and global policies; never tenant data.
+ */
+export function isPlatformGrantable(permission: string): boolean {
+  const i = permission.indexOf(':');
+  if (i <= 0) return false;
+  const resource = permission.slice(0, i);
+  return PLATFORM_RESOURCES.has(resource) || resource === 'applications' || resource === 'policies';
+}
+
+/** Tenant permissions that only read (granted by a read-only support session). */
+export function isReadPermission(permission: string): boolean {
+  return isTenantGrantable(permission) && /:(read|view)$/.test(permission);
+}
+
 export function isTenantGrantable(permission: string): boolean {
   const i = permission.indexOf(':');
   if (i <= 0) return false; // '*' or malformed

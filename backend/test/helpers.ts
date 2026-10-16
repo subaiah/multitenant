@@ -238,6 +238,22 @@ export async function login(t: TenantSeed, email: string) {
   return (await loginSession(t.slug, email)).token;
 }
 
+/**
+ * An active support session for a platform user in a tenant, straight in the
+ * database (the approval flow itself is tested in support.test.ts).
+ */
+export async function grantSupportSession(platformEmail: string, tenantId: string, access: 'READ_ONLY' | 'READ_WRITE' = 'READ_ONLY', permissions: string[] = []) {
+  const { controlDb } = await db();
+  const user = await controlDb.platformUser.findUniqueOrThrow({ where: { email: platformEmail } });
+  const now = new Date();
+  return controlDb.supportSession.create({
+    data: {
+      platformUserId: user.id, tenantId, approvedBy: user.id, approvedAt: now, reason: 'test fixture', access, permissions,
+      durationMinutes: 60, validFrom: now, validTo: new Date(now.getTime() + 3_600_000), status: 'ACTIVE',
+    },
+  });
+}
+
 /** Wait until a tenant created through the API is provisioned (or failed). */
 export async function waitForProvisioning(tenantId: string, timeoutMs = 30_000): Promise<string> {
   const { controlDb } = await db();

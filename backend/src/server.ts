@@ -33,7 +33,9 @@ import { orgUnitRoutes } from './routes/org-units.js';
 import { tenantApplicationRoutes } from './routes/tenant-applications.js';
 import { delegationRoutes } from './routes/delegations.js';
 import { policyRoutes } from './routes/policies.js';
-import { supportSessionRoutes } from './routes/support-sessions.js';
+import { supportSessionRoutes, tenantSupportAccessRoutes } from './routes/support-sessions.js';
+import { platformRoleRoutes } from './routes/platform-roles.js';
+import { ensurePlatformRoles } from './lib/platform-roles.js';
 import { accessRequestRoutes } from './routes/access-requests.js';
 import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
@@ -232,7 +234,9 @@ async function registerRoutes() {
     // Phase 3: Advanced Governance routes
     await protectedRoutes.register(delegationRoutes, { prefix: '/delegations' });
     await protectedRoutes.register(policyRoutes, { prefix: '/policies' });
-    await protectedRoutes.register(supportSessionRoutes, { prefix: '/support-sessions' });
+    await protectedRoutes.register(platformScoped(supportSessionRoutes), { prefix: '/support-sessions' });
+    // The tenant's view of platform support in its organization
+    await protectedRoutes.register(tenantSupportAccessRoutes, { prefix: '/support-access' });
     await protectedRoutes.register(accessRequestRoutes, { prefix: '/access-requests' });
     await protectedRoutes.register(certificationRoutes, { prefix: '/certifications' });
 
@@ -244,6 +248,7 @@ async function registerRoutes() {
 
     // Platform portal data (platform users only)
     await protectedRoutes.register(platformScoped(platformRoutes), { prefix: '/platform' });
+    await protectedRoutes.register(platformScoped(platformRoleRoutes), { prefix: '/platform-roles' });
 
     // Current tenant's deployed applications
     await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
@@ -273,6 +278,8 @@ async function start() {
     // Test database connection
     await controlDb.$connect();
     fastify.log.info('Database connected successfully');
+    // Built-in platform roles exist and are current
+    await ensurePlatformRoles();
 
     // The tenant database server must be set up the way isolation relies on
     const serverCheck = await checkTenantServer();

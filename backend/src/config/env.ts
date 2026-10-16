@@ -73,6 +73,11 @@ const envSchema = z.object({
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
 
+  // Support sessions (lib/support.ts): longest a session may last, and whether
+  // someone with support:manage may approve their own (one-person teams)
+  SUPPORT_MAX_HOURS: z.string().default('8').transform(Number),
+  SUPPORT_SELF_APPROVAL: z.enum(['true', 'false']).default('false'),
+
   // Notifications (lib/notifications.ts): how often to look for due work
   // (retries, work left by a stopped server; 0 = only right after events)
   NOTIFICATION_POLL_MS: z.string().default('15000').transform(Number),
@@ -210,6 +215,8 @@ export const config = {
   auditArchiveDir: env.AUDIT_ARCHIVE_DIR,
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
   notificationPollMs: env.NOTIFICATION_POLL_MS,
+  supportMaxHours: env.SUPPORT_MAX_HOURS,
+  supportSelfApproval: env.SUPPORT_SELF_APPROVAL === 'true',
   notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,
 
   /** Encryption keys for stored secrets, by version; see readSecretKeys */

@@ -175,13 +175,23 @@ export async function getEnhancedUserPermissions(
   const userTypePermissions = getDefaultPermissions(userType as UserType);
   userTypePermissions.forEach(perm => addPermission(perm, 'userType'));
 
+  // Platform users: their platform roles. They never get tenant roles; inside a
+  // tenant they work through a support session (middleware/authorize.ts).
+  if (platformUser) {
+    const { platformRolePermissions } = await import('../lib/platform-roles.js');
+    for (const r of await platformRolePermissions(userId)) {
+      directRoleNames.add(r.role);
+      r.permissions.forEach((perm) => addPermission(perm, `role:${r.role}`));
+    }
+  }
+
   // Roles, groups and delegations are tenant-scoped. Without a tenant (platform
   // users) only user-type permissions apply; querying with tenantId undefined
   // would otherwise match assignments in every tenant.
-  if (!tenantId) {
+  if (!tenantId || platformUser) {
     return {
       permissions: Array.from(permissionSources.keys()),
-      sources: { userType, directRoles: [], groupRoles: [], delegations: [] },
+      sources: { userType, directRoles: [...directRoleNames], groupRoles: [], delegations: [] },
       effectivePermissions: Array.from(permissionSources.entries()).map(([permission, sources]) => ({
         permission,
         sources: Array.from(sources),

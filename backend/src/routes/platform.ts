@@ -109,9 +109,14 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
   }, async () => {
     const users = await controlDb.platformUser.findMany({
       orderBy: { createdAt: 'asc' },
-      select: { id: true, email: true, name: true, userType: true, status: true, lastLoginAt: true, createdAt: true, mfaEnabledAt: true },
+      select: {
+        id: true, email: true, name: true, userType: true, status: true, lastLoginAt: true, createdAt: true, mfaEnabledAt: true,
+        platformRoles: { select: { role: { select: { id: true, name: true } } } },
+      },
     });
-    return { users: users.map(({ mfaEnabledAt, ...u }) => ({ ...u, mfaEnabled: Boolean(mfaEnabledAt) })) };
+    return {
+      users: users.map(({ mfaEnabledAt, platformRoles, ...u }) => ({ ...u, mfaEnabled: Boolean(mfaEnabledAt), roles: platformRoles.map((r) => r.role) })),
+    };
   });
 
   // Clear a platform user's two-factor (lost device)

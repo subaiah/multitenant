@@ -152,13 +152,17 @@ test('managers manage groups but cannot assign roles', async () => {
   assert.match(res.json.message, /roles:assign/);
 });
 
-test('platform support can request support sessions but not list or revoke them', async () => {
+test('platform support can request support sessions but not approve them', async () => {
   const support = await cookieFor(P.supportEmail, 'platform');
   const req = await api('POST', '/support-sessions/request', {
     cookie: support,
-    tenant: A.tenantId,
-    body: { tenantId: A.tenantId, reason: 'Investigating a login issue', permissions: ['users:read'], validTo: new Date(Date.now() + 3600_000).toISOString() },
+    body: { tenantId: A.tenantId, reason: 'Investigating a login issue', durationMinutes: 30 },
   });
-  assert.notEqual(req.status, 403, JSON.stringify(req.json));
-  assert.equal((await api('GET', '/support-sessions', { cookie: support, tenant: A.tenantId })).status, 403);
+  assert.equal(req.status, 201, JSON.stringify(req.json));
+  assert.equal(req.json.status, 'PENDING');
+  assert.equal((await api('POST', `/support-sessions/${req.json.id}/decide`, { cookie: support, body: { approved: true } })).status, 403);
+  // Only their own in the list
+  const list = (await api('GET', '/support-sessions', { cookie: support })).json;
+  assert.ok(list.sessions.every((s: { platformUserId: string }) => s.platformUserId === req.json.platformUserId));
+  assert.equal(list.canApprove, false);
 });
