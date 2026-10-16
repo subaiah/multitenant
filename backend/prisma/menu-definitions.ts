@@ -21,6 +21,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
     { label: 'Applications', path: '/platform/applications', icon: 'Package', permission: 'applications:read' },
     { label: 'Platform Users', path: '/platform/users', icon: 'Users', permission: 'platform-users:read' },
     { label: 'Global Policies', path: '/platform/policies', icon: 'Shield', permission: 'policies:read' },
+    { label: 'Support', path: '/platform/support', icon: 'LifeBuoy', permission: 'support:request' },
     { label: 'Audit Log', path: '/platform/audit', icon: 'ScrollText', permission: 'platform-audit:read' },
     { label: 'Settings', path: '/platform/settings', icon: 'Settings', permission: 'platform-settings:manage' },
   ],

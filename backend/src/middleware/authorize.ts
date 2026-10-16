@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getEnhancedUserPermissions } from '../utils/authorization.js';
-import { permissionMatches } from '../utils/permissions.js';
+import { PLATFORM_RESOURCES, permissionMatches } from '../utils/permissions.js';
+import { sessionPermissions } from '../lib/support.js';
 import { AppError } from './error-handler.js';
 
 /**
@@ -39,8 +40,16 @@ declare module 'fastify' {
 export async function loadPermissions(request: FastifyRequest): Promise<Set<string>> {
   if (!request.effectivePermissions) {
     const { userId, userType } = request.user;
-    const { permissions } = await getEnhancedUserPermissions(userId, request.tenant?.id, userType);
-    request.effectivePermissions = new Set(permissions);
+    if (request.supportSession) {
+      // Platform staff in a tenant: the session's tenant permissions, plus their
+      // platform-only ones (a platform admin's '*' must not cover tenant data)
+      const { permissions } = await getEnhancedUserPermissions(userId, undefined, userType);
+      const platformOnly = permissions.flatMap((p) => (p === '*' || p === '*:*' ? [...PLATFORM_RESOURCES].map((r) => `${r}:*`) : PLATFORM_RESOURCES.has(p.split(':')[0]) ? [p] : []));
+      request.effectivePermissions = new Set([...platformOnly, ...sessionPermissions(request.supportSession)]);
+    } else {
+      const { permissions } = await getEnhancedUserPermissions(userId, request.tenant?.id, userType);
+      request.effectivePermissions = new Set(permissions);
+    }
   }
   return request.effectivePermissions;
 }

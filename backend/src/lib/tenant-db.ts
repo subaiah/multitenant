@@ -41,9 +41,9 @@ async function load(tenantId: string, version?: Date | null) {
 }
 
 /** The tenant's own client: connected as its role, so it sees only its rows. */
-export async function dbForTenant(tenantId: string, version?: Date | null): Promise<TenantDb> {
+export async function dbForTenant(tenantId: string, version?: Date | null, { readOnly = false } = {}): Promise<TenantDb> {
   const { url, target } = await load(tenantId, version);
-  return tenantClient(url, schemaOf(target));
+  return tenantClient(url, schemaOf(target), { readOnly });
 }
 
 /** Where a tenant's data lives (for platform work on its target). */

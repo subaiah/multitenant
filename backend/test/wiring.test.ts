@@ -7,8 +7,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   api, baseUrl, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp,
-  PASSWORD, type PlatformSeed, type TenantSeed,
-} from './helpers.js';
+  PASSWORD, grantSupportSession, type PlatformSeed, type TenantSeed } from './helpers.js';
 
 let A: TenantSeed;
 let B: TenantSeed;
@@ -127,6 +126,9 @@ test('platform routes work without a tenant; tenant routes need one selected', a
   assert.equal((await api('GET', '/menu-items/portal/TENANT', { cookie })).status, 403);
 
   assert.equal((await api('GET', '/users', { cookie })).status, 400, 'tenant-scoped without a tenant');
+  // Inside a tenant only with a support session
+  assert.equal((await api('GET', '/users', { cookie, tenant: A.tenantId })).json.code, 'SUPPORT_SESSION_REQUIRED');
+  await grantSupportSession(P.adminEmail, A.tenantId);
   const scoped = await api('GET', '/users', { cookie, tenant: A.tenantId });
   assert.equal(scoped.status, 200);
   assert.ok(scoped.json.data.every((u: { email: string }) => u.email.includes('wire-a')));

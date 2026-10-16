@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import {
-  PASSWORD, api, baseUrl, db, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp,
+  PASSWORD, api, baseUrl, db, grantSupportSession, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp,
   type PlatformSeed, type TenantSeed,
 } from './helpers.js';
 import { archiveChain, auditCatalog, recordAudit, verifyChain } from '../src/lib/audit.js';
@@ -292,6 +292,7 @@ test('the platform has its own log, for platform staff only', async () => {
 
 test('a platform user working in a tenant appears in that tenant’s log as platform staff', async () => {
   const admin = await loginSession('platform', P.adminEmail);
+  await grantSupportSession(P.adminEmail, A.tenantId, 'READ_WRITE', ['groups:create']);
   const res = await api('POST', '/groups', { cookie: admin.cookie, tenant: A.tenantId, body: { name: `Support-made ${Date.now()}` } });
   assert.equal(res.status, 201);
   const own = await loginSession(A.slug, A.adminEmail);

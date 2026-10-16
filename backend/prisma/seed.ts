@@ -8,6 +8,7 @@
  * Needs an empty control plane and the roles from prisma/tenant/setup-roles.sql.
  * Tenant data is written as each tenant's own database role.
  */
+import { ensurePlatformRoles } from '../src/lib/platform-roles.js';
 import { controlDb, disconnectDatabases } from '../src/lib/prisma.js';
 import { provisionTenant } from '../src/lib/provisioning.js';
 import { dbForTenant } from '../src/lib/tenant-db.js';
@@ -83,7 +84,12 @@ async function main() {
       { email: 'support@platform.local', name: 'Platform Support', passwordHash: userHash, userType: 'PLATFORM_USER', status: 'ACTIVE' },
     ],
   });
-  console.log('✅ 2 platform users (admin@platform.local / admin123, support@platform.local / user123)');
+  // Built-in platform roles; the support user gets "Support" (ask for read-only access to a tenant)
+  await ensurePlatformRoles();
+  const supportUser = await controlDb.platformUser.findUniqueOrThrow({ where: { email: 'support@platform.local' } });
+  const supportRole = await controlDb.platformRole.findUniqueOrThrow({ where: { name: 'Support' } });
+  await controlDb.platformRoleAssignment.create({ data: { platformUserId: supportUser.id, roleId: supportRole.id } });
+  console.log('✅ 2 platform users (admin@platform.local / admin123, support@platform.local / user123, with the Support role)');
 
   for (const t of TENANTS) {
     const tenant = await controlDb.tenant.create({

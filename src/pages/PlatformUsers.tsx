@@ -3,6 +3,8 @@ import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiPost } from '../lib/api-client';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
+import { PlatformRolesCard, UserRolesDialog, type RoleCatalog } from '../components/PlatformRoles';
+import { useState } from 'react';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatRelative, humanize } from '../components/ui';
 
 interface PlatformUser {
@@ -14,12 +16,16 @@ interface PlatformUser {
   lastLoginAt: string | null;
   createdAt: string;
   mfaEnabled: boolean;
+  roles: { id: string; name: string }[];
 }
 
 export default function PlatformUsers() {
   const { user, hasPermission } = useAuth();
   const users = useApi<{ users: PlatformUser[] }>('/platform/users');
   const canReset = hasPermission('platform-settings:manage');
+  const canManageRoles = hasPermission('platform-users:manage');
+  const roles = useApi<RoleCatalog>('/platform-roles');
+  const [editing, setEditing] = useState<PlatformUser | null>(null);
 
   const resetTwoFactor = async (u: PlatformUser) => {
     if (!window.confirm(`Reset two-factor for ${u.email}? They will set it up again the next time they sign in.`)) return;
@@ -47,7 +53,8 @@ export default function PlatformUsers() {
                 <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
                   <tr>
                     <th className="px-5 py-3 font-medium">User</th>
-                    <th className="px-5 py-3 font-medium">Role</th>
+                    <th className="px-5 py-3 font-medium">Type</th>
+                    <th className="px-5 py-3 font-medium">Platform roles</th>
                     <th className="px-5 py-3 font-medium">Status</th>
                     <th className="px-5 py-3 font-medium">Two-factor</th>
                     <th className="px-5 py-3 font-medium">Last sign-in</th>
@@ -64,6 +71,16 @@ export default function PlatformUsers() {
                         <p className="text-xs text-slate-500">{u.email}</p>
                       </td>
                       <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{humanize(u.userType.replace('PLATFORM_', ''))}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {u.userType === 'PLATFORM_ADMIN' ? <span className="text-xs text-slate-400">Everything (admin)</span>
+                            : u.roles.length === 0 ? <span className="text-xs text-slate-400">None</span>
+                            : u.roles.map((r) => <span key={r.id} className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/10 text-xs text-blue-700 dark:text-blue-300">{r.name}</span>)}
+                          {canManageRoles && roles.data && u.userType !== 'PLATFORM_ADMIN' && (
+                            <button type="button" onClick={() => setEditing(u)} className="ml-1 text-xs font-medium text-blue-600 hover:text-blue-700">Edit</button>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-5 py-3"><Badge value={u.status} /></td>
                       <td className="px-5 py-3">
                         <span className={u.mfaEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-400'}>{u.mfaEnabled ? 'On' : 'Off'}</span>
@@ -83,6 +100,11 @@ export default function PlatformUsers() {
           )
         }
       </DataView>
+      {roles.data && <PlatformRolesCard catalog={roles.data} canManage={canManageRoles} onChange={() => void Promise.all([roles.reload(), users.reload()])} />}
+      {editing && roles.data && (
+        <UserRolesDialog user={editing} catalog={roles.data} onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void Promise.all([roles.reload(), users.reload()]); }} />
+      )}
     </div>
   );
 }
