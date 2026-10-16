@@ -193,6 +193,11 @@ test('production refuses to start without a valid key', () => {
   assert.notEqual(short.status, 0);
   assert.match(short.stderr, /must be 32 bytes/);
 
-  const ok = run({ SECRETS_KEY_V1: key().toString('base64') });
+  // The audit log's signing key is required too
+  const noAuditKey = run({ SECRETS_KEY_V1: key().toString('base64') });
+  assert.notEqual(noAuditKey.status, 0);
+  assert.match(noAuditKey.stderr, /AUDIT_KEY_V1 is required in production/);
+
+  const ok = run({ SECRETS_KEY_V1: key().toString('base64'), AUDIT_KEY_V1: key().toString('base64') });
   assert.equal(ok.status, 0, ok.stderr);
 });

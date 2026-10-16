@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -178,6 +179,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         target: organization.name,
         type: 'CONFIG',
       });
+    await audit(request, 'organization.created', { resource: { type: 'organization', id: organization.id, label: organization.name } });
     
     return reply.status(201).send(organization);
   });
@@ -226,6 +228,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         target: organization.name,
         type: 'CONFIG',
       });
+    await audit(request, 'organization.updated', { resource: { type: 'organization', id: organization.id, label: organization.name }, details: { set: data } });
     
     return organization;
   });
@@ -281,6 +284,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         target: organization.name,
         type: 'CONFIG',
       });
+    await audit(request, 'organization.deleted', { resource: { type: 'organization', id: organization.id, label: organization.name } });
     
     return reply.status(204).send();
   });
@@ -357,6 +361,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${user.email} to ${organization.name}`,
         type: 'USER',
       });
+    await audit(request, 'organization.member_added', { resource: { type: 'organization', id: organization.id, label: organization.name }, details: { userId: user.id, user: user.email, membershipId: membership.id } });
     
     return reply.status(201).send(membership);
   });
@@ -395,6 +400,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `user ${memberUserId} from organization ${orgId}`,
         type: 'USER',
       });
+    await audit(request, 'organization.member_removed', { resource: { type: 'organization', id: orgId }, details: { userId: memberUserId } });
     
     return reply.status(204).send();
   });

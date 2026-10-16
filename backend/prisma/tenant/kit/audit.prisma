@@ -1,0 +1,56 @@
+// Audit log (src/lib/audit.ts): who did what to which record, when and from
+// where. Append-only (tenant roles may only insert and read; a trigger
+// refuses updates) and tamper-evident: each entry carries an HMAC over its
+// content and the previous entry's hash, so an edited, removed or reordered
+// entry breaks the chain. Entries older than the retention period are
+// archived to files (control plane: audit_archives) and removed here.
+model AuditEvent {
+  id            String         @id @default(uuid())
+  tenantId      String         @map("tenant_id")
+  /// Position in this tenant's chain, from 1
+  seq           Int
+  occurredAt    DateTime       @default(now()) @map("occurred_at")
+  /// Catalog key (src/kit/audit-events.ts or the product's), e.g. role.assigned
+  event         String
+  category      String
+  outcome       AuditOutcome   @default(SUCCESS)
+  actorType     AuditActorType @map("actor_type")
+  actorId       String?        @map("actor_id")
+  actorEmail    String?        @map("actor_email")
+  resourceType  String?        @map("resource_type")
+  resourceId    String?        @map("resource_id")
+  resourceLabel String?        @map("resource_label")
+  /// { field: [before, after] }; secrets are masked
+  changes       Json?
+  details       Json?
+  ip            String?
+  userAgent     String?        @map("user_agent")
+  requestId     String?        @map("request_id")
+  prevHash      String         @map("prev_hash")
+  hash          String
+  /// Which AUDIT_KEY_V<n> signed it
+  keyVersion    Int            @map("key_version")
+
+  @@unique([tenantId, seq])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, event])
+  @@index([tenantId, resourceType, resourceId])
+  @@index([tenantId, actorId])
+  @@map("audit_events")
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+}
+
+enum AuditActorType {
+  /// A user of the tenant
+  USER
+  /// A platform user (e.g. during a support session)
+  PLATFORM
+  /// The application itself (background jobs)
+  SYSTEM
+  /// Not signed in (e.g. a failed sign-in)
+  ANONYMOUS
+}

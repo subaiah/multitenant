@@ -4,6 +4,7 @@ import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 // Where the data lives (isolation mode, role, schema or database, connection
 // string) is set by provisioning and can't change once a tenant has data;
@@ -66,6 +67,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const data = updateDatabaseConfigSchema.parse(request.body);
 
+    const before = await controlDb.databaseConfig.findUnique({ where: { tenantId: request.tenant.id }, omit: { connectionString: true } });
     const config = await controlDb.databaseConfig.update({
       where: { tenantId: request.tenant.id },
       data,
@@ -80,6 +82,7 @@ export const databaseRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'CONFIG',
         metadata: data,
       });
+    await audit(request, 'database_config.updated', { resource: { type: 'database_config', label: 'Database settings' }, changes: diff(before, data) });
 
     return present(config);
   });

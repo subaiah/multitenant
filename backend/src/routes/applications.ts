@@ -6,6 +6,7 @@ import { platformDb } from '../lib/tenant-targets.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -179,6 +180,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'application.created', { resource: { type: 'application', id: application.id, label: application.name }, details: { ...data } });
     
     return reply.status(201).send(application);
   });
@@ -214,6 +216,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateApplicationSchema.parse(request.body);
     
+    const before = await controlDb.applicationRegistry.findUnique({ where: { id } });
     const application = await controlDb.applicationRegistry.update({
       where: { id },
       data,
@@ -227,6 +230,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'application.updated', { resource: { type: 'application', id: application.id, label: application.name }, changes: diff(before, data) });
     
     return application;
   });
@@ -281,6 +285,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'application.deleted', { resource: { type: 'application', id: application.id, label: application.name } });
     
     return reply.status(204).send();
   });
@@ -383,6 +388,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${permission.name} for ${application.name}`,
         type: 'CONFIG',
       });
+    await audit(request, 'permission.created', { resource: { type: 'permission', id: permission.id, label: permission.name }, details: { application: application.name } });
     
     return reply.status(201).send(permission);
   });
@@ -434,6 +440,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: permission.name,
         type: 'CONFIG',
       });
+    await audit(request, 'permission.deleted', { resource: { type: 'permission', id: permission.id, label: permission.name } });
     
     return reply.status(204).send();
   });

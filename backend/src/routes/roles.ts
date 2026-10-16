@@ -7,6 +7,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { createDefaultTenantRoles, getEnhancedUserPermissions } from '../utils/authorization.js';
 import type { TenantDb } from '../lib/tenant-db.js';
 import { logActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 // Validation schemas
 const createRoleSchema = z.object({
@@ -181,6 +182,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     await logActivity({ tenantId, userId, action: 'created role', target: role.name, type: 'CONFIG' });
+    await audit(request, 'role.created', { resource: { type: 'role', id: role.id, label: role.name }, details: { permissions } });
 
     return reply.status(201).send(role);
   });
@@ -262,6 +264,13 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         target: changes ? `${updated.name} (${changes})`.slice(0, 500) : updated.name,
         type: 'CONFIG',
       });
+    await audit(request, 'role.updated', {
+      resource: { type: 'role', id: updated.id, label: updated.name },
+      changes: {
+        ...diff(role, { name: updated.name, description: updated.description }, ['name', 'description']),
+        ...((added.length || removed.length) && { permissions: [{ removed }, { added }] }),
+      },
+    });
 
     return updated;
   });
@@ -301,6 +310,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
 
     await request.db.role.delete({ where: { id } });
     await logActivity({ tenantId, userId, action: 'deleted role', target: role.name, type: 'CONFIG' });
+    await audit(request, 'role.deleted', { resource: { type: 'role', id: role.id, label: role.name } });
 
     return reply.status(204).send();
   });
@@ -492,6 +502,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${role.name} to ${data.principalType.toLowerCase()} ${principalName}`,
         type: 'USER',
       });
+    await audit(request, 'role.assigned', {
+      resource: { type: 'role_assignment', id: assignment.id, label: `${role.name} → ${principalName}` },
+      details: { roleId: role.id, role: role.name, principalType: data.principalType, principalId: data.userId ?? data.groupId, principal: principalName, scopeType: data.scopeType, scopeId, validFrom, validTo },
+    });
     
     return reply.status(201).send(assignment);
   });
@@ -531,6 +545,10 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${assignment.role.name} from ${assignment.principalType.toLowerCase()} ${principalName}`,
         type: 'USER',
       });
+    await audit(request, 'role.unassigned', {
+      resource: { type: 'role_assignment', id: assignment.id, label: `${assignment.role.name} → ${principalName}` },
+      details: { roleId: assignment.roleId, role: assignment.role.name, principalType: assignment.principalType, principalId: assignment.userId ?? assignment.groupId, principal: principalName, scopeType: assignment.scopeType, scopeId: assignment.scopeId },
+    });
   }
 
   // Remove role assignment
@@ -743,6 +761,7 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
         target: 'roles',
         type: 'CONFIG',
       });
+    await audit(request, 'roles.initialized');
 
     return { message: 'Default roles initialized successfully' };
   });

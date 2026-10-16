@@ -21,7 +21,9 @@
     "tenant:migrate": "tsx prisma/tenant-migrate.ts",
     "tenant:baseline": "tsx prisma/tenant-baseline.ts",
     "db:reset": "prisma migrate reset",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "audit:archive": "tsx prisma/audit.ts archive",
+    "audit:verify": "tsx prisma/audit.ts verify"
   },
   "keywords": [
     "fastify",

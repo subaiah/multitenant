@@ -11,6 +11,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { TenantDb } from '../lib/tenant-db.js';
 import type { UserType } from '../utils/authorization.js';
+import type { AuditEventDefinition } from './audit-events.js';
 
 export interface ProductPermission {
   /** `resource:action`. The resource must not be a kit or platform resource. */
@@ -49,6 +50,13 @@ export interface ProductModule {
 
   /** Tenant-portal menu entries, added after the kit's */
   tenantMenu: ProductMenuItem[];
+
+  /**
+   * The product's audit events, recorded with audit(request, key, ...)
+   * (lib/audit.ts). Prefix keys with the feature, e.g. 'invoice.approved';
+   * they must not reuse a kit key.
+   */
+  auditEvents?: Record<string, AuditEventDefinition>;
 
   /** Runs when a tenant is created, after the kit's defaults (seed product data here). */
   onTenantCreated?: (tenantId: string, db: TenantDb) => Promise<void>;

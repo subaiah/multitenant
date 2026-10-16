@@ -19,6 +19,7 @@ import pg from 'pg';
 import { config } from '../config/env.js';
 import { encryptSecretsIn } from './secrets.js';
 
+const AUDIT_MODELS = new Set(['AuditEvent', 'PlatformAuditEvent']);
 const WRITES = new Set(['create', 'createMany', 'createManyAndReturn', 'update', 'updateMany', 'updateManyAndReturn', 'upsert']);
 
 // Secrets (lib/secrets.ts SECRET_FIELDS) are encrypted on every write, on any
@@ -28,8 +29,9 @@ const encryptSecrets = {
   name: 'encrypt-secrets',
   query: {
     $allModels: {
-      async $allOperations({ operation, args, query }: { operation: string; args: unknown; query: (args: unknown) => Promise<unknown> }) {
-        if (WRITES.has(operation) && args && typeof args === 'object') {
+      async $allOperations({ model, operation, args, query }: { model?: string; operation: string; args: unknown; query: (args: unknown) => Promise<unknown> }) {
+        // Audit entries hold no secrets (lib/audit.ts redacts them) and must be stored exactly as hashed
+        if (WRITES.has(operation) && args && typeof args === 'object' && !AUDIT_MODELS.has(model ?? '')) {
           const a = args as Record<string, unknown>;
           encryptSecretsIn(a.data);
           encryptSecretsIn(a.create);

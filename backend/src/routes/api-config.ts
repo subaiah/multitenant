@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 const updateApiConfigSchema = z.object({
   bffEnabled: z.boolean().optional(),
@@ -64,6 +65,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('BFF URL required when BFF is enabled', 400);
     }
 
+    const before = await request.db.apiConfig.findUnique({ where: { tenantId: request.tenant.id } });
     const config = await request.db.apiConfig.update({
       where: { tenantId: request.tenant.id },
       data,
@@ -77,6 +79,7 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'API',
         metadata: data,
       });
+    await audit(request, 'api_config.updated', { resource: { type: 'api_config', label: 'API settings' }, changes: diff(before, data) });
 
     return config;
   });

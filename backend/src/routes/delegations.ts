@@ -5,6 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createDelegationSchema = z.object({
   delegateId: z.string().uuid(),
@@ -231,6 +232,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Delegation to ${delegate.email}`,
         type: 'USER',
       });
+    await audit(request, 'delegation.created', { resource: { type: 'delegation', id: delegation.id, label: `to ${delegate.email}` }, details: { delegateId: data.delegateId, roleAssignmentId: data.roleAssignmentId, reason: data.reason, validFrom, validTo } });
     
     return reply.status(201).send(delegation);
   });
@@ -296,6 +298,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Delegation ${id}`,
         type: 'USER',
       });
+    await audit(request, 'delegation.revoked', { resource: { type: 'delegation', id }, details: { delegatorId: delegation.delegatorId, delegateId: delegation.delegateId } });
     
     return revoked;
   });

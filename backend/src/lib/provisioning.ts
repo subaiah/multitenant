@@ -26,6 +26,7 @@ import { config } from '../config/env.js';
 import { closeTenantClients, controlDb } from './prisma.js';
 import { dbForTenant, forgetTenant } from './tenant-db.js';
 import { createTenantDefaults, deleteTenantData } from './tenant-data.js';
+import { archiveChain, platformActor, recordAudit } from './audit.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { sendInvitation } from './invitations.js';
 import { logPlatformActivity } from './activity.js';
@@ -131,9 +132,11 @@ export async function provisionTenant(tenantId: string): Promise<void> {
   if (!result) return;
   if (result.ok) {
     await logPlatformActivity({ ...result.audit, action: 'tenant set up', metadata: { isolation: result.isolation } }).catch(() => {});
+    await recordAudit({ actor: { type: 'SYSTEM' } }, 'tenant.provisioned', { tenantId, resource: { type: 'tenant', id: tenantId, label: result.audit.target }, details: { isolation: result.isolation } }).catch(() => {});
     await refreshTenantUsage([tenantId]).catch(() => {});
   } else {
     await logPlatformActivity({ ...result.audit, action: 'tenant setup failed', type: 'ALERT', metadata: { error: result.error } }).catch(() => {});
+    await recordAudit({ actor: { type: 'SYSTEM' } }, 'tenant.provisioning_failed', { outcome: 'FAILURE', tenantId, resource: { type: 'tenant', id: tenantId, label: result.audit.target }, details: { error: result.error } }).catch(() => {});
   }
 }
 
@@ -225,6 +228,10 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
   try {
     const cfg = tenant.databaseConfig;
     const role = cfg?.dbRoleName;
+    // The tenant's audit log outlives it: archive every entry first
+    if (tenant.provisioningStatus === 'READY') {
+      await archiveChain(tenantId, { before: new Date(8.64e15), everything: true });
+    }
     if (cfg && role) {
       const target: Target = targetOf(cfg);
       if (target.kind === 'shared') {
@@ -262,6 +269,7 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
       controlDb.tenant.delete({ where: { id: tenantId } }),
     ]);
     await logPlatformActivity({ tenantId, userId: actorId, action: 'deleted tenant', target: `${tenant.name} (${tenant.slug})`, type: 'CONFIG' });
+    await recordAudit({ actor: await platformActor(actorId) }, 'tenant.deleted', { tenantId, resource: { type: 'tenant', id: tenantId, label: tenant.slug }, details: { name: tenant.name } }).catch(() => {});
   } catch (err) {
     await controlDb.tenant
       .update({ where: { id: tenantId }, data: { provisioningError: `Deleting failed: ${describeError(err)}` } })
@@ -295,6 +303,7 @@ export async function rotateTenantCredentials(tenantId: string, actorId: string)
     forgetTenant(tenantId);
     await closeTenantClients((u) => u === oldUrl);
     await logPlatformActivity({ tenantId, userId: actorId, action: 'rotated database credentials', target: `${tenant.name} (${tenant.slug})`, type: 'CONFIG' });
+    await recordAudit({ actor: await platformActor(actorId) }, 'tenant.credentials_rotated', { tenantId, resource: { type: 'tenant', id: tenantId, label: tenant.slug } }).catch(() => {});
   }, 5_000);
   if (!done) throw new AppError(BUSY_MESSAGE, 409);
 }
