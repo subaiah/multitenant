@@ -52,7 +52,7 @@ The person who did something isn't told about it. Only active users are notified
 - **Retention.** In-app notifications older than `NOTIFICATION_RETENTION_DAYS` (90) are
   removed daily.
 - **Email setup.** Email uses the existing mail settings (`EMAIL_TRANSPORT`, `SMTP_URL`,
-  `EMAIL_FROM`). Each email links to the item and to the preferences page.
+  `MAIL_FROM`). Each email links to the item and to the preferences page.
 - **The bell.** It checks the unread count every 30 seconds as a *background* request
   (`x-background-request: 1`). That request doesn't count as activity, so it never keeps an
   idle session alive.
