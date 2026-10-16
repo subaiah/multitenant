@@ -42,6 +42,8 @@ import { platformRoutes } from './routes/platform.js';
 import { deploymentRoutes } from './routes/deployments.js';
 import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
 import { startAuditArchiving, stopAuditArchiving } from './lib/audit.js';
+import { notificationsSettled, startNotifications, stopNotifications } from './lib/notifications.js';
+import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 import { authorize } from './middleware/authorize.js';
@@ -199,6 +201,10 @@ async function registerRoutes() {
     await protectedRoutes.register(auditRoutes, { prefix: '/audit' });
     await protectedRoutes.register(platformScoped(platformAuditRoutes), { prefix: '/platform-audit' });
 
+    // Notifications: your inbox and preferences (both portals), and the organization's rules
+    await protectedRoutes.register(platformScoped(notificationRoutes), { prefix: '/notifications' });
+    await protectedRoutes.register(notificationSettingRoutes, { prefix: '/notification-settings' });
+
     // Database configuration
     await protectedRoutes.register(databaseRoutes, { prefix: '/database' });
 
@@ -294,6 +300,7 @@ async function start() {
     await resumeProvisioning().catch((err) => fastify.log.error({ err }, 'Resuming provisioning failed'));
     startUsageRefresh((msg) => fastify.log.warn(msg), resumeProvisioning);
     startAuditArchiving((msg, err) => fastify.log.error({ err }, msg));
+    startNotifications((msg, err) => fastify.log.error({ err }, msg));
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -305,6 +312,9 @@ const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
   stopUsageRefresh();
   stopAuditArchiving();
+  stopNotifications();
+  // Let notification work in progress finish (a few seconds at most)
+  await Promise.race([notificationsSettled(), new Promise((r) => setTimeout(r, 5000))]);
   await disconnectDatabases();
   await fastify.close();
   process.exit(0);

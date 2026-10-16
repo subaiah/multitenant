@@ -229,6 +229,19 @@ export function onAudit(listener: Listener) {
   listeners.push(listener);
 }
 
+/**
+ * Run something inside the transaction that records an entry, so it is saved
+ * if and only if the entry is (the notification outbox). `tx` is the control
+ * plane's transaction for the platform chain, the tenant's otherwise.
+ */
+type TxHook = (args: { tx: unknown; chain: string; entry: Content }) => Promise<void>;
+const txHooks: TxHook[] = [];
+export function onAuditInTransaction(hook: TxHook) {
+  txHooks.push(hook);
+}
+export type AuditContent = Content;
+let extensionsLoaded: Promise<unknown> | null = null;
+
 let warn: (msg: string, err?: unknown) => void = (msg, err) => console.error(msg, err);
 export function setAuditLogger(fn: typeof warn) {
   warn = fn;
@@ -292,6 +305,9 @@ export async function audit(
 
 /** Record an entry outside a request (background jobs, scripts). Throws for an unknown event or missing tenant. */
 export async function recordAudit(ctx: AuditContext, event: string, input: AuditInput = {}): Promise<{ chain: string; seq: number; hash: string }> {
+  // Whatever reacts to entries (notifications) registers its hooks when loaded
+  extensionsLoaded ??= import('./notifications.js');
+  await extensionsLoaded;
   const definition = auditCatalog()[event];
   if (!definition) throw new Error(`Unknown audit event "${event}": add it to src/kit/audit-events.ts or the product's auditEvents`);
   const chain = definition.scope === 'platform' ? PLATFORM_CHAIN : ctx.tenantId;
@@ -332,6 +348,7 @@ export async function recordAudit(ctx: AuditContext, event: string, input: Audit
       const last = (await tx.platformAuditEvent.findFirst({ orderBy: { seq: 'desc' }, select: { seq: true, hash: true } })) ?? (await archivedTail(chain));
       const next = await write(last);
       await tx.platformAuditEvent.create({ data: { ...base, tenantId: tenantField, seq: next.seq, prevHash: next.prevHash, hash: next.hash, keyVersion } });
+      for (const hook of txHooks) await hook({ tx, chain, entry: next.content });
       return next;
     });
   } else {
@@ -343,6 +360,7 @@ export async function recordAudit(ctx: AuditContext, event: string, input: Audit
         (await archivedTail(chain));
       const next = await write(last);
       await tx.auditEvent.create({ data: { ...base, tenantId: chain, seq: next.seq, prevHash: next.prevHash, hash: next.hash, keyVersion } });
+      for (const hook of txHooks) await hook({ tx, chain, entry: next.content });
       return next;
     });
   }

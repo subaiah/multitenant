@@ -31,6 +31,12 @@ export class AuthError extends ApiError {
 interface ApiOptions extends RequestInit {
   /** Don't try to refresh the session on 401 (login/public endpoints). */
   skipAuth?: boolean;
+  /**
+   * A request the page makes by itself (polling), not the user: it doesn't
+   * count as activity for the idle timeout, and on 401 it doesn't renew the
+   * session (the user's next action does).
+   */
+  background?: boolean;
 }
 
 // One refresh at a time: refresh tokens rotate, so two parallel refreshes
@@ -72,11 +78,12 @@ async function parse<T>(response: Response): Promise<T> {
 }
 
 export async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): Promise<T> {
-  const { skipAuth = false, ...fetchOptions } = options;
+  const { skipAuth = false, background = false, ...fetchOptions } = options;
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
+  if (background) fetchOptions.headers = { ...(fetchOptions.headers as Record<string, string>), 'x-background-request': '1' };
 
   const response = await send(url, fetchOptions);
-  if (response.status !== 401 || skipAuth) {
+  if (response.status !== 401 || skipAuth || background) {
     return parse<T>(response);
   }
 

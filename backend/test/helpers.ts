@@ -20,6 +20,7 @@ if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must 
 // Background jobs would race the tests' own provisioning and cleanup
 process.env.TENANT_USAGE_REFRESH_MS ??= '0';
 process.env.AUDIT_ARCHIVE_INTERVAL_MS ??= '0';
+process.env.NOTIFICATION_POLL_MS ??= '0';
 // Audit archives (also written when test tenants are deleted) go somewhere disposable
 process.env.AUDIT_ARCHIVE_DIR ??= join(tmpdir(), 'multitenant-test-audit-archive');
 
@@ -180,6 +181,10 @@ export async function stopServerAndCleanUp() {
   }
   await controlDb.platformRefreshToken.deleteMany({ where: { userId: { in: platformIds } } });
   await controlDb.platformActivity.deleteMany({ where: { OR: [{ userId: { in: platformIds } }, { tenantId: { in: created.tenants } }] } });
+  // Notifications this process raised (provisioning, deleting) finish first
+  await (await import('../src/lib/notifications.js')).notificationsSettled();
+  await controlDb.platformNotification.deleteMany({ where: { userId: { in: platformIds } } });
+  await controlDb.platformNotificationPreference.deleteMany({ where: { userId: { in: platformIds } } });
   await controlDb.platformUser.deleteMany({ where: { id: { in: platformIds } } });
   await disconnectDatabases();
 }

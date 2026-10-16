@@ -13,6 +13,7 @@ import Tenants from './pages/Tenants';
 import Applications from './pages/Applications';
 import ActivityLog from './pages/ActivityLog';
 import AuditLog from './pages/AuditLog';
+import Notifications from './pages/Notifications';
 import SettingsPage from './pages/Settings';
 import Infrastructure from './pages/Infrastructure';
 import DataIsolation from './pages/DataIsolation';
@@ -94,6 +95,7 @@ export default function App() {
                   <PlatformUsers />
                 </PermissionGuard>
               } />
+              <Route path="/platform/notifications" element={<Notifications scope="platform" />} />
               <Route path="/platform/audit" element={
                 <PermissionGuard permission="platform-audit:read" redirectTo="/unauthorized">
                   <AuditLog scope="platform" />
@@ -120,6 +122,8 @@ export default function App() {
               } />
               {/* Every signed-in user can see their own profile */}
               <Route path="/profile" element={<Profile />} />
+              {/* Everyone has an inbox and preferences */}
+              <Route path="/notifications" element={<Notifications scope="tenant" />} />
               <Route path="/applications" element={
                 <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
                   <Applications />
