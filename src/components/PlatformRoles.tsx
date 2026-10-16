@@ -123,7 +123,7 @@ export function UserRolesDialog({ user, catalog, onClose, onSaved }: {
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div role="dialog" aria-label={`Platform roles for ${user.email}`} onClick={(e) => e.stopPropagation()} className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+      <div role="dialog" aria-label={`Platform roles for ${user.email}`} onClick={(e) => e.stopPropagation()} className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-lg p-6 space-y-4 shadow-xl">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Platform roles for {user.email}</h3>
           <button aria-label="Close" onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>

@@ -59,6 +59,11 @@ test('menu items use catalog permissions and point at real routes', () => {
   for (const portal of ['PLATFORM', 'TENANT'] as const) {
     for (const item of flatten(MENUS[portal])) {
       if (item.permission) assert.ok(catalog.has(item.permission), `menu "${item.label}" uses unknown permission "${item.permission}"`);
+      if (item.path.startsWith('#')) {
+        // A section: a heading over its entries, never a page of its own
+        assert.ok(item.children?.length, `section "${item.label}" has no entries`);
+        continue;
+      }
       assert.ok(paths.has(item.path), `menu "${item.label}" points at ${item.path}, which is not a route`);
     }
   }

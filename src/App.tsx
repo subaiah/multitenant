@@ -1,6 +1,7 @@
 import { Suspense, lazy, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { LoadingState } from './components/ui';
 import { PermissionGuard } from './components/PermissionGuard';
 import { RequireAuth } from './components/RequireAuth';
@@ -41,12 +42,12 @@ function PlaceholderPage({ title, description }: { title: string; description: s
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-slate-800 dark:text-white">{title}</h2>
+        <h2 className="text-xl font-semibold text-slate-800 dark:text-white">{title}</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{description}</p>
       </div>
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12">
+      <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12">
         <div className="flex flex-col items-center justify-center text-center">
-          <div className="w-16 h-16 bg-blue-100 dark:bg-blue-500/20 rounded-2xl flex items-center justify-center mb-4">
+          <div className="w-16 h-16 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
@@ -74,6 +75,7 @@ function Preview({ children, home }: { children: ReactNode; home: string }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         {/* Pages load on first visit; the layouts show this while one does */}
         <Suspense fallback={<LoadingState />}>
@@ -244,6 +246,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

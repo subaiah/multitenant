@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { Search, Activity, Rocket, Settings, Users, DollarSign, AlertTriangle, KeyRound, Code, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { Card, DataView, EmptyState, PageHeader, StatCard, formatRelative, humanize, inputClass, selectClass, secondaryButtonClass } from '../components/ui';
+import { Card, DataView, EmptyState, PageHeader, StatCard, formatRelative, humanize, inputClass, selectClass, secondaryButtonClass, formatDateTime } from '../components/ui';
 
 interface ActivityRow {
   id: string;
@@ -98,7 +98,7 @@ export default function ActivityLog() {
                             <span className="font-medium">{a.user?.name || a.user?.email || 'System'}</span> {a.action}{' '}
                             <span className="text-slate-500 dark:text-slate-400">{a.target}</span>
                           </p>
-                          <p className="text-xs text-slate-400 mt-0.5">{humanize(a.type)} · {new Date(a.createdAt).toLocaleString()}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{humanize(a.type)} · {formatDateTime(a.createdAt)}</p>
                         </div>
                         <span className="text-xs text-slate-400 shrink-0">{formatRelative(a.createdAt)}</span>
                       </li>

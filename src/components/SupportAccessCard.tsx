@@ -2,7 +2,7 @@
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiPost } from '../lib/api-client';
-import { Badge, Card, formatRelative } from './ui';
+import { Badge, Card, formatRelative, formatDateTime } from './ui';
 
 interface Access {
   id: string;
@@ -41,7 +41,7 @@ export function SupportAccessCard() {
                 </p>
                 <p className="text-xs text-slate-500">{s.reason}</p>
                 <p className="text-xs text-slate-400">
-                  {s.validFrom && `from ${new Date(s.validFrom).toLocaleString()}`}{s.validTo && ` until ${new Date(s.validTo).toLocaleString()}`}
+                  {s.validFrom && `from ${formatDateTime(s.validFrom)}`}{s.validTo && ` until ${formatDateTime(s.validTo)}`}
                   {s.approvedBy && ` · approved by ${s.approvedBy}`}
                 </p>
               </div>

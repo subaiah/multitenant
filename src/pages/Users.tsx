@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
 import { TENANT_USER_TYPES, canManageUserType } from '../lib/permissions';
 import {
+  ActionsMenu, Avatar,
   Badge, Card, DataView, EmptyState, PageHeader, formatRelative, humanize, inputClass, primaryButtonClass, secondaryButtonClass, selectClass,
 } from '../components/ui';
 
@@ -107,9 +108,9 @@ export default function Users() {
             <Card><EmptyState icon={UsersIcon} title={search || userType || status ? 'No users match these filters' : 'No users yet'} /></Card>
           ) : (
             <>
-              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+              <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
                     <tr>
                       <th className="px-5 py-3 font-medium">User</th>
                       <th className="px-5 py-3 font-medium">Type</th>
@@ -126,14 +127,19 @@ export default function Users() {
                       return (
                         <tr key={u.id}>
                           <td className="px-5 py-3">
-                            <p className="font-medium text-slate-800 dark:text-white">
-                              {u.name || u.email} {isMe && <span className="text-xs font-normal text-slate-400">(you)</span>}
-                            </p>
-                            <p className="text-xs text-slate-500">{u.email}</p>
+                            <div className="flex items-center gap-3">
+                              <Avatar name={u.name || u.email} />
+                              <div className="min-w-0">
+                                <p className="font-medium text-slate-800 dark:text-white">
+                                  {u.name || u.email} {isMe && <span className="text-xs font-normal text-slate-500">(you)</span>}
+                                </p>
+                                <p className="text-[13px] font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">{u.email}</p>
+                              </div>
+                            </div>
                           </td>
                           <td className="px-5 py-3">
                             {canUpdate && manageable ? (
-                              <select aria-label={`Type for ${u.email}`} value={u.userType} className={selectClass}
+                              <select aria-label={`Type for ${u.email}`} value={u.userType} className={`${selectClass} py-1.5`}
                                 onChange={(e) => act(() => apiPatch(`/users/${u.id}`, { userType: e.target.value }), `${u.email} is now ${typeLabel(e.target.value)}`)}>
                                 {assignableTypes.map((t) => <option key={t} value={t}>{typeLabel(t)}</option>)}
                               </select>
@@ -142,39 +148,45 @@ export default function Users() {
                             )}
                           </td>
                           <td className="px-5 py-3"><Badge value={u.status === 'PENDING' ? 'INVITED' : u.status} /></td>
-                          <td className="px-5 py-3 text-slate-500">{u.status === 'PENDING' ? '—' : formatRelative(u.lastLoginAt)}</td>
+                          <td className="px-5 py-3 text-slate-600 dark:text-slate-400">{u.status === 'PENDING' ? 'Invited' : formatRelative(u.lastLoginAt)}</td>
                           <td className="px-5 py-3">
-                            <span className={u.mfaEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-400'}>{u.mfaEnabled ? 'On' : 'Off'}</span>
+                            <span className={u.mfaEnabled ? 'text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'}>{u.status === 'PENDING' ? 'Not set up' : u.mfaEnabled ? 'On' : 'Off'}</span>
                           </td>
                           <td className="px-5 py-3">
-                            <div className="flex justify-end gap-2">
+                            <div className="flex justify-end items-center gap-1">
                               {(canReviewAccess || isMe) && (
-                                <Link to={`/access-review/${u.id}`} className="px-3 py-2 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Access</Link>
+                                <Link to={`/access-review/${u.id}`} className="px-3 py-1.5 text-sm font-medium rounded-md text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">Access</Link>
                               )}
-                              {u.status === 'PENDING' && canCreate && manageable && (
-                                <button className={secondaryButtonClass} onClick={() => act(() => apiPost(`/users/${u.id}/resend-invite`, {}), `Invitation resent to ${u.email}`)}>Resend invite</button>
-                              )}
-                              {u.status !== 'PENDING' && canUpdate && manageable && (
-                                <button className={secondaryButtonClass}
-                                  onClick={() => (u.status !== 'ACTIVE' || confirm(`Deactivate ${u.email}? They'll be signed out everywhere right away.`))
-                                    && act(() => apiPatch(`/users/${u.id}`, { status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }),
-                                      `${u.email} ${u.status === 'ACTIVE' ? 'deactivated and signed out' : 'reactivated'}`)}>
-                                  {u.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
-                                </button>
-                              )}
-                              {u.mfaEnabled && canUpdate && manageable && (
-                                <button className={secondaryButtonClass} title="For a lost phone: they set up two-factor again at their next sign-in"
-                                  onClick={() => confirm(`Reset two-factor for ${u.email}? They'll set it up again the next time they sign in.`)
-                                    && act(() => apiPost(`/users/${u.id}/mfa/reset`, {}), `Two-factor reset for ${u.email}`)}>
-                                  Reset 2FA
-                                </button>
-                              )}
-                              {canDelete && manageable && (
-                                <button className="px-3 py-2 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
-                                  onClick={() => confirm(`Remove ${u.email}? This can't be undone.`) && act(() => apiDelete(`/users/${u.id}`), `${u.email} removed`)}>
-                                  Remove
-                                </button>
-                              )}
+                              <ActionsMenu
+                                label={`More actions for ${u.email}`}
+                                actions={[
+                                  ...(u.status === 'PENDING' && canCreate && manageable
+                                    ? [{ label: 'Resend invitation', onSelect: () => act(() => apiPost(`/users/${u.id}/resend-invite`, {}), `Invitation resent to ${u.email}`) }]
+                                    : []),
+                                  ...(u.status !== 'PENDING' && canUpdate && manageable
+                                    ? [{
+                                        label: u.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate',
+                                        onSelect: () => (u.status !== 'ACTIVE' || confirm(`Deactivate ${u.email}? They'll be signed out everywhere right away.`))
+                                          && act(() => apiPatch(`/users/${u.id}`, { status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }),
+                                            `${u.email} ${u.status === 'ACTIVE' ? 'deactivated and signed out' : 'reactivated'}`),
+                                      }]
+                                    : []),
+                                  ...(u.mfaEnabled && canUpdate && manageable
+                                    ? [{
+                                        label: 'Reset two-factor',
+                                        onSelect: () => confirm(`Reset two-factor for ${u.email}? They'll set it up again the next time they sign in.`)
+                                          && act(() => apiPost(`/users/${u.id}/mfa/reset`, {}), `Two-factor reset for ${u.email}`),
+                                      }]
+                                    : []),
+                                  ...(canDelete && manageable
+                                    ? [{
+                                        label: 'Remove',
+                                        danger: true,
+                                        onSelect: () => confirm(`Remove ${u.email}? This can't be undone.`) && act(() => apiDelete(`/users/${u.id}`), `${u.email} removed`),
+                                      }]
+                                    : []),
+                                ]}
+                              />
                             </div>
                           </td>
                         </tr>
@@ -235,7 +247,7 @@ function InviteDialog({ types, onClose, onInvited }: { types: readonly string[];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <form role="dialog" aria-label="Invite user" onSubmit={submit} onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white dark:bg-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+        className="w-full max-w-md bg-white dark:bg-slate-800 rounded-lg p-6 space-y-4 shadow-xl">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Invite user</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>

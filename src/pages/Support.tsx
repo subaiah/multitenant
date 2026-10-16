@@ -71,7 +71,7 @@ export default function Support() {
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500">
+                    <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500">
                       <tr>
                         <th className="px-5 py-3 font-medium">Tenant</th>
                         <th className="px-5 py-3 font-medium">Who</th>

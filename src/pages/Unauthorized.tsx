@@ -3,7 +3,7 @@ import { Shield, ArrowLeft, Home } from 'lucide-react';
 
 export default function Unauthorized() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
       <div className="max-w-md w-full text-center">
         {/* Icon */}
         <div className="mb-6">
@@ -13,7 +13,7 @@ export default function Unauthorized() {
         </div>
 
         {/* Title */}
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">
+        <h1 className="text-3xl font-semibold text-slate-900 dark:text-white mb-3">
           Access Denied
         </h1>
 

@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCheck, Lock, Loader2, RotateCw } from 'lucide-react';
 import { apiGet, apiPost, apiPut } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, EmptyState, ErrorState, LoadingState, PageHeader, formatRelative, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { Card, EmptyState, ErrorState, LoadingState, PageHeader, formatRelative, primaryButtonClass, secondaryButtonClass, formatDateTime } from '../components/ui';
 import type { InboxItem } from '../components/NotificationBell';
 
 interface Channels { inApp: boolean; email: boolean }
@@ -131,7 +131,7 @@ function Inbox() {
                     <p className={`text-sm ${n.readAt ? 'text-slate-700 dark:text-slate-200' : 'font-semibold text-slate-900 dark:text-white'}`}>{n.title}</p>
                     {n.body && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{n.body}</p>}
                   </button>
-                  <p className="text-xs text-slate-400 mt-1" title={new Date(n.createdAt).toLocaleString()}>{formatRelative(n.createdAt)}</p>
+                  <p className="text-xs text-slate-400 mt-1" title={formatDateTime(n.createdAt)}>{formatRelative(n.createdAt)}</p>
                 </div>
                 {!n.readAt && (
                   <button className="text-xs text-blue-600 hover:text-blue-700 shrink-0" onClick={() => void markRead([n.id])}>Mark read</button>
@@ -196,13 +196,13 @@ function Preferences() {
     >
       {error && <p role="alert" className="mb-3 text-sm text-red-600">{error}</p>}
       <table className="w-full text-sm">
-        <thead className="text-xs uppercase text-slate-500">
+        <thead className="text-[13px] text-slate-500">
           <tr><th className="text-left font-medium py-2">Notification</th><th className="w-24 font-medium">In app</th><th className="w-24 font-medium">Email</th></tr>
         </thead>
         <tbody>
           {groups.map(([category, list]) => (
             <Fragment key={category}>
-              <tr><td colSpan={3} className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{CATEGORY_LABELS[category] ?? category}</td></tr>
+              <tr><td colSpan={3} className="pt-4 pb-1 text-xs font-semibold text-slate-400">{CATEGORY_LABELS[category] ?? category}</td></tr>
               {list.map((p) => (
                 <tr key={p.type} className="border-t border-slate-100 dark:border-slate-700">
                   <td className="py-2.5 pr-4">
@@ -293,7 +293,7 @@ function Organization() {
       >
         {error && <p role="alert" className="mb-3 text-sm text-red-600">{error}</p>}
         <table className="w-full text-sm">
-          <thead className="text-xs uppercase text-slate-500">
+          <thead className="text-[13px] text-slate-500">
             <tr>
               <th className="text-left font-medium py-2">Notification</th>
               <th className="w-20 font-medium">On</th>
@@ -305,7 +305,7 @@ function Organization() {
           <tbody>
             {groups.map(([category, list]) => (
               <Fragment key={category}>
-                <tr><td colSpan={5} className="pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{CATEGORY_LABELS[category] ?? category}</td></tr>
+                <tr><td colSpan={5} className="pt-4 pb-1 text-xs font-semibold text-slate-400">{CATEGORY_LABELS[category] ?? category}</td></tr>
                 {list.map((t) => {
                   const v = value(t);
                   return (

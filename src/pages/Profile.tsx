@@ -127,7 +127,7 @@ export default function Profile() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Profile</h1>
+        <h1 className="text-2xl font-semibold text-slate-800 dark:text-white">Profile</h1>
         <p className="text-slate-600 dark:text-slate-400 mt-1">
           Manage your account information
         </p>
@@ -155,16 +155,16 @@ export default function Profile() {
       )}
 
       {/* Profile card */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-6">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-700">
           <div className="flex items-center gap-4">
-            <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center text-white font-bold text-2xl border-2 border-white/30">
+            <div aria-hidden className="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center text-slate-700 dark:text-slate-100 font-semibold text-xl">
               {getUserInitials()}
             </div>
-            <div className="text-white">
-              <h2 className="text-xl font-bold">{name || user.email}</h2>
-              <p className="text-blue-100 text-sm">{formatUserType(user.userType)}</p>
+            <div>
+              <h2 className="text-xl font-semibold text-slate-800 dark:text-white">{name || user.email}</h2>
+              <p className="text-slate-600 dark:text-slate-400 text-sm">{formatUserType(user.userType)}</p>
             </div>
           </div>
         </div>
@@ -213,7 +213,7 @@ export default function Profile() {
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
                   <User size={16} className="text-slate-400" />
-                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                     User Type
                   </span>
                 </div>
@@ -224,7 +224,7 @@ export default function Profile() {
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
                   <Building2 size={16} className="text-slate-400" />
-                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                     Tenant
                   </span>
                 </div>

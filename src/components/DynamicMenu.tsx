@@ -1,220 +1,90 @@
+/**
+ * The sidebar menu, from the menu entries the server allows this person
+ * (src/kit/menu-definitions.ts on the server). A top-level entry whose path
+ * starts with "#" is a section: its label heads the entries inside it.
+ */
 import { Link, useLocation } from 'react-router-dom';
-import { useMenuItems, MenuItem } from '../hooks/useMenuItems';
-import { usePermissions } from '../hooks/usePermissions';
+import { useMemo } from 'react';
 import {
-  LayoutDashboard,
-  Building2,
-  Package,
-  Users,
-  Shield,
-  ShieldCheck,
-  Settings,
-  Activity,
-  Boxes,
-  Server,
-  Database,
-  KeyRound,
-  Code,
-  ScrollText,
-  LifeBuoy,
-  ChevronDown,
-  ChevronRight,
-  LucideIcon,
+  Activity, Boxes, Building2, ClipboardCheck, Code, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
+  Network, Package, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound, type LucideIcon,
 } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useMenuItems, type MenuItem } from '../hooks/useMenuItems';
+import { usePermissions } from '../hooks/usePermissions';
 
-// Icon mapping
-const iconMap: Record<string, LucideIcon> = {
-  LayoutDashboard,
-  Building2,
-  Package,
-  Users,
-  Shield,
-  ShieldCheck,
-  Settings,
-  Activity,
-  Boxes,
-  Server,
-  Database,
-  KeyRound,
-  Code,
-  ScrollText,
-  LifeBuoy,
+const ICONS: Record<string, LucideIcon> = {
+  Activity, Boxes, Building2, ClipboardCheck, Code, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
+  Network, Package, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound,
 };
 
-interface DynamicMenuProps {
-  portal: 'PLATFORM' | 'TENANT';
-}
+const isSection = (item: MenuItem) => item.path.startsWith('#');
 
-export default function DynamicMenu({ portal }: DynamicMenuProps) {
-  const { menuItems, loading: menuLoading, error: menuError } = useMenuItems(portal);
+export default function DynamicMenu({ portal, onNavigate }: { portal: 'PLATFORM' | 'TENANT'; onNavigate?: () => void }) {
+  const { menuItems, loading, error } = useMenuItems(portal);
   const { hasPermission, loading: permLoading } = usePermissions();
-  const location = useLocation();
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const { pathname } = useLocation();
 
-  // Filter menu items based on permissions
-  const filteredMenuItems = useMemo(() => {
-    if (permLoading || menuLoading) return [];
-
-    const filterItem = (item: MenuItem): MenuItem | null => {
-      // Check if user has permission for this item
-      if (item.permission && !hasPermission(item.permission)) {
-        return null;
-      }
-
-      // Filter children recursively
-      if (item.children && item.children.length > 0) {
-        const filteredChildren = item.children
-          .map(filterItem)
-          .filter((child): child is MenuItem => child !== null);
-
-        // If no children are visible, hide the parent too
-        if (filteredChildren.length === 0) {
-          return null;
-        }
-
-        return { ...item, children: filteredChildren };
-      }
-
-      return item;
-    };
-
+  const items = useMemo(() => {
+    if (loading || permLoading) return [];
+    const allowed = (i: MenuItem) => !i.permission || hasPermission(i.permission);
     return menuItems
-      .map(filterItem)
-      .filter((item): item is MenuItem => item !== null);
-  }, [menuItems, hasPermission, menuLoading, permLoading]);
+      .filter(allowed)
+      .map((i) => ({ ...i, children: (i.children ?? []).filter(allowed) }))
+      // A section with nothing left in it disappears
+      .filter((i) => !isSection(i) || i.children.length > 0);
+  }, [menuItems, hasPermission, loading, permLoading]);
 
-  const toggleExpanded = (id: string) => {
-    setExpandedItems(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  };
+  // The longest matching path wins, so /roles/new doesn't also light up /roles
+  const current = useMemo(() => {
+    const paths = items.flatMap((i) => (isSection(i) ? i.children.map((c) => c.path) : [i.path, ...i.children.map((c) => c.path)]));
+    return paths
+      .filter((p) => pathname === p || pathname.startsWith(p + '/'))
+      .sort((a, b) => b.length - a.length)[0];
+  }, [items, pathname]);
 
-  const isActive = (path: string) => {
-    return location.pathname === path || location.pathname.startsWith(path + '/');
-  };
+  if (loading || permLoading) {
+    return (
+      <div className="px-3 space-y-2" aria-hidden>
+        {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-8 rounded-md bg-sidebar-raised/60" />)}
+      </div>
+    );
+  }
+  if (error) return <p className="px-4 text-sm text-red-300" role="alert">The menu couldn't be loaded. Reload the page to try again.</p>;
 
-  const hasActiveChild = (item: MenuItem) => {
-    if (!item.children || item.children.length === 0) return false;
-    return item.children.some(child => isActive(child.path));
-  };
-
-  const renderIcon = (iconName: string | null) => {
-    if (!iconName || !iconMap[iconName]) {
-      return <LayoutDashboard size={20} />;
-    }
-    const Icon = iconMap[iconName];
-    return <Icon size={20} />;
-  };
-
-  const renderMenuItem = (item: MenuItem, isChild = false) => {
-    const hasChildren = item.children && item.children.length > 0;
-    const isExpanded = expandedItems.has(item.id);
-    const active = isActive(item.path);
-    const hasActive = hasActiveChild(item);
-
-    if (hasChildren) {
-      return (
-        <div key={item.id}>
-          <button
-            onClick={() => toggleExpanded(item.id)}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-lg mb-2 transition-colors ${
-              active || hasActive
-                ? portal === 'PLATFORM'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                : isChild
-                ? 'pl-8'
-                : ''
-            } ${
-              !active && !hasActive
-                ? portal === 'PLATFORM'
-                  ? 'text-slate-300 hover:bg-slate-700'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                : ''
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              {renderIcon(item.icon)}
-              <span>{item.label}</span>
-            </div>
-            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </button>
-          {isExpanded && (
-            <div className="ml-4">
-              {item.children!.map(child => renderMenuItem(child, true))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
+  const link = (item: MenuItem) => {
+    const Icon = (item.icon && ICONS[item.icon]) || LayoutDashboard;
+    const active = item.path === current;
     return (
       <Link
         key={item.id}
         to={item.path}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition-colors ${
-          active
-            ? portal === 'PLATFORM'
-              ? 'bg-blue-600 text-white'
-              : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-            : isChild
-            ? 'pl-8'
-            : ''
-        } ${
-          !active
-            ? portal === 'PLATFORM'
-              ? 'text-slate-300 hover:bg-slate-700'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-            : ''
+        onClick={onNavigate}
+        aria-current={active ? 'page' : undefined}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+          active ? 'bg-sidebar-raised text-white font-medium' : 'text-sidebar-ink hover:bg-sidebar-raised/60 hover:text-white'
         }`}
       >
-        {renderIcon(item.icon)}
-        <span>{item.label}</span>
+        <Icon size={18} strokeWidth={1.75} aria-hidden className={active ? 'text-sidebar-accent' : 'text-sidebar-muted'} />
+        <span className="truncate">{item.label}</span>
       </Link>
     );
   };
 
-  const isLoading = menuLoading || permLoading;
-
-  if (isLoading) {
-    return (
-      <div className="p-4">
-        <div className="animate-pulse space-y-3">
-          {[1, 2, 3, 4, 5].map(i => (
-            <div key={i} className="h-12 bg-slate-200 dark:bg-slate-700 rounded"></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (menuError) {
-    return (
-      <div className="p-4 text-red-500">
-        <p>Failed to load menu</p>
-        <p className="text-sm">{menuError}</p>
-      </div>
-    );
-  }
-
-  if (filteredMenuItems.length === 0) {
-    return (
-      <div className="p-4 text-slate-500 dark:text-slate-400">
-        <p>No menu items available</p>
-      </div>
-    );
-  }
-
   return (
-    <nav className="p-4">
-      {filteredMenuItems.map(item => renderMenuItem(item))}
+    <nav aria-label="Main" className="px-3 flex flex-col gap-5">
+      {items.map((item) =>
+        isSection(item) ? (
+          <div key={item.id} className="flex flex-col gap-0.5">
+            <p className="px-3 pb-1.5 text-xs text-sidebar-muted">{item.label}</p>
+            {item.children.map(link)}
+          </div>
+        ) : (
+          <div key={item.id} className="flex flex-col gap-0.5">
+            {link(item)}
+            {item.children.map(link)}
+          </div>
+        ),
+      )}
     </nav>
   );
 }

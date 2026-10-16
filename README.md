@@ -31,6 +31,16 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
   - Entries are archived after a year. ([backend/docs/AUDIT_LOG.md](backend/docs/AUDIT_LOG.md))
 - **Notifications.** In-app and email, with organization rules and personal preferences. Products can add their own types. ([backend/docs/NOTIFICATIONS.md](backend/docs/NOTIFICATIONS.md))
 
+## Look and feel
+
+The interface uses IBM Plex Sans (with Plex Mono for literal values such as email addresses), a graphite sidebar, cool grey neutrals and a verdigris accent, in light and dark themes. Everyone can switch the theme from the sidebar; it follows the device until they do.
+
+A product re-skins it in one place:
+
+- **Colours and fonts:** the tokens at the top of `src/index.css`.
+- **Its name:** `VITE_APP_NAME` when building (`APP_NAME` in `deploy/.env`).
+- **Tenants' own branding:** each tenant's logo and colour on their sign-in page and in their sidebar, from their Settings page.
+
 ## Pages with sample data
 
 Some pages show data the demo seed fills in, because nothing real reports it yet:

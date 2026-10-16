@@ -15,8 +15,12 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY index.html vite.config.js tsconfig.json ./
 COPY src ./src
+COPY public ./public
 # The API is on the same address, under /api
 ENV VITE_API_URL=/api
+# The product's name in the platform portal and the browser tab
+ARG APP_NAME=Multitenant
+ENV VITE_APP_NAME=${APP_NAME}
 RUN npm run build
 
 FROM caddy:${CADDY_VERSION}-alpine

@@ -64,7 +64,7 @@ export default function Infrastructure() {
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+                      <thead className="text-left text-[13px] text-slate-500 dark:text-slate-400">
                         <tr>
                           <th className="pb-2 font-medium">Application</th>
                           <th className="pb-2 font-medium">Status</th>

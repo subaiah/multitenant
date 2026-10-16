@@ -159,8 +159,8 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
   return (
     <div className="space-y-6">
       {/* Who */}
-      <div className="flex flex-wrap items-center gap-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-        <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-semibold">
+      <div className="flex flex-wrap items-center gap-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5">
+        <div className="flex items-center justify-center w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-100 font-semibold">
           {(user.name || user.email).slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -172,9 +172,9 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
           <p className="text-sm text-slate-500">{user.email} · {typeLabel(user.userType)}</p>
         </div>
         <dl className="flex gap-6 text-center">
-          <div><dt className="text-xs text-slate-500">Permissions</dt><dd className="text-2xl font-bold text-slate-800 dark:text-white">{effective.length}</dd></div>
-          <div><dt className="text-xs text-slate-500">In effect</dt><dd className="text-2xl font-bold text-slate-800 dark:text-white">{active.length}</dd></div>
-          <div><dt className="text-xs text-slate-500">Not in effect</dt><dd className="text-2xl font-bold text-slate-400">{inactive.length}</dd></div>
+          <div><dt className="text-xs text-slate-500">Permissions</dt><dd className="text-2xl font-semibold text-slate-800 dark:text-white">{effective.length}</dd></div>
+          <div><dt className="text-xs text-slate-500">In effect</dt><dd className="text-2xl font-semibold text-slate-800 dark:text-white">{active.length}</dd></div>
+          <div><dt className="text-xs text-slate-500">Not in effect</dt><dd className="text-2xl font-semibold text-slate-400">{inactive.length}</dd></div>
         </dl>
       </div>
 
@@ -197,7 +197,7 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
           </ul>
           {inactive.length > 0 && (
             <>
-              <h4 className="pt-2 text-xs font-medium uppercase tracking-wide text-slate-400">Not in effect</h4>
+              <h4 className="pt-2 text-xs font-medium text-slate-400">Not in effect</h4>
               <ul className="space-y-2">
                 {inactive.map((s) => <SourceCard key={s.id} s={s} userType={user.userType} selected={selected === s.id} onSelect={() => setSelected(selected === s.id ? null : s.id)} canManage={canManage} />)}
               </ul>
@@ -235,10 +235,10 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
           {areas.length === 0 ? (
             <Card><EmptyState icon={Shield} title={term ? 'No permissions match' : 'No permissions'} /></Card>
           ) : (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700">
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700">
               {areas.map((a) => (
                 <div key={a.resource} className="px-5 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">{a.label}</p>
+                  <p className="text-xs font-medium text-slate-400 mb-1">{a.label}</p>
                   <ul>
                     {a.rows.map((p) => {
                       const from = granted.get(p.name) ?? [];
@@ -292,7 +292,7 @@ function SourceCard({ s, userType, selected, onSelect, canManage }: {
     : null;
   return (
     <li>
-      <div className={`rounded-xl border p-3 transition ${selected
+      <div className={`rounded-lg border p-3 transition ${selected
         ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/50 dark:bg-blue-500/10'
         : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'} ${s.active ? '' : 'opacity-70'}`}>
         <button type="button" onClick={onSelect} aria-pressed={selected} className="w-full text-left flex items-start gap-3">

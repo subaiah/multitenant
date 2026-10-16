@@ -139,9 +139,9 @@ export default function Tenants() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {l.data.map((t) => (
                   <button key={t.id} onClick={() => setSelected(t)}
-                    className="text-left bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500/50 transition-colors">
+                    className="text-left bg-white dark:bg-slate-800 rounded-lg p-5 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500/50 transition-colors">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold" style={{ backgroundColor: t.primaryColor ?? '#3b82f6' }}>
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-semibold" style={{ backgroundColor: t.primaryColor ?? '#3b82f6' }}>
                         {t.name.charAt(0)}
                       </div>
                       <div className="min-w-0">
