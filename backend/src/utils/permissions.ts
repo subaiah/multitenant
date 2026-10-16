@@ -28,6 +28,8 @@ export const KIT_PERMISSIONS = [
   'menus:manage',
   'support:request', // ask for a time-limited support session into a tenant
   'support:manage', // list and revoke support sessions
+  'platform-audit:read', // the platform's audit log
+  'platform-audit:manage', // verify, export and archive audit logs
 
   // Shared: application registry (read) and tenant entitlements / deployed apps
   'applications:read',
@@ -38,6 +40,8 @@ export const KIT_PERMISSIONS = [
   'tenant:read',
   'tenant:update',
   'activity:read',
+  'audit:read',
+  'audit:export',
   'infrastructure:read',
   'database:read',
   'database:manage',
@@ -81,7 +85,8 @@ const KIT_RESOURCE_INFO: Record<string, { label: string; description: string }> 
   dashboard: { label: 'Dashboard', description: 'The tenant overview' },
   tenant: { label: 'Tenant profile', description: 'Name, branding and plan details' },
   applications: { label: 'Applications', description: 'Apps available to and deployed in the tenant' },
-  activity: { label: 'Activity log', description: 'Audit trail of changes' },
+  activity: { label: 'Activity log', description: 'A feed of what has happened' },
+  audit: { label: 'Audit log', description: 'Tamper-evident record of who changed what' },
   infrastructure: { label: 'Infrastructure', description: 'Deployments and resource usage' },
   database: { label: 'Database', description: 'Data isolation, backups and connections' },
   auth: { label: 'Authentication', description: 'Sign-in methods, SSO and password policy' },
@@ -105,6 +110,8 @@ const KIT_PERMISSION_INFO: Partial<Record<KitPermission, string>> = {
   'applications:read': 'See applications',
   'applications:manage': 'Enable, deploy and configure applications',
   'activity:read': 'See the activity log',
+  'audit:read': 'See the audit log and check its integrity',
+  'audit:export': 'Export the audit log and download archives',
   'infrastructure:read': 'See infrastructure and usage',
   'database:read': 'See database configuration',
   'database:manage': 'Change database configuration and backups',
@@ -144,7 +151,7 @@ const KIT_USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
   PLATFORM_ADMIN: ['*'],
   PLATFORM_USER: ['platform:read', 'tenants:read', 'applications:read', 'policies:read', 'platform-users:read', 'support:request'],
   TENANT_ADMIN: [
-    'dashboard:view', 'tenant:*', 'applications:*', 'activity:read', 'infrastructure:read',
+    'dashboard:view', 'tenant:*', 'applications:*', 'activity:read', 'audit:*', 'infrastructure:read',
     'database:*', 'auth:*', 'api:*', 'users:*', 'groups:*', 'roles:*', 'organizations:*', 'settings:*',
     'policies:*', 'access-requests:*', 'certifications:*', 'delegations:*',
   ],
@@ -173,7 +180,7 @@ export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = Object.fromEntr
 ) as Record<UserType, string[]>;
 
 /** Resources that exist only at platform level. */
-const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support']);
+const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support', 'platform-audit']);
 
 /**
  * Can a tenant-scoped role (or group role, or delegation) grant this to a

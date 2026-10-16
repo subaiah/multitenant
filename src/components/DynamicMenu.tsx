@@ -15,6 +15,7 @@ import {
   Database,
   KeyRound,
   Code,
+  ScrollText,
   ChevronDown,
   ChevronRight,
   LucideIcon,
@@ -36,6 +37,7 @@ const iconMap: Record<string, LucideIcon> = {
   Database,
   KeyRound,
   Code,
+  ScrollText,
 };
 
 interface DynamicMenuProps {

@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createSupportSessionSchema = z.object({
   tenantId: z.string().uuid(),
@@ -142,6 +143,8 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Support session for ${tenant.name}`,
         type: 'AUTH',
       });
+    await audit(request, 'support_session.created', { tenantId: data.tenantId, resource: { type: 'support_session', id: session.id, label: tenant.name }, details: { reason: data.reason, permissions: data.permissions, validTo } });
+    await audit(request, 'support.session_started', { resource: { type: 'support_session', id: session.id }, details: { reason: data.reason, permissions: data.permissions, validTo } }, { tenantId: data.tenantId });
     
     return reply.status(201).send(session);
   });
@@ -194,6 +197,8 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Support session ${id}`,
         type: 'AUTH',
       });
+    await audit(request, 'support_session.revoked', { tenantId: session.tenantId, resource: { type: 'support_session', id } });
+    await audit(request, 'support.session_ended', { resource: { type: 'support_session', id } }, { tenantId: session.tenantId });
     
     return revoked;
   });

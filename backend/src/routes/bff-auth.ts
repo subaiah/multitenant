@@ -14,7 +14,8 @@ import { otpEmail } from '../lib/email-templates.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
-import { assertRefreshAllowed, completeSignIn, recordSignIn, startSession, type SignInResult } from '../lib/sign-in.js';
+import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
+import { audit } from '../lib/audit.js';
 import { mfaRoutes } from './mfa.js';
 import { finishSso, SsoError, ssoRedirectUri, startSso, userForIdentity } from '../lib/sso.js';
 import { tokenSlug } from '../lib/auth-planes.js';
@@ -83,14 +84,16 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     if (isPlatformSlug(tenantSlug)) {
       const user = await controlDb.platformUser.findUnique({ where: { email } });
       if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+        await recordSignInFailure(request, 'platform', { email, userId: user?.id, method: 'password', reason: user ? 'wrong password' : 'no such account' });
         throw new AppError('Invalid credentials', 401);
       }
       if (user.status !== 'ACTIVE') {
+        await recordSignInFailure(request, 'platform', { email, userId: user.id, method: 'password', reason: 'account not active' });
         throw new AppError('User account is not active', 403);
       }
       const next = await completeSignIn(fastify, request, reply, 'platform', user);
       if (next) return mfaNext(next);
-      await recordSignIn('platform', user.id, 'logged in via BFF');
+      await recordSignIn(request, 'platform', user.id, 'logged in via BFF', 'password');
       return {
         message: 'Login successful',
         user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: 'PLATFORM' },
@@ -101,22 +104,27 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const { tenant, db } = await tenantForSignIn(tenantSlug);
     const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
 
+    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
+    const refuse = (reason: string) => recordSignInFailure(request, owner, { email, userId: user?.id, method: 'password', reason });
+
     // Password is required. Verify it before revealing anything else about the account.
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+      await refuse(user ? 'wrong password' : 'no such account');
       throw new AppError('Invalid credentials', 401);
     }
     const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
     if (authConfig?.ssoOnly) {
+      await refuse('single sign-on only');
       throw new AppError('SSO authentication required', 403);
     }
     if (user.status !== 'ACTIVE') {
+      await refuse('account not active');
       throw new AppError('User account is not active', 403);
     }
 
-    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
     const next = await completeSignIn(fastify, request, reply, owner, user);
     if (next) return mfaNext(next);
-    await recordSignIn(owner, user.id, 'logged in via BFF');
+    await recordSignIn(request, owner, user.id, 'logged in via BFF', 'password');
 
     return {
       message: 'Login successful',
@@ -236,15 +244,18 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid OTP', 401);
     }
     const { tenant, db } = await tenantForSignIn(tenantSlug);
+    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
 
     const otpRecord = await db.otpCode.findFirst({
       where: { tenantId: tenant.id, email, code, verified: false },
     });
     if (!otpRecord) {
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });
       throw new AppError('Invalid OTP', 401);
     }
     if (new Date() > otpRecord.expiresAt) {
       await db.otpCode.delete({ where: { id: otpRecord.id } });
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'code expired' });
       throw new AppError('OTP has expired', 401);
     }
     await db.otpCode.update({ where: { id: otpRecord.id }, data: { verified: true } });
@@ -254,13 +265,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User not found', 404);
     }
     if (user.status !== 'ACTIVE') {
+      await recordSignInFailure(request, owner, { email, userId: user.id, method: 'email-code', reason: 'account not active' });
       throw new AppError('User account is not active', 403);
     }
 
-    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
     const next = await completeSignIn(fastify, request, reply, owner, user);
     if (next) return mfaNext(next);
-    await recordSignIn(owner, user.id, 'logged in via OTP');
+    await recordSignIn(request, owner, user.id, 'logged in via OTP', 'email-code');
 
     return {
       message: 'Login successful',
@@ -300,8 +311,21 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       const done = await finishSso(url);
       slug = done.slug;
-      const { user, how } = await userForIdentity(done.db, done.tenant.id, done.provider, done.identity);
-      if (user.status === 'INACTIVE') throw new SsoError('Your account is not active', 'SSO_INACTIVE');
+      const ssoOwner = { tenantId: done.tenant.id, tenantSlug: done.tenant.slug };
+      const { user, how } = await userForIdentity(done.db, done.tenant.id, done.provider, done.identity).catch(async (err) => {
+        await recordSignInFailure(request, ssoOwner, { email: done.identity.email ?? '', method: 'sso', reason: (err as Error).message });
+        throw err;
+      });
+      if (user.status === 'INACTIVE') {
+        await recordSignInFailure(request, ssoOwner, { email: user.email, userId: user.id, method: 'sso', reason: 'account not active' });
+        throw new SsoError('Your account is not active', 'SSO_INACTIVE');
+      }
+      if (how === 'created') {
+        await audit(request, 'user.created_by_sso', {
+          resource: { type: 'user', id: user.id, label: user.email },
+          details: { provider: done.provider.provider, userType: user.userType },
+        }, { actor: { type: 'USER', id: user.id, email: user.email }, tenantId: done.tenant.id });
+      }
       // Signing in through the organization's provider accepts an invitation
       if (user.status === 'PENDING') {
         await done.db.user.updateMany({ where: { id: user.id, tenantId: done.tenant.id }, data: { status: 'ACTIVE' } });
@@ -309,7 +333,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       const owner = { tenantId: done.tenant.id, tenantSlug: done.tenant.slug };
       // Two-factor at sign-in is the identity provider's job here
       await startSession(fastify, request, reply, owner, user);
-      await recordSignIn(owner, user.id, `logged in with ${done.provider.provider}${how === 'created' ? ' (new account)' : ''}`);
+      await recordSignIn(request, owner, user.id, `logged in with ${done.provider.provider}${how === 'created' ? ' (new account)' : ''}`, 'sso');
       return reply.redirect(`${config.frontendUrl}/${encodeURIComponent(done.tenant.slug)}/login`);
     } catch (err) {
       request.log.warn({ err }, 'Single sign-on failed');
@@ -451,6 +475,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     reply.clearCookie('refresh_token', { path: '/' });
 
     await logActivity({ tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' });
+    await audit(request, user.tenantId ? 'auth.signed_out_everywhere' : 'platform.auth.signed_out_everywhere', {}, {
+      actor: { type: user.tenantId ? 'USER' : 'PLATFORM', id: user.id },
+      tenantId: user.tenantId ?? null,
+    });
 
     return { message: 'All sessions revoked successfully' };
   });

@@ -18,10 +18,11 @@ import type { SessionOwner } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { newRecoveryCodes, newTotpSecret, otpauthUrl, verifyTotp } from '../lib/mfa.js';
 import {
-  consumeMfaCode, getMfaState, ownerOf, readMfaToken, recordSignIn, saveMfaState, signMfaToken,
+  consumeMfaCode, getMfaState, ownerOf, readMfaToken, recordSignIn, recordSignInFailure, saveMfaState, signMfaToken,
   signedInUser, startSession, type MfaClaims,
 } from '../lib/sign-in.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 export const codeSchema = z.string().trim().min(6).max(20);
 
@@ -87,10 +88,11 @@ export const mfaRoutes: FastifyPluginAsync = async (fastify) => {
     const used = await consumeMfaCode(owner, claims.userId, state, body.code);
     if (!used) {
       await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: claims.userId, action: 'two-factor code rejected', target: 'system', type: 'AUTH' });
+      await recordSignInFailure(request, owner, { email: state.email, userId: claims.userId, method: 'two-factor', reason: 'wrong code', mfa: true });
       throw new AppError('That code is not right', 401, true, 'MFA_INVALID');
     }
     await startSession(fastify, request, reply, owner, { id: claims.userId, userType: claims.userType });
-    await recordSignIn(owner, claims.userId, used === 'recovery' ? 'logged in with a recovery code' : 'logged in with two-factor');
+    await recordSignIn(request, owner, claims.userId, used === 'recovery' ? 'logged in with a recovery code' : 'logged in with two-factor', used === 'recovery' ? 'recovery-code' : 'two-factor');
     const remaining = used === 'recovery' ? state.recoveryHashes.length - 1 : undefined;
     return { message: 'Login successful', ...(await signedInUser(owner, claims.userId)), recoveryCodesLeft: remaining };
   });
@@ -122,8 +124,12 @@ export const mfaRoutes: FastifyPluginAsync = async (fastify) => {
 
     const recoveryCodes = await finishEnrollment(owner, claims.userId, claims.pendingSecret, body.code);
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: claims.userId, action: 'set up two-factor', target: 'system', type: 'AUTH' });
+    await audit(request, owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled', { details: { during: 'sign-in' } }, {
+      actor: { type: owner === 'platform' ? 'PLATFORM' : 'USER', id: claims.userId, email: state.email },
+      tenantId: owner === 'platform' ? null : owner.tenantId,
+    });
     await startSession(fastify, request, reply, owner, { id: claims.userId, userType: claims.userType });
-    await recordSignIn(owner, claims.userId, 'logged in with two-factor');
+    await recordSignIn(request, owner, claims.userId, 'logged in with two-factor', 'two-factor');
     return { message: 'Login successful', ...(await signedInUser(owner, claims.userId)), recoveryCodes };
   });
 };

@@ -5,6 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createCertificationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -194,6 +195,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
         target: certification.name,
         type: 'CONFIG',
       });
+    await audit(request, 'certification.created', { resource: { type: 'certification', id: certification.id, label: certification.name } });
     
     return reply.status(201).send(certification);
   });
@@ -340,6 +342,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
         target: certification.name,
         type: 'CONFIG',
       });
+    await audit(request, 'certification.completed', { resource: { type: 'certification', id, label: certification.name } });
     
     return completed;
   });

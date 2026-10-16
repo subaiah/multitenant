@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createServer, type AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { TenantDb } from '../src/lib/tenant-db.js';
 
@@ -17,6 +19,9 @@ if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a tes
 if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must point at a test tenant database (as the migration owner)');
 // Background jobs would race the tests' own provisioning and cleanup
 process.env.TENANT_USAGE_REFRESH_MS ??= '0';
+process.env.AUDIT_ARCHIVE_INTERVAL_MS ??= '0';
+// Audit archives (also written when test tenants are deleted) go somewhere disposable
+process.env.AUDIT_ARCHIVE_DIR ??= join(tmpdir(), 'multitenant-test-audit-archive');
 
 export const PASSWORD = 'correct-horse-battery';
 // A port the OS says is free (a fixed range could hit a dev server already

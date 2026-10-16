@@ -4,6 +4,7 @@ import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -184,6 +185,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'entitlement.updated', { resource: { type: 'application', id: application.id, label: application.name }, changes: { enabled: [false, true] }, details: { entitlementId: tenantApplication.id } });
     
     return reply.status(201).send(tenantApplication);
   });
@@ -241,6 +243,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: tenantApplication.application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'entitlement.updated', { resource: { type: 'application', id: tenantApplication.applicationId, label: tenantApplication.application.name }, details: { set: data } });
     
     return tenantApplication;
   });
@@ -283,6 +286,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: tenantApplication.application.name,
         type: 'CONFIG',
       });
+    await audit(request, 'entitlement.updated', { resource: { type: 'application', id: tenantApplication.applicationId, label: tenantApplication.application.name }, changes: { enabled: [true, false] } });
     
     return reply.status(204).send();
   });

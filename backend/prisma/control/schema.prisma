@@ -350,3 +350,85 @@ model MenuItem {
   @@index([parentId])
   @@map("menu_items")
 }
+
+// Audit log of platform actions (src/lib/audit.ts): the same shape and hash
+// chain as each tenant's audit_events, as one chain ("platform").
+model PlatformAuditEvent {
+  id            String         @id @default(uuid())
+  /// The tenant the action concerned, if any
+  tenantId      String?        @map("tenant_id")
+  seq           Int            @unique
+  occurredAt    DateTime       @default(now()) @map("occurred_at")
+  event         String
+  category      String
+  outcome       AuditOutcome   @default(SUCCESS)
+  actorType     AuditActorType @map("actor_type")
+  actorId       String?        @map("actor_id")
+  actorEmail    String?        @map("actor_email")
+  resourceType  String?        @map("resource_type")
+  resourceId    String?        @map("resource_id")
+  resourceLabel String?        @map("resource_label")
+  changes       Json?
+  details       Json?
+  ip            String?
+  userAgent     String?        @map("user_agent")
+  requestId     String?        @map("request_id")
+  prevHash      String         @map("prev_hash")
+  hash          String
+  keyVersion    Int            @map("key_version")
+
+  @@index([occurredAt])
+  @@index([tenantId])
+  @@index([event])
+  @@map("platform_audit_events")
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+}
+
+enum AuditActorType {
+  USER
+  PLATFORM
+  SYSTEM
+  ANONYMOUS
+}
+
+// The latest entry of each audit chain ("platform" or a tenant id), kept
+// apart from the tenant's own data: removing entries from the end of a
+// tenant's chain is then detectable too.
+model AuditHead {
+  chain     String   @id
+  seq       Int
+  hash      String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("audit_heads")
+}
+
+// Audit entries moved out of the live tables after the retention period:
+// one gzipped JSON-lines file per run and chain, with what's needed to keep
+// verifying the chain across it.
+model AuditArchive {
+  id        String   @id @default(uuid())
+  chain     String
+  tenantId  String?  @map("tenant_id")
+  fromSeq   Int      @map("from_seq")
+  toSeq     Int      @map("to_seq")
+  fromAt    DateTime @map("from_at")
+  toAt      DateTime @map("to_at")
+  rows      Int
+  /// prev_hash of the first entry and hash of the last
+  firstPrevHash String @map("first_prev_hash")
+  lastHash  String   @map("last_hash")
+  /// Path under AUDIT_ARCHIVE_DIR
+  file      String
+  sha256    String
+  bytes     Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([chain, fromSeq])
+  @@index([tenantId])
+  @@map("audit_archives")
+}

@@ -44,3 +44,4 @@ lerna-debug.log*
 
 # Generated Prisma clients (npm run prisma:generate)
 src/generated/
+audit-archive/

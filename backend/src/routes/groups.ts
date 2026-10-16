@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireCanGrant } from '../middleware/authorize.js';
 import { assignmentState, groupPermissionNames } from '../lib/access.js';
 import { logActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 const createGroupSchema = z.object({
   name: z.string().min(2).max(100),
@@ -209,6 +210,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
+    await audit(request, 'group.created', { resource: { type: 'group', id: group.id, label: group.name }, details: { description: group.description } });
     
     return reply.status(201).send(group);
   });
@@ -270,6 +272,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
+    await audit(request, 'group.updated', { resource: { type: 'group', id: group.id, label: group.name }, changes: diff(current, data) });
     
     return group;
   });
@@ -330,6 +333,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
+    await audit(request, 'group.deleted', { resource: { type: 'group', id: group.id, label: group.name } });
     
     return reply.status(204).send();
   });
@@ -416,6 +420,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${user.email} to ${group.name}`,
         type: 'USER',
       });
+    await audit(request, 'group.member_added', { resource: { type: 'group', id: group.id, label: group.name }, details: { userId: memberUserId, user: user.email, membershipId: membership.id } });
     
     return reply.status(201).send(membership);
   });
@@ -462,6 +467,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${membership.user.email} from ${membership.group.name}`,
         type: 'USER',
       });
+    await audit(request, 'group.member_removed', { resource: { type: 'group', id: groupId, label: membership.group.name }, details: { userId: membership.userId, user: membership.user.email } });
     
     return reply.status(204).send();
   });

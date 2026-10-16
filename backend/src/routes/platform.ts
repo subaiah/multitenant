@@ -7,6 +7,7 @@ import { isPlatformUser } from '../utils/authorization.js';
 import { countBy } from '../lib/stats.js';
 import { latestMigration, startRollout, tenantsBehind } from '../lib/tenant-migrations.js';
 import { logPlatformActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
 
 /** Platform-portal data: cross-tenant statistics and platform users. */
@@ -98,6 +99,7 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
       type: report.failed.length ? 'ALERT' : 'DEPLOY',
       metadata: { succeeded: report.succeeded.length, failed: report.failed.map((f) => f.target) },
     });
+    await audit(request, 'tenant.migrations_run', { details: { latest: latestMigration(), succeeded: report.succeeded.length, failed: report.failed.map((f) => f.target) } });
     return { ...report, latest: latestMigration(), tenantsBehind: await tenantsBehind() };
   });
 
@@ -126,6 +128,7 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
     if (!user) throw new AppError('User not found', 404);
     await resetTwoFactor('platform', user.id);
     await logPlatformActivity({ userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
+    await audit(request, 'platform_user.mfa_reset', { resource: { type: 'platform_user', id: user.id, label: user.email } });
     return { mfaEnabled: false };
   });
 };

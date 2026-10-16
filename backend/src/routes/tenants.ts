@@ -12,6 +12,7 @@ import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authori
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity, logPlatformActivity } from '../lib/activity.js';
+import { audit, diff } from '../lib/audit.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -141,6 +142,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       type: 'CONFIG',
       metadata: { isolation: data.strategy, firstAdmin: data.adminEmail },
     });
+await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 'tenant', id: tenant.id, label: tenant.slug }, details: { name: tenant.name, plan: tenant.plan, isolation: data.strategy, firstAdmin: data.adminEmail } });
 
     // Provisioning runs in the background: database role, schema or database,
     // tables, row-level security, defaults, then the first admin's invitation.
@@ -182,6 +184,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     // Pending until the job picks it up, so nobody reads the old failure as the outcome
     await controlDb.tenant.update({ where: { id }, data: { provisioningStatus: 'PENDING', provisioningError: null } });
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'retried provisioning', target: tenant.slug, type: 'CONFIG' });
+    await audit(request, 'tenant.provisioning_retried', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug } });
     void startProvisioning(id);
     return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
   });
@@ -339,6 +342,7 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
+    const before = await controlDb.tenant.findUnique({ where: { id } });
     const tenant = await controlDb.tenant.update({
       where: { id },
       data,
@@ -347,6 +351,13 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     // In the tenant's own log once it has one; the platform log before that
     const entry = { tenantId: id, userId: request.user.userId, action: 'updated tenant', target: tenant.name, type: 'CONFIG' as const, metadata: data };
     await (tenant.provisioningStatus === 'READY' ? logActivity(entry) : logPlatformActivity(entry));
+    // Platform staff in the platform's audit log; the tenant's own admins in the tenant's
+    const changes = diff(before, data);
+    if (isPlatformUser(userType)) {
+      await audit(request, 'tenant.updated', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, changes });
+    } else {
+      await audit(request, 'tenant_profile.updated', { resource: { type: 'tenant', id, label: tenant.name }, changes });
+    }
 
     return tenant;
   });

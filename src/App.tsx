@@ -12,6 +12,7 @@ import PlatformUsers from './pages/PlatformUsers';
 import Tenants from './pages/Tenants';
 import Applications from './pages/Applications';
 import ActivityLog from './pages/ActivityLog';
+import AuditLog from './pages/AuditLog';
 import SettingsPage from './pages/Settings';
 import Infrastructure from './pages/Infrastructure';
 import DataIsolation from './pages/DataIsolation';
@@ -93,6 +94,11 @@ export default function App() {
                   <PlatformUsers />
                 </PermissionGuard>
               } />
+              <Route path="/platform/audit" element={
+                <PermissionGuard permission="platform-audit:read" redirectTo="/unauthorized">
+                  <AuditLog scope="platform" />
+                </PermissionGuard>
+              } />
               <Route path="/platform/policies" element={
                 <PermissionGuard permission="policies:read" redirectTo="/unauthorized">
                   <PlaceholderPage title="Global Policies" description="Manage platform-wide access policies" />
@@ -122,6 +128,11 @@ export default function App() {
               <Route path="/activity" element={
                 <PermissionGuard permission="activity:read" redirectTo="/unauthorized">
                   <ActivityLog />
+                </PermissionGuard>
+              } />
+              <Route path="/audit-log" element={
+                <PermissionGuard permission="audit:read" redirectTo="/unauthorized">
+                  <AuditLog scope="tenant" />
                 </PermissionGuard>
               } />
               <Route path="/infrastructure" element={

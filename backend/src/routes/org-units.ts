@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createOrgUnitSchema = z.object({
   name: z.string().min(2).max(100),
@@ -220,6 +221,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${unit.name} (${unit.unitType})`,
         type: 'CONFIG',
       });
+    await audit(request, 'org_unit.created', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { unitType: unit.unitType } });
     
     return reply.status(201).send(unit);
   });
@@ -294,6 +296,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: unit.name,
         type: 'CONFIG',
       });
+    await audit(request, 'org_unit.updated', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { set: data } });
     
     return unit;
   });
@@ -349,6 +352,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: unit.name,
         type: 'CONFIG',
       });
+    await audit(request, 'org_unit.deleted', { resource: { type: 'org_unit', id: unit.id, label: unit.name } });
     
     return reply.status(204).send();
   });
@@ -486,6 +490,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${user.email} to ${unit.name}`,
         type: 'USER',
       });
+    await audit(request, 'org_unit.member_added', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { userId: user.id, user: user.email, membershipId: membership.id } });
     
     return reply.status(201).send(membership);
   });
@@ -524,6 +529,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `user ${memberUserId} from unit ${unitId}`,
         type: 'USER',
       });
+    await audit(request, 'org_unit.member_removed', { resource: { type: 'org_unit', id: unitId }, details: { userId: memberUserId } });
     
     return reply.status(204).send();
   });

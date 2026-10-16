@@ -27,6 +27,7 @@ import { decryptSecret, secretContext } from './secrets.js';
 import { issueRefreshToken, type SessionOwner, type StoredRefreshToken } from './auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from './activity.js';
+import { audit } from './audit.js';
 import { useRecoveryCode, verifyTotp } from './mfa.js';
 
 export function parseExpiryToMs(expiry: string): number {
@@ -248,14 +249,37 @@ export async function completeSignIn(
   return null;
 }
 
-/** After every step of a sign-in succeeded: record it. */
-export async function recordSignIn(owner: SessionOwner, userId: string, how: string) {
+/** After every step of a sign-in succeeded: record it (activity feed and audit log). */
+export async function recordSignIn(request: FastifyRequest, owner: SessionOwner, userId: string, how: string, method: SignInMethod) {
+  let email: string | null = null;
   if (owner === 'platform') {
-    await controlDb.platformUser.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
+    email = (await controlDb.platformUser.update({ where: { id: userId }, data: { lastLoginAt: new Date() }, select: { email: true } })).email;
   } else {
-    await (await dbForTenant(owner.tenantId)).user.updateMany({ where: { id: userId, tenantId: owner.tenantId }, data: { lastLoginAt: new Date() } });
+    const db = await dbForTenant(owner.tenantId);
+    await db.user.updateMany({ where: { id: userId, tenantId: owner.tenantId }, data: { lastLoginAt: new Date() } });
+    email = (await db.user.findFirst({ where: { id: userId, tenantId: owner.tenantId }, select: { email: true } }))?.email ?? null;
   }
   await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId, action: how, target: 'system', type: 'AUTH' });
+  await audit(request, owner === 'platform' ? 'platform.auth.signed_in' : 'auth.signed_in', { details: { method } }, {
+    actor: { type: owner === 'platform' ? 'PLATFORM' : 'USER', id: userId, email },
+    tenantId: owner === 'platform' ? null : owner.tenantId,
+  });
+}
+
+export type SignInMethod = 'password' | 'email-code' | 'two-factor' | 'recovery-code' | 'sso';
+
+/** A sign-in that was refused, in the tenant's (or the platform's) audit log. */
+export async function recordSignInFailure(
+  request: FastifyRequest,
+  owner: SessionOwner,
+  attempt: { email: string; userId?: string | null; method: SignInMethod; reason: string; mfa?: boolean },
+) {
+  const platform = owner === 'platform';
+  const event = attempt.mfa ? (platform ? 'platform.auth.mfa_failed' : 'auth.mfa_failed') : platform ? 'platform.auth.sign_in_failed' : 'auth.sign_in_failed';
+  await audit(request, event, { outcome: 'FAILURE', details: { method: attempt.method, reason: attempt.reason } }, {
+    actor: attempt.userId ? { type: platform ? 'PLATFORM' : 'USER', id: attempt.userId, email: attempt.email } : { type: 'ANONYMOUS', email: attempt.email },
+    tenantId: platform ? null : owner.tenantId,
+  });
 }
 
 /** The signed-in user as the sign-in endpoints return it. */

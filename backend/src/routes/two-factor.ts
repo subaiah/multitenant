@@ -10,6 +10,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { newRecoveryCodes } from '../lib/mfa.js';
 import { consumeMfaCode, getMfaState, mfaRequired, readMfaToken, saveMfaState } from '../lib/sign-in.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 import { codeSchema, enrollment, finishEnrollment, mfaRateLimit } from './mfa.js';
 
 /** The signed-in caller as a session owner. */
@@ -60,6 +61,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     if (!state || state.enabled) throw new AppError('Two-factor is already set up', 409);
     const recoveryCodes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret, body.code);
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'set up two-factor', target: 'system', type: 'AUTH' });
+    await audit(request, owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled');
     return { enabled: true, recoveryCodes };
   });
 
@@ -85,6 +87,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     await checkCode(request);
     await saveMfaState(owner, request.user.userId, { secret: null, enabledAt: null, lastStep: null, recoveryHashes: [] });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'turned off two-factor', target: 'system', type: 'AUTH' });
+    await audit(request, owner === 'platform' ? 'platform.account.mfa_disabled' : 'account.mfa_disabled');
     return { enabled: false };
   });
 
@@ -95,6 +98,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     const { codes, hashes } = newRecoveryCodes();
     await saveMfaState(owner, request.user.userId, { recoveryHashes: hashes });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'made new recovery codes', target: 'system', type: 'AUTH' });
+    await audit(request, owner === 'platform' ? 'platform.account.recovery_codes_regenerated' : 'account.recovery_codes_regenerated');
     return { recoveryCodes: codes };
   });
 };

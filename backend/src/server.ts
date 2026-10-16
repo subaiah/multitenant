@@ -40,6 +40,8 @@ import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { platformRoutes } from './routes/platform.js';
 import { deploymentRoutes } from './routes/deployments.js';
+import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
+import { startAuditArchiving, stopAuditArchiving } from './lib/audit.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 import { authorize } from './middleware/authorize.js';
@@ -193,6 +195,10 @@ async function registerRoutes() {
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });
 
+    // Audit logs: the tenant's, and the platform's (lib/audit.ts)
+    await protectedRoutes.register(auditRoutes, { prefix: '/audit' });
+    await protectedRoutes.register(platformScoped(platformAuditRoutes), { prefix: '/platform-audit' });
+
     // Database configuration
     await protectedRoutes.register(databaseRoutes, { prefix: '/database' });
 
@@ -287,6 +293,7 @@ async function start() {
     // platform usage snapshots fresh
     await resumeProvisioning().catch((err) => fastify.log.error({ err }, 'Resuming provisioning failed'));
     startUsageRefresh((msg) => fastify.log.warn(msg), resumeProvisioning);
+    startAuditArchiving((msg, err) => fastify.log.error({ err }, msg));
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -297,6 +304,7 @@ async function start() {
 const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
   stopUsageRefresh();
+  stopAuditArchiving();
   await disconnectDatabases();
   await fastify.close();
   process.exit(0);

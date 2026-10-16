@@ -5,6 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createAccessRequestSchema = z.object({
   roleId: z.string().uuid(),
@@ -154,6 +155,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Access request for ${role.name}`,
         type: 'USER',
       });
+    await audit(request, 'access_request.created', { resource: { type: 'access_request', id: accessRequest.id, label: role.name }, details: { roleId: data.roleId, scopeType: data.scopeType, scopeId: data.scopeId, reason: data.reason, durationHours: data.duration } });
     
     return reply.status(201).send(accessRequest);
   });
@@ -241,6 +243,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Access request ${id}`,
         type: 'USER',
       });
+    await audit(request, 'access_request.decided', { resource: { type: 'access_request', id }, details: { decision: approved ? 'APPROVED' : 'DENIED', requesterId: accessRequest.requesterId, roleId: accessRequest.roleId, reason: approved ? undefined : reason, validTo: approved ? validTo : undefined } });
     
     return updated;
   });

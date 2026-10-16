@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 import { endAllPlatformSessions, endAllSessions } from '../lib/sessions.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -75,6 +76,10 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     if (invite.tenant) {
       await (await dbForTenant(invite.tenant.id)).user.update({ where: { id: invite.userId }, data });
       await logActivity({ tenantId: invite.tenant.id, userId: invite.userId, action: 'accepted invitation', target: invite.user.email, type: 'USER' });
+      await audit(request, 'auth.invitation_accepted', { resource: { type: 'user', id: invite.userId, label: invite.user.email } }, {
+        actor: { type: 'USER', id: invite.userId, email: invite.user.email },
+        tenantId: invite.tenant.id,
+      });
     } else {
       await controlDb.platformUser.update({ where: { id: invite.userId }, data });
     }
@@ -142,6 +147,10 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
         ...endAllSessions(db, reset.userId),
       ]);
       await logActivity({ tenantId: reset.tenant.id, userId: reset.userId, action: 'reset password', target: reset.user.email, type: 'AUTH' });
+      await audit(request, 'auth.password_reset', { resource: { type: 'user', id: reset.userId, label: reset.user.email } }, {
+        actor: { type: 'USER', id: reset.userId, email: reset.user.email },
+        tenantId: reset.tenant.id,
+      });
     } else {
       await controlDb.$transaction([
         controlDb.platformUser.update({ where: { id: reset.userId }, data: { passwordHash } }),

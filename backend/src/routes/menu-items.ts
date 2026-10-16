@@ -6,6 +6,7 @@ import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '..
 import { permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { audit } from '../lib/audit.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -221,6 +222,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
+    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'created menu item' }, details: { action: 'created menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return reply.status(201).send(menuItem);
   });
@@ -288,6 +290,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
+    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'updated menu item' }, details: { action: 'updated menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return menuItem;
   });
@@ -324,6 +327,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
+    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'deleted menu item' }, details: { action: 'deleted menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return reply.status(204).send();
   });
@@ -376,6 +380,7 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${items.length} items`,
         type: 'CONFIG',
       });
+    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'reordered menu items' }, details: { action: 'reordered menu items', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return { message: 'Menu items reordered successfully' };
   });

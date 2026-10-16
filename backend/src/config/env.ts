@@ -67,6 +67,12 @@ const envSchema = z.object({
   // Require two-factor sign-in for every platform user
   PLATFORM_MFA_REQUIRED: z.enum(['true', 'false']).default('false'),
 
+  // Audit log (lib/audit.ts): entries older than this move to archive files
+  AUDIT_RETENTION_DAYS: z.string().default('365').transform(Number),
+  AUDIT_ARCHIVE_DIR: z.string().default('./audit-archive'),
+  // How often to archive (0 = never automatically; run npm run audit:archive)
+  AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
+
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
   DEV_EXPOSE_OTP: z.enum(['true', 'false']).default('false'),
@@ -104,10 +110,10 @@ const envSchema = z.object({
  * re-encrypt run has moved everything on. Generate one with:
  *   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
  */
-function readSecretKeys(nodeEnv: string): Map<number, Buffer> {
+function readKeys(prefix: string, nodeEnv: string, devKey: string): Map<number, Buffer> {
   const keys = new Map<number, Buffer>();
   for (const [name, value] of Object.entries(process.env)) {
-    const m = /^SECRETS_KEY_V([1-9]\d{0,3})$/.exec(name);
+    const m = new RegExp(`^${prefix}_V([1-9]\\d{0,3})$`).exec(name);
     if (!m || !value) continue;
     const key = Buffer.from(value, 'base64');
     if (key.length !== 32) {
@@ -117,13 +123,22 @@ function readSecretKeys(nodeEnv: string): Map<number, Buffer> {
   }
   if (keys.size === 0) {
     if (nodeEnv === 'production') {
-      throw new Error('SECRETS_KEY_V1 is required in production (32 random bytes, base64)');
+      throw new Error(`${prefix}_V1 is required in production (32 random bytes, base64)`);
     }
     // Development and tests only: a fixed, public key so local data stays readable
-    keys.set(1, Buffer.from('ZGV2LW9ubHktc2VjcmV0cy1rZXktZG8tbm90LXVzZSE=', 'base64'));
+    keys.set(1, Buffer.from(devKey, 'base64'));
   }
   return keys;
 }
+
+const readSecretKeys = (nodeEnv: string) => readKeys('SECRETS_KEY', nodeEnv, 'ZGV2LW9ubHktc2VjcmV0cy1rZXktZG8tbm90LXVzZSE=');
+/**
+ * Keys that sign audit entries (lib/audit.ts): AUDIT_KEY_V1, AUDIT_KEY_V2, ...
+ * like SECRETS_KEY_V*. Kept apart from the database, so whoever can write to
+ * the database still can't forge a consistent audit chain. Never remove an
+ * old version while entries signed with it remain (live or archived).
+ */
+const readAuditKeys = (nodeEnv: string) => readKeys('AUDIT_KEY', nodeEnv, 'ZGV2LW9ubHktYXVkaXQta2V5LWRvLW5vdC11c2UtISE=');
 
 // Parse and validate environment variables
 const env = envSchema.parse(process.env);
@@ -185,9 +200,13 @@ export const config = {
   platformSessionIdleMinutes: env.PLATFORM_SESSION_IDLE_MINUTES,
   platformSessionMaxHours: env.PLATFORM_SESSION_MAX_HOURS,
   platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',
+  auditRetentionDays: env.AUDIT_RETENTION_DAYS,
+  auditArchiveDir: env.AUDIT_ARCHIVE_DIR,
+  auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
 
   /** Encryption keys for stored secrets, by version; see readSecretKeys */
   secretKeys: readSecretKeys(env.NODE_ENV),
+  auditKeys: readAuditKeys(env.NODE_ENV),
 } as const;
 
 export type Config = typeof config;

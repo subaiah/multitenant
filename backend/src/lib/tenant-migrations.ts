@@ -29,6 +29,8 @@ export interface Migration {
 }
 
 export const POLICY = 'tenant_isolation';
+/** Tenant tables tenant roles may only insert into and read (lib/audit.ts) */
+export const APPEND_ONLY_TABLES = ['audit_events'];
 /** Bump when the policy text changes, so the next run replaces existing policies */
 const POLICY_VERSION = 'v1';
 /** Tables the tenant roles never touch */
@@ -237,6 +239,30 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
           ).rows.map((r) => `${s}.${ident(r.t)}`)
         : [];
     const dml = 'SELECT, INSERT, UPDATE, DELETE';
+    // Append-only tables (the audit log): tenant roles may add and read rows, nothing else
+    const appendOnly = tables.filter((t) => APPEND_ONLY_TABLES.includes(t));
+    const readWrite = tables.filter((t) => !APPEND_ONLY_TABLES.includes(t));
+    const lackingInsert = async (role: string) =>
+      appendOnly.length
+        ? (
+            await c.query(
+              `SELECT t FROM unnest($2::text[]) t WHERE NOT has_table_privilege($1, format('%I.%I', $3::text, t), 'INSERT')`,
+              [role, appendOnly, schema],
+            )
+          ).rows.map((r) => `${s}.${ident(r.t)}`)
+        : [];
+    const canAlter = async (role: string) =>
+      appendOnly.length
+        ? (
+            await c.query(
+              `SELECT t FROM unnest($2::text[]) t
+                WHERE has_table_privilege($1, format('%I.%I', $3::text, t), 'UPDATE')
+                   OR has_table_privilege($1, format('%I.%I', $3::text, t), 'DELETE')
+                   OR has_table_privilege($1, format('%I.%I', $3::text, t), 'TRUNCATE')`,
+              [role, appendOnly, schema],
+            )
+          ).rows.map((r) => `${s}.${ident(r.t)}`)
+        : [];
 
     // Tenant roles: rows in the tenant tables, nothing else, no DDL
     if (target.kind !== 'shared') await c.query(`REVOKE ALL ON SCHEMA ${s} FROM PUBLIC`);
@@ -248,8 +274,12 @@ async function secureTarget(c: pg.Client, target: Target, access: TargetAccess) 
       if (!(await c.query(`SELECT has_function_privilege($1, $2, 'EXECUTE') AS ok`, [role, `${s}.current_tenant_id()`])).rows[0].ok) {
         await c.query(`GRANT EXECUTE ON FUNCTION ${s}.current_tenant_id() TO ${r}`);
       }
-      const missing = await lacking(role, tables);
+      const missing = await lacking(role, readWrite);
       if (missing.length) await c.query(`GRANT ${dml} ON ${missing.join(', ')} TO ${r}`);
+      const missingInsert = await lackingInsert(role);
+      if (missingInsert.length) await c.query(`GRANT SELECT, INSERT ON ${missingInsert.join(', ')} TO ${r}`);
+      const tooMuch = await canAlter(role);
+      if (tooMuch.length) await c.query(`REVOKE UPDATE, DELETE, TRUNCATE ON ${tooMuch.join(', ')} FROM ${r}`);
     }
     // Platform role: every table in the schema (it bypasses row-level security)
     const all = (await c.query(`SELECT tablename FROM pg_tables WHERE schemaname = $1`, [schema])).rows.map((r) => r.tablename as string);
