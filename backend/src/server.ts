@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
+import { serializeRequest } from './lib/log-redaction.js';
 import { controlDb, disconnectDatabases } from './lib/prisma.js';
 import { resumeProvisioning } from './lib/provisioning.js';
 import { checkTenantServer } from './lib/tenant-server-check.js';
@@ -60,6 +61,8 @@ const fastify = Fastify({
   trustProxy: config.trustProxy,
   logger: {
     level: config.logLevel,
+    // Request lines without the secrets some URLs carry (lib/log-redaction.ts)
+    serializers: { req: serializeRequest },
     transport: config.nodeEnv === 'development' 
       ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z' } }
       : undefined,

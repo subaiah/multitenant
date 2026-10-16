@@ -154,7 +154,7 @@ The server is safe to run several times behind a load balancer:
 ## Monitoring
 
 - **Health:** `GET /api/health`, liveness with no database access. `GET /api/health/detailed` also checks the control plane and the shared tenant database.
-- **Logs:** JSON on standard output, through `docker compose logs`, or ship them with your log collector. Request headers and cookies are not logged.
+- **Logs:** JSON on standard output, through `docker compose logs`, or ship them with your log collector. Request lines leave out headers and cookies, and the invitation and reset tokens and sign-in codes that some URLs carry.
 - **Worth alerting on:**
   - the API container restarting;
   - `migrate` failing;

@@ -229,3 +229,13 @@ test('the release step adds new menu entries and keeps changes to existing ones'
   assert.equal(await controlDb.menuItem.count({ where: { portal: 'TENANT', parentId: access.id, path: '/users' } }), 1);
   await controlDb.menuItem.update({ where: { id: users.id }, data: { label: 'Platform Users' } });
 });
+
+test('request logs leave out tokens and sign-in codes', async () => {
+  const { redactUrl } = await import('../src/lib/log-redaction.js');
+  assert.equal(redactUrl('/bff/account/invitations/acme.abc123'), '/bff/account/invitations/[redacted]');
+  assert.equal(redactUrl('/bff/account/invitations/accept'), '/bff/account/invitations/accept');
+  assert.equal(redactUrl('/bff/account/password/reset/platform.xyz'), '/bff/account/password/reset/[redacted]');
+  assert.equal(redactUrl('/bff/account/password/reset'), '/bff/account/password/reset');
+  assert.equal(redactUrl('/bff/auth/sso/callback?code=c0de&state=s7&iss=https%3A%2F%2Fidp'), '/bff/auth/sso/callback?code=[redacted]&state=[redacted]&iss=https%3A%2F%2Fidp');
+  assert.equal(redactUrl('/users?search=ann&page=2'), '/users?search=ann&page=2');
+});

@@ -114,7 +114,7 @@ try {
   check('platform "coming soon" pages are hidden', !/Global Policies/.test(platformMenu), platformMenu.replace(/\s+/g, ' '));
 
   // ---- 2. a tenant in its own database
-  await admin.getByRole('link', { name: 'Tenants' }).click();
+  await admin.goto(`${APP}/platform/tenants`);
   await admin.getByRole('button', { name: 'New tenant' }).click();
   const dlg = admin.getByRole('dialog', { name: 'New tenant' });
   await dlg.getByLabel('Organization name').fill(TENANT.name);
