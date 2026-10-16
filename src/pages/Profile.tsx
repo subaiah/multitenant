@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase } from 'lucide-react';
+import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound } from 'lucide-react';
 import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
+import { TwoFactorSettings } from '../components/TwoFactorSettings';
 
 interface UserInfo {
   id: string;
@@ -232,6 +233,15 @@ export default function Profile() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Two-factor sign-in */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <KeyRound size={20} className="text-blue-500" />
+              Two-factor sign-in
+            </h3>
+            <TwoFactorSettings />
           </div>
 
           {/* Group Memberships */}

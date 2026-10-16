@@ -3,10 +3,14 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
+import { ssoRedirectUri } from '../lib/sso.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
-  sessionTimeout: z.number().min(5).max(1440).optional(),
+  /** Idle minutes before a session ends */
+  sessionTimeout: z.number().int().min(5).max(1440).optional(),
+  /** Hours after signing in when a session ends, however active */
+  maxSessionHours: z.number().int().min(1).max(720).optional(),
   passwordPolicy: z.enum(['STANDARD', 'STRONG', 'VERY_STRONG']).optional(),
   ssoOnly: z.boolean().optional(),
   otpEnabled: z.boolean().optional(),
@@ -55,7 +59,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Authentication configuration not found', 404);
     }
 
-    return config;
+    // The address to register with identity providers
+    return { ...config, ssoRedirectUri: ssoRedirectUri() };
   });
 
   // Update auth config
@@ -68,7 +73,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'object',
         properties: {
           mfaEnabled: { type: 'boolean' },
-          sessionTimeout: { type: 'number', minimum: 5, maximum: 1440 },
+          sessionTimeout: { type: 'integer', minimum: 5, maximum: 1440 },
+          maxSessionHours: { type: 'integer', minimum: 1, maximum: 720 },
           passwordPolicy: { type: 'string', enum: ['STANDARD', 'STRONG', 'VERY_STRONG'] },
           ssoOnly: { type: 'boolean' },
           otpEnabled: { type: 'boolean' },

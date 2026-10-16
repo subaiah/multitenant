@@ -14,7 +14,7 @@ const ROUTES = join(import.meta.dirname, '..', 'src', 'routes');
 // The product's routes (src/product) follow the same rules
 const PRODUCT = join(import.meta.dirname, '..', 'src', 'product');
 // Registered outside the authenticated scope (login, session, health)
-const PUBLIC_FILES = new Set(['auth.ts', 'bff-auth.ts', 'account.ts', 'health.ts']);
+const PUBLIC_FILES = new Set(['auth.ts', 'bff-auth.ts', 'mfa.ts', 'account.ts', 'health.ts']);
 const catalog = new Set<string>(PERMISSIONS);
 
 interface Declared {

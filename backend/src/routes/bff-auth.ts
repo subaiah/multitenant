@@ -1,10 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import {
-  activeSessions, findRefreshToken, issueRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
+  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
   type SessionOwner,
 } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -15,6 +14,10 @@ import { otpEmail } from '../lib/email-templates.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
+import { assertRefreshAllowed, completeSignIn, recordSignIn, startSession, type SignInResult } from '../lib/sign-in.js';
+import { mfaRoutes } from './mfa.js';
+import { finishSso, SsoError, ssoRedirectUri, startSso, userForIdentity } from '../lib/sso.js';
+import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
 
 // Validation schemas
@@ -35,61 +38,27 @@ const otpVerifySchema = z.object({
   code: z.string().length(6),
 });
 
-// Helper function to parse expiry string to milliseconds
-function parseExpiryToMs(expiry: string): number {
-  const match = expiry.match(/^(\d+)([smhd])$/);
-  if (!match) throw new Error('Invalid expiry format');
-  
-  const value = parseInt(match[1]);
-  const unit = match[2];
-  
-  switch (unit) {
-    case 's': return value * 1000;
-    case 'm': return value * 60 * 1000;
-    case 'h': return value * 60 * 60 * 1000;
-    case 'd': return value * 24 * 60 * 60 * 1000;
-    default: throw new Error('Invalid expiry unit');
-  }
-}
+/** What a sign-in step returns when two-factor comes next (no session yet). */
+const mfaNext = (r: NonNullable<SignInResult>) => ({
+  message: r.mfa === 'verify' ? 'Enter the code from your authenticator app' : 'Set up two-factor sign-in to continue',
+  mfa: r.mfa,
+  mfaToken: r.mfaToken,
+});
 
-/**
- * Start a session: short-lived access token and a refresh token (stored in
- * the account's own plane), both as httpOnly cookies.
- */
-async function startSession(
-  fastify: FastifyInstance,
-  request: FastifyRequest,
-  reply: FastifyReply,
-  owner: SessionOwner,
-  user: { id: string; userType: string },
-  familyId?: string,
-) {
-  const tenantId = owner === 'platform' ? undefined : owner.tenantId;
-  const accessToken = fastify.jwt.sign(
-    { userId: user.id, tenantId, userType: user.userType as never, type: 'access' },
-    { expiresIn: config.accessTokenExpiry },
-  );
-  const refreshExpiryMs = parseExpiryToMs(config.refreshTokenExpiry);
-  const refreshToken = await issueRefreshToken(
-    owner,
-    user.id,
-    new Date(Date.now() + refreshExpiryMs),
-    { userAgent: request.headers['user-agent'], ipAddress: request.ip },
-    familyId,
-  );
-
-  const secure = config.nodeEnv === 'production';
-  reply.setCookie('access_token', accessToken, {
-    httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: parseExpiryToMs(config.accessTokenExpiry) / 1000,
-  });
-  reply.setCookie('refresh_token', refreshToken, {
-    httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: refreshExpiryMs / 1000,
-  });
+/** Back to the sign-in page with a message (SSO happens in full-page redirects, not API calls). */
+function ssoErrorRedirect(slug: string, err: unknown): string {
+  const code = err instanceof SsoError ? err.code : err instanceof AppError && err.statusCode === 404 ? 'SSO_UNAVAILABLE' : 'SSO_FAILED';
+  const message = err instanceof SsoError || err instanceof AppError ? err.message : 'Single sign-on failed';
+  const params = new URLSearchParams({ sso_error: code, message });
+  return `${config.frontendUrl}/${slug ? `${encodeURIComponent(slug)}/` : ''}login?${params}`;
 }
 
 const portalOf = (userType: string) => (userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT');
 
 export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
+  // Two-factor steps of signing in (/bff/auth/mfa/...)
+  await fastify.register(mfaRoutes, { prefix: '/mfa' });
+
   // Login endpoint - sets httpOnly cookies
   fastify.post('/login', {
     config: { rateLimit: loginRateLimit('bff') },
@@ -119,9 +88,9 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       if (user.status !== 'ACTIVE') {
         throw new AppError('User account is not active', 403);
       }
-      await startSession(fastify, request, reply, 'platform', user);
-      await controlDb.platformUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-      await logActivity({ tenantId: null, userId: user.id, action: 'logged in via BFF', target: 'system', type: 'AUTH' });
+      const next = await completeSignIn(fastify, request, reply, 'platform', user);
+      if (next) return mfaNext(next);
+      await recordSignIn('platform', user.id, 'logged in via BFF');
       return {
         message: 'Login successful',
         user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: 'PLATFORM' },
@@ -144,9 +113,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User account is not active', 403);
     }
 
-    await startSession(fastify, request, reply, { tenantId: tenant.id, tenantSlug: tenant.slug }, user);
-    await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    await logActivity({ tenantId: tenant.id, userId: user.id, action: 'logged in via BFF', target: 'system', type: 'AUTH' });
+    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
+    const next = await completeSignIn(fastify, request, reply, owner, user);
+    if (next) return mfaNext(next);
+    await recordSignIn(owner, user.id, 'logged in via BFF');
 
     return {
       message: 'Login successful',
@@ -287,15 +257,64 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User account is not active', 403);
     }
 
-    await startSession(fastify, request, reply, { tenantId: tenant.id, tenantSlug: tenant.slug }, user);
-    await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    await logActivity({ tenantId: tenant.id, userId: user.id, action: 'logged in via OTP', target: 'system', type: 'AUTH' });
+    const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
+    const next = await completeSignIn(fastify, request, reply, owner, user);
+    if (next) return mfaNext(next);
+    await recordSignIn(owner, user.id, 'logged in via OTP');
 
     return {
       message: 'Login successful',
       user: { id: user.id, email: user.email, name: user.name, userType: user.userType, portal: portalOf(user.userType) },
       tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
     };
+  });
+
+  // Single sign-on (lib/sso.ts). The browser is sent here, then to the
+  // identity provider, which sends it back to /sso/callback; that starts the
+  // session and returns the browser to the sign-in page, which goes on in.
+  fastify.get('/sso/start', {
+    schema: {
+      tags: ['bff-auth'],
+      summary: 'Start signing in with an identity provider (browser redirect)',
+      querystring: {
+        type: 'object',
+        required: ['tenantSlug', 'providerId'],
+        properties: { tenantSlug: { type: 'string' }, providerId: { type: 'string' } },
+      },
+    },
+  }, async (request, reply) => {
+    const { tenantSlug, providerId } = request.query as { tenantSlug: string; providerId: string };
+    try {
+      return reply.redirect((await startSso(tenantSlug, providerId)).href);
+    } catch (err) {
+      request.log.warn({ err }, 'Single sign-on could not start');
+      return reply.redirect(ssoErrorRedirect(tenantSlug, err));
+    }
+  });
+
+  fastify.get('/sso/callback', {
+    schema: { tags: ['bff-auth'], summary: 'Where identity providers return the browser' },
+  }, async (request, reply) => {
+    const url = new URL(request.url, ssoRedirectUri());
+    let slug = tokenSlug(url.searchParams.get('state') ?? '') ?? '';
+    try {
+      const done = await finishSso(url);
+      slug = done.slug;
+      const { user, how } = await userForIdentity(done.db, done.tenant.id, done.provider, done.identity);
+      if (user.status === 'INACTIVE') throw new SsoError('Your account is not active', 'SSO_INACTIVE');
+      // Signing in through the organization's provider accepts an invitation
+      if (user.status === 'PENDING') {
+        await done.db.user.updateMany({ where: { id: user.id, tenantId: done.tenant.id }, data: { status: 'ACTIVE' } });
+      }
+      const owner = { tenantId: done.tenant.id, tenantSlug: done.tenant.slug };
+      // Two-factor at sign-in is the identity provider's job here
+      await startSession(fastify, request, reply, owner, user);
+      await recordSignIn(owner, user.id, `logged in with ${done.provider.provider}${how === 'created' ? ' (new account)' : ''}`);
+      return reply.redirect(`${config.frontendUrl}/${encodeURIComponent(done.tenant.slug)}/login`);
+    } catch (err) {
+      request.log.warn({ err }, 'Single sign-on failed');
+      return reply.redirect(ssoErrorRedirect(slug, err));
+    }
   });
 
   // Refresh token endpoint
@@ -327,10 +346,22 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     if (storedToken.user.status !== 'ACTIVE') {
       throw new AppError('User account is not active', 403);
     }
+    // Idle too long, or past the maximum session length: the session is over
+    try {
+      await assertRefreshAllowed(storedToken);
+    } catch (err) {
+      await revokeRefreshToken(storedToken, 'family');
+      reply.clearCookie('access_token', { path: '/' });
+      reply.clearCookie('refresh_token', { path: '/' });
+      throw err;
+    }
 
     // Rotate: revoke the old token, issue a new one in the same family
     await revokeRefreshToken(storedToken);
-    await startSession(fastify, request, reply, storedToken.owner, storedToken.user, storedToken.familyId);
+    await startSession(fastify, request, reply, storedToken.owner, storedToken.user, {
+      familyId: storedToken.familyId,
+      sessionStartedAt: storedToken.sessionStartedAt,
+    });
 
     return {
       message: 'Token refreshed successfully',

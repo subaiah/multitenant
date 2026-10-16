@@ -34,14 +34,11 @@ test('BFF login requires the correct password', async () => {
   await login(A, A.userEmail);
 });
 
-test('legacy /auth/login requires the correct password', async () => {
-  const noPw = await api('POST', '/auth/login', { body: { email: A.userEmail, tenantId: A.tenantId } });
-  assert.equal(noPw.status, 400);
-  const wrong = await api('POST', '/auth/login', { body: { email: A.userEmail, tenantId: A.tenantId, password: 'nope' } });
-  assert.equal(wrong.status, 401);
-  const ok = await api('POST', '/auth/login', { body: { email: A.userEmail, tenantId: A.tenantId, password: PASSWORD } });
-  assert.equal(ok.status, 200);
-  assert.ok(ok.json.token);
+test('the old sign-in routes are gone (they skipped two-factor and session rules)', async () => {
+  for (const path of ['/auth/login', '/auth/password-login', '/auth/otp/request', '/auth/otp/verify', '/auth/oauth/initiate', '/auth/oauth/callback']) {
+    const res = await api('POST', path, { body: { email: A.userEmail, tenantId: A.tenantId, tenantSlug: A.slug, password: PASSWORD } });
+    assert.equal(res.status, 404, path);
+  }
 });
 
 // ---------------------------------------------------------------- tenant isolation

@@ -1,436 +1,106 @@
-# Authentication Methods Guide
+# Signing in
 
-This guide covers all authentication methods supported by the multi-tenant platform.
+How people sign in, and the rules every session follows. Code: `src/routes/bff-auth.ts`
+(the endpoints), `src/lib/sign-in.ts` (sessions and two-factor), `src/lib/sso.ts`
+(single sign-on), `src/lib/mfa.ts` (authenticator codes).
 
-## Overview
+All sign-in goes through `/bff/auth/*`. The session is two httpOnly cookies: a short
+access token and a rotating refresh token. The old `/auth/login`, `/auth/otp/*` and
+`/auth/oauth/*` routes are gone; they skipped two-factor and the session rules.
 
-The platform supports three authentication methods:
+## Ways to sign in
 
-1. **SSO (Single Sign-On)** - Enterprise identity providers
-2. **Password Login** - Traditional email/password authentication
-3. **OTP (One-Time Password)** - Passwordless authentication via email
+| Way | Endpoint | Two-factor |
+| --- | --- | --- |
+| Email and password | `POST /bff/auth/login` | Yes, when set up or required |
+| Emailed one-time code | `POST /bff/auth/otp/request`, `POST /bff/auth/otp/verify` | Yes, when set up or required |
+| Single sign-on | `GET /bff/auth/sso/start` → identity provider → `GET /bff/auth/sso/callback` | No: the identity provider's own sign-in (and its MFA) applies |
 
-## 1. SSO Authentication
+Platform users sign in with a password on the `platform` slug; single sign-on is for tenants.
 
-### Supported Providers
+## Single sign-on
 
-- **Microsoft Entra ID** (Azure AD)
-- **Google Workspace**
-- **GitHub**
-- **Okta**
-- **Auth0**
-- **Custom OIDC**
+Each tenant adds identity providers on the Authentication page. Register the
+**redirect URI** shown there (`BFF_URL` + `/bff/auth/sso/callback`) with the provider.
 
-### Configuration
+| Provider | What to enter | How it signs in |
+| --- | --- | --- |
+| Microsoft Entra ID | Client ID, secret, directory (tenant) ID | OpenID Connect, issuer `login.microsoftonline.com/<directory>/v2.0`; the token's `tid` must match |
+| Google | Client ID, secret | OpenID Connect, `accounts.google.com`; email must be verified |
+| Okta | Client ID, secret, Okta domain | OpenID Connect, issuer `https://<domain>` |
+| Auth0 | Client ID, secret, Auth0 domain | OpenID Connect, issuer `https://<domain>/` |
+| Custom OIDC | Client ID, secret, issuer URL | OpenID Connect via the issuer's discovery document |
+| GitHub | Client ID, secret | OAuth 2; the primary verified email from the GitHub API |
 
-Each tenant can configure multiple SSO providers in the Authentication settings page.
+The flow uses the authorization code with PKCE, a `state` (single use, 10 minutes, kept in
+`oauth_sessions`) and, for OpenID Connect, a `nonce` and a signed ID token checked by
+`openid-client`.
 
-### User Flow
+Who signed in is matched to a user like this:
 
-1. User visits tenant login page (e.g., `/acme-corp/login`)
-2. User sees available SSO providers
-3. User clicks on a provider (e.g., "Continue with Microsoft")
-4. User is redirected to provider's login page
-5. After authentication, user is redirected back to the application
-6. If user doesn't exist and auto-provisioning is enabled, account is created automatically
+1. A user already linked to this provider's **subject** (`external_identities`). Later
+   sign-ins match on the subject only, so a changed or reused email at the provider can't
+   take over an account.
+2. Otherwise a user with the same **verified** email, who is then linked.
+3. Otherwise, if the provider has *auto-provision* on, a new Tenant User is created and linked.
 
-### Tenant Settings
+An invited (pending) user who signs in this way is activated. Inactive users are refused.
+Problems come back to the sign-in page as `?sso_error=<code>&message=...`
+(`SSO_EXPIRED`, `SSO_DENIED`, `SSO_UNVERIFIED`, `SSO_NO_ACCOUNT`, `SSO_MISCONFIGURED`,
+`SSO_UNAVAILABLE`, `SSO_FAILED`).
 
-- **SSO Only**: When enabled, users can only authenticate via SSO (no password/OTP)
-- **Auto-Provisioning**: Automatically create user accounts on first SSO login
+Outside production, plain-http identity providers are allowed (local testing).
 
-## 2. Password Login
+## Two-factor (authenticator apps)
 
-### Overview
+TOTP (RFC 6238: 6 digits, 30-second steps, SHA-1), which every authenticator app supports.
 
-Traditional email and password authentication for users who have set a password.
+- **Required by the organization**: Authentication page → *Require two-factor sign-in*.
+  Platform users: `PLATFORM_MFA_REQUIRED=true`.
+- **Optional for anyone**: Profile → *Two-factor sign-in* (platform users: Platform Users page).
 
-### User Flow
+After a correct password or emailed code the endpoint returns `{ mfa: 'verify' | 'enroll', mfaToken }`
+instead of setting cookies. The MFA token is signed with its own key, lasts 10 minutes and
+can't be used as a session. Then:
 
-1. User visits tenant login page
-2. User clicks "Sign in with Email" or "Sign In with Password"
-3. User enters email and password
-4. System validates credentials
-5. User is logged in and redirected to dashboard
+- `POST /bff/auth/mfa/verify { mfaToken, code }`: a code from the app, or a recovery code.
+- `POST /bff/auth/mfa/enroll/start { mfaToken }` and `POST /bff/auth/mfa/enroll/confirm { enrollToken, code }`:
+  set up an app while signing in, when it's required and not set up yet.
 
-### Setting a Password
+Rules:
 
-Users can set a password via the API:
+- The secret is encrypted at rest (`lib/secrets.ts`) and shown only while setting up.
+- A code works for its 30-second step and one step either side, and only once (the last
+  used step is stored; two simultaneous requests can't both use it).
+- Ten single-use recovery codes are made when it's set up, stored as SHA-256 hashes and
+  shown once. New ones can be made from the profile (with a current code).
+- Five wrong codes per account per 15 minutes, however many MFA tokens are fetched.
+- Turning it off needs a current code, and isn't possible while the organization requires it.
+- An admin with `users:update` can reset a user's two-factor (lost phone): `POST /users/:id/mfa/reset`.
+  Platform admins: `POST /platform/users/:id/mfa/reset`. The user sets it up again at the next sign-in.
 
-```bash
-POST /auth/set-password
-Authorization: Bearer <token>
-Content-Type: application/json
+Self-service endpoints (signed in): `GET /bff/two-factor`, `POST /bff/two-factor/enroll/start`,
+`POST /bff/two-factor/enroll/confirm`, `POST /bff/two-factor/recovery-codes`, `POST /bff/two-factor/disable`.
 
-{
-  "password": "your-secure-password"
-}
-```
+## Sessions
 
-### Password Requirements
+Every session has two limits, checked by the server:
 
-Password policies are configurable per tenant:
+| Limit | Tenants (Authentication page) | Platform users (env) |
+| --- | --- | --- |
+| Inactivity: no requests for this long ends the session | *Sign out after inactivity*, minutes (default 60) | `PLATFORM_SESSION_IDLE_MINUTES` (30) |
+| Maximum length: from signing in, however active | *Maximum session length*, hours (default 12) | `PLATFORM_SESSION_MAX_HOURS` (12) |
 
-- **STANDARD**: Minimum 8 characters
-- **STRONG**: Minimum 12 characters, mixed case, numbers
-- **VERY_STRONG**: Minimum 16 characters, special characters
+How:
 
-### Test Credentials
-
-For development, test users are seeded with passwords:
-
-- **Admin**: `admin@<tenant-slug>.com` / `admin123`
-- **User**: `user@<tenant-slug>.com` / `user123`
-
-Example:
-- Email: `admin@acme-corp.com`
-- Password: `admin123`
-
-## 3. OTP (One-Time Password) Login
-
-### Overview
-
-Passwordless authentication using a 6-digit code sent to the user's email.
-
-### User Flow
-
-1. User visits tenant login page
-2. User enters email address
-3. User clicks "Sign In with OTP"
-4. System generates a 6-digit OTP and sends it via email
-5. **In Development**: OTP is displayed on the login page
-6. **In Production**: OTP is sent to user's email
-7. User enters the OTP code
-8. System validates the OTP
-9. User is logged in and redirected to dashboard
-
-### Configuration
-
-OTP settings are configurable per tenant:
-
-- **OTP Enabled**: Enable/disable OTP authentication
-- **OTP Expiry**: How long the OTP is valid (default: 5 minutes)
-
-### Development Mode
-
-In development mode (`NODE_ENV=development`), the OTP is displayed directly on the login page in a prominent green box:
-
-```
-┌─────────────────────────────────────┐
-│  Development Mode - Your OTP:       │
-│  ┌───────────────────────────────┐ │
-│  │         123456                │ │
-│  └───────────────────────────────┘ │
-│  This OTP is shown for development │
-│  purposes only                     │
-└─────────────────────────────────────┘
-```
-
-### Production Mode
-
-In production, the OTP is sent via email. You need to integrate with an email service:
-
-- SendGrid
-- AWS SES
-- Mailgun
-- Postmark
-
-Example integration (to be implemented in `backend/src/routes/auth.ts`):
-
-```typescript
-// In production, send OTP via email
-await sendOtpEmail(email, code);
-```
-
-### Security Features
-
-- OTP expires after configured time (default: 5 minutes)
-- OTP can only be used once
-- OTP is tied to specific tenant and email
-- Rate limiting prevents brute force attacks
-- Failed attempts are logged
-
-## API Endpoints
-
-### Request OTP
-
-```bash
-POST /auth/otp/request
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "tenantSlug": "acme-corp"
-}
-```
-
-**Response (Development)**:
-```json
-{
-  "message": "OTP generated successfully",
-  "otp": "123456",
-  "expiresAt": "2024-01-15T10:30:00.000Z"
-}
-```
-
-**Response (Production)**:
-```json
-{
-  "message": "OTP sent successfully",
-  "expiresAt": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### Verify OTP
-
-```bash
-POST /auth/otp/verify
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "tenantSlug": "acme-corp",
-  "code": "123456"
-}
-```
-
-**Response**:
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "name": "John Doe",
-    "role": "USER"
-  },
-  "tenant": {
-    "id": "uuid",
-    "name": "Acme Corporation"
-  }
-}
-```
-
-### Password Login
-
-```bash
-POST /auth/password-login
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "tenantSlug": "acme-corp",
-  "password": "your-password"
-}
-```
-
-**Response**:
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "name": "John Doe",
-    "role": "USER"
-  },
-  "tenant": {
-    "id": "uuid",
-    "name": "Acme Corporation"
-  }
-}
-```
-
-### Set Password
-
-```bash
-POST /auth/set-password
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "password": "your-secure-password"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Password set successfully"
-}
-```
-
-## Tenant Configuration
-
-### Authentication Settings
-
-Each tenant can configure authentication methods in the Authentication page:
-
-1. **SSO Providers**: Add/remove SSO providers
-2. **SSO Only**: Restrict to SSO only (no password/OTP)
-3. **OTP Enabled**: Enable/disable OTP authentication
-4. **OTP Expiry**: Set OTP validity duration
-5. **Password Policy**: Set password requirements
-6. **Session Timeout**: Configure session duration
-
-### Example Configurations
-
-#### Enterprise Tenant (SSO Only)
-```json
-{
-  "ssoOnly": true,
-  "otpEnabled": false,
-  "providers": ["ENTRA", "OKTA"]
-}
-```
-
-#### Startup Tenant (All Methods)
-```json
-{
-  "ssoOnly": false,
-  "otpEnabled": true,
-  "otpExpiry": 5,
-  "passwordPolicy": "STANDARD",
-  "providers": ["GOOGLE", "GITHUB"]
-}
-```
-
-#### Regulated Tenant (SSO + MFA)
-```json
-{
-  "ssoOnly": true,
-  "mfaEnabled": true,
-  "otpEnabled": false,
-  "providers": ["ENTRA"],
-  "passwordPolicy": "VERY_STRONG"
-}
-```
-
-## Security Best Practices
-
-### For Production
-
-1. **Use HTTPS**: All authentication endpoints must use HTTPS
-2. **Rate Limiting**: Implement rate limiting on auth endpoints
-3. **Account Lockout**: Lock accounts after multiple failed attempts
-4. **Audit Logging**: Log all authentication events
-5. **Email Verification**: Verify email addresses before allowing OTP
-6. **Password Hashing**: Use bcrypt or argon2 (currently using PBKDF2)
-7. **Session Management**: Implement proper session timeout and refresh
-8. **CSRF Protection**: Use CSRF tokens for state-changing operations
-
-### For Development
-
-1. **Never expose OTP in production**: Only show OTP in development mode
-2. **Use strong test passwords**: Don't use weak passwords even in dev
-3. **Rotate secrets**: Regularly rotate JWT secrets and API keys
-4. **Monitor logs**: Watch for suspicious authentication patterns
-
-## Troubleshooting
-
-### OTP Not Received (Production)
-
-1. Check email service configuration
-2. Verify email address is correct
-3. Check spam/junk folder
-4. Verify email service quotas and limits
-5. Check backend logs for email sending errors
-
-### Password Login Fails
-
-1. Verify email and password are correct
-2. Check if user account is active
-3. Verify tenant is not suspended
-4. Check if SSO-only mode is enabled
-5. Verify password meets policy requirements
-
-### SSO Login Fails
-
-1. Verify SSO provider configuration
-2. Check client ID and secret are correct
-3. Verify redirect URIs are configured correctly
-4. Check provider's admin console for errors
-5. Verify user has access to the application in provider
-
-## Migration Guide
-
-### Adding OTP to Existing Tenant
-
-1. Go to Authentication settings
-2. Enable "OTP Authentication"
-3. Set OTP expiry duration
-4. Save changes
-5. Users can now use OTP login
-
-### Enabling Password Login
-
-1. User logs in via SSO or OTP
-2. User navigates to profile settings
-3. User sets a password
-4. Password login is now available
-
-### Switching to SSO Only
-
-1. Configure SSO providers
-2. Test SSO login works
-3. Enable "SSO Only" mode
-4. Password and OTP login will be disabled
-5. Users must use SSO to login
-
-## Database Schema
-
-### User Model
-
-```prisma
-model User {
-  id              String     @id @default(uuid())
-  tenantId        String     @map("tenant_id")
-  email           String
-  name            String?
-  passwordHash    String?    @map("password_hash")  // Nullable for SSO-only users
-  role            UserRole   @default(USER)
-  status          UserStatus @default(ACTIVE)
-  lastLoginAt     DateTime?  @map("last_login_at")
-  createdAt       DateTime   @default(now()) @map("created_at")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
-}
-```
-
-### OTP Model
-
-```prisma
-model OtpCode {
-  id          String    @id @default(uuid())
-  tenantId    String    @map("tenant_id")
-  email       String
-  code        String
-  expiresAt   DateTime  @map("expires_at")
-  verified    Boolean   @default(false)
-  createdAt   DateTime  @default(now()) @map("created_at")
-}
-```
-
-### Auth Config Model
-
-```prisma
-model AuthConfig {
-  id              String         @id @default(uuid())
-  tenantId        String         @unique @map("tenant_id")
-  mfaEnabled      Boolean        @default(false) @map("mfa_enabled")
-  sessionTimeout  Int            @default(60) @map("session_timeout")
-  passwordPolicy  PasswordPolicy @default(STANDARD) @map("password_policy")
-  ssoOnly         Boolean        @default(false) @map("sso_only")
-  otpEnabled      Boolean        @default(true) @map("otp_enabled")
-  otpExpiry       Int            @default(5) @map("otp_expiry")
-}
-```
-
-## Summary
-
-The multi-tenant platform provides flexible authentication options:
-
-- **SSO**: Best for enterprise customers with existing identity providers
-- **Password**: Traditional authentication for users who prefer it
-- **OTP**: Modern passwordless authentication with email verification
-
-All methods can be enabled/disabled per tenant, providing maximum flexibility for different use cases and security requirements.
+- The access token carries the session id (`sid`, the refresh-token family). Requests
+  update the session's *last seen* time, at most once a minute.
+- An access token never lives longer than the inactivity limit or the time left in the
+  session, so an idle browser holds nothing usable.
+- A refresh past either limit is refused with `SESSION_IDLE` or `SESSION_MAX`; the session
+  is revoked and the cookies cleared. Refreshing keeps the session's start time.
+- The browser goes to the sign-in page with a notice (*signed out after a period of
+  inactivity* / *reached its maximum length*).
+
+Access tokens must be session tokens (`type: 'access'`): other tokens signed with the same
+key, such as the `/bff/token/exchange` service tokens, are refused as sessions.

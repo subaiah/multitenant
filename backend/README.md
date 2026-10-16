@@ -167,11 +167,12 @@ Response:
 ### Login
 
 ```bash
-curl -X POST http://localhost:4000/auth/login \
+curl -X POST http://localhost:4000/bff/auth/login -c cookies.txt \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "admin@example.com",
-    "tenantId": "uuid"
+    "email": "admin@acme-corp.com",
+    "password": "admin123",
+    "tenantSlug": "acme-corp"
   }'
 ```
 
@@ -189,7 +190,7 @@ curl -X GET http://localhost:4000/tenants/current \
 
 ### Authentication
 - `POST /auth/register` - Register new tenant and admin user
-- `POST /auth/login` - Login and get JWT token
+- `POST /bff/auth/login` - Sign in; sets the session cookies (see docs/AUTHENTICATION_METHODS.md for two-factor and single sign-on)
 - `GET /auth/verify` - Verify JWT token
 
 ### Tenants
@@ -348,12 +349,36 @@ npm run build        # Compile TypeScript
 npm start            # Start production server
 
 # Database
-npm run prisma:generate  # Generate Prisma client
-npm run prisma:migrate   # Run migrations
-npm run prisma:studio    # Open Prisma Studio
-npm run prisma:seed      # Seed database
-npm run db:push          # Push schema to database
-npm run db:reset         # Reset database
+npm run prisma:generate        # Generate Prisma clients
+npx prisma migrate deploy      # Apply control-plane migrations (prisma/control/migrations)
+npm run tenant:migrate         # Apply tenant migrations to every tenant (prisma/tenant/migrations)
+npm run prisma:migrate         # Make a control-plane migration after changing prisma/control
+npm run prisma:migrate:tenant  # Make a tenant migration after changing prisma/tenant
+npm run prisma:studio          # Open Prisma Studio
+npm run prisma:seed            # Seed demo data
+```
+
+### Database setup and upgrades
+
+Migrations are committed for both planes and are the history of the production schema.
+
+A new database:
+
+```bash
+psql -U postgres -v shared_db=multitenant_tenants -v owner_password=... -v provisioner_password=... \
+  -v platform_password=... -f prisma/tenant/setup-roles.sql
+npx prisma migrate deploy
+npm run tenant:migrate
+npm run prisma:seed
+```
+
+A database created earlier with `db push` (before migrations were committed): mark the
+starting point as applied once, then deploy as usual.
+
+```bash
+npx prisma migrate resolve --applied 00000000000000_init
+npx prisma migrate deploy
+npm run tenant:migrate   # tenants already on 00000000000000_baseline get the newer migrations
 ```
 
 ### Code Quality

@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode, useRef } from 'react';
-import { SESSION_ENDED_EVENT, apiGet, apiPost, logout as apiLogout, getCurrentUser, type CurrentUser } from '../lib/api-client';
+import {
+  SESSION_ENDED_EVENT, apiGet, apiPost, isMfaStep, logout as apiLogout, getCurrentUser,
+  type CurrentUser, type MfaStep, type SessionEndReason,
+} from '../lib/api-client';
 import { permissionMatches, type Portal } from '../lib/permissions';
 
 type User = CurrentUser['user'];
@@ -12,14 +15,17 @@ interface AuthContextType {
   /** True until the initial session check (and any reload) finishes. */
   loading: boolean;
   isAuthenticated: boolean;
-  /** Password login; returns the user's portal so the caller can navigate. */
-  login: (email: string, password: string, tenantSlug: string) => Promise<Portal>;
+  /**
+   * Password login. Returns the user's portal so the caller can navigate, or
+   * the two-factor step that comes next (no session yet).
+   */
+  login: (email: string, password: string, tenantSlug: string) => Promise<Portal | MfaStep>;
   /** Re-read the session after a login that happened elsewhere (e.g. OTP). */
   reload: () => Promise<Portal | null>;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
-  /** True after the server ended the session mid-use (see api-client) */
-  sessionEnded: boolean;
+  /** Why the server ended the session mid-use (see api-client), or false */
+  sessionEnded: SessionEndReason | false;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sessionEnded, setSessionEnded] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState<SessionEndReason | false>(false);
 
   const clear = useCallback(() => {
     setUser(null);
@@ -67,10 +73,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signedIn = useRef(false);
   signedIn.current = !!user;
   useEffect(() => {
-    const onEnded = () => {
-      // Only a session that existed can "end" (not the startup check while signed out)
-      if (!signedIn.current) return;
-      setSessionEnded(true);
+    const onEnded = (event: Event) => {
+      const reason = (event as CustomEvent<SessionEndReason>).detail ?? 'signed-out';
+      // Only a session that existed can "end" (not the startup check while
+      // signed out), unless the server said it timed out
+      if (!signedIn.current && reason === 'signed-out') return;
+      setSessionEnded(reason);
       setUser(null);
       setPermissions([]);
     };
@@ -79,8 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string, tenantSlug: string): Promise<Portal> => {
-      await apiPost('/bff/auth/login', { email, password, tenantSlug }, { skipAuth: true });
+    async (email: string, password: string, tenantSlug: string): Promise<Portal | MfaStep> => {
+      const body = await apiPost('/bff/auth/login', { email, password, tenantSlug }, { skipAuth: true });
+      if (isMfaStep(body)) return body;
       const portal = await reload();
       if (!portal) throw new Error('Login succeeded but the session could not be loaded');
       return portal;

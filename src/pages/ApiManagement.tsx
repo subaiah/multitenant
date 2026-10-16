@@ -22,7 +22,8 @@ interface Gateway {
   features: string[];
 }
 
-const AUTH_TYPES = ['JWT', 'OAUTH2', 'API_KEY'];
+// API keys aren't issued yet, so they aren't offered (a saved API_KEY still shows)
+const AUTH_TYPES = ['JWT', 'OAUTH2'];
 const VERSIONING = ['URL', 'HEADER', 'QUERY'];
 
 export default function ApiManagement() {
@@ -107,7 +108,7 @@ function ApiConfigForm({ config, gateways, onSaved }: { config: ApiConfig; gatew
         <label className="block text-sm">
           <span className="text-slate-600 dark:text-slate-300">Authentication</span>
           <select value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value })} className={`${inputClass} mt-1`}>
-            {AUTH_TYPES.map((t) => <option key={t} value={t}>{t === 'OAUTH2' ? 'OAuth 2.0' : t === 'API_KEY' ? 'API key' : t}</option>)}
+            {(AUTH_TYPES.includes(form.authType) ? AUTH_TYPES : [...AUTH_TYPES, form.authType]).map((t) => <option key={t} value={t}>{t === 'OAUTH2' ? 'OAuth 2.0' : t === 'API_KEY' ? 'API key' : t}</option>)}
           </select>
         </label>
         <label className="block text-sm">

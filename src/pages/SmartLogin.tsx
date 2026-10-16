@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Building2, ArrowRight } from 'lucide-react';
 import { apiGet } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,8 @@ export default function SmartLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  // Keep a notice (e.g. why the session ended) for the organization's sign-in page
+  const { search } = useLocation();
   const { user, loading: authLoading } = useAuth();
 
   // Already signed in: skip the org picker
@@ -44,7 +46,7 @@ export default function SmartLogin() {
       }
 
       // Redirect to the appropriate login page
-      navigate(`/${orgSlug.trim()}/login`, { replace: true });
+      navigate(`/${orgSlug.trim()}/login${search}`, { replace: true });
     } catch (err) {
       console.error('Error verifying organization:', err);
       setError('Failed to verify organization. Please try again.');

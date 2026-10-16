@@ -8,6 +8,7 @@ import { requireCanManageUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
+import { resetTwoFactor } from './two-factor.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
@@ -84,13 +85,14 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
           status: true,
           lastLoginAt: true,
           createdAt: true,
+          mfaEnabledAt: true,
         },
       }),
       request.db.user.count({ where }),
     ]);
 
     return {
-      data: users,
+      data: users.map(({ mfaEnabledAt, ...u }) => ({ ...u, mfaEnabled: Boolean(mfaEnabledAt) })),
       pagination: {
         page,
         limit,
@@ -277,6 +279,27 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     requireCanManageUserType(request.user.userType, user.userType);
     await sendInvitation(request.tenant, user, request.user.userId);
     return { invitationSent: true };
+  });
+
+  // Clear a user's two-factor (lost device): they set it up again at their next sign-in
+  fastify.post('/:id/mfa/reset', {
+    config: { permission: 'users:update' },
+    schema: {
+      tags: ['users'],
+      summary: "Reset a user's two-factor sign-in",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const user = await request.db.user.findFirst({
+      where: { id, tenantId: request.tenant.id },
+      select: { id: true, email: true, userType: true },
+    });
+    if (!user) throw new AppError('User not found', 404);
+    requireCanManageUserType(request.user.userType, user.userType);
+    await resetTwoFactor({ tenantId: request.tenant.id, tenantSlug: request.tenant.slug }, user.id);
+    await logActivity({ tenantId: request.tenant.id, userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
+    return { mfaEnabled: false };
   });
 
   // Update user

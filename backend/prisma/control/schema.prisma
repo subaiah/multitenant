@@ -150,6 +150,12 @@ model PlatformUser {
   lastLoginAt        DateTime?        @map("last_login_at")
   /// Access tokens issued before this are refused ("sign out everywhere")
   sessionsValidAfter DateTime?        @map("sessions_valid_after")
+  /// Two-factor sign-in (lib/mfa.ts); the secret is encrypted at rest. Named
+  /// apart from the tenant User's totpSecret because secret fields are keyed by name.
+  platformTotpSecret String?          @map("totp_secret")
+  mfaEnabledAt       DateTime?        @map("mfa_enabled_at")
+  mfaRecoveryCodes   String[]         @default([]) @map("mfa_recovery_codes")
+  mfaLastStep        Int?             @map("mfa_last_step")
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @updatedAt @map("updated_at")
 
@@ -181,6 +187,8 @@ model PlatformRefreshToken {
   revokedAt  DateTime? @map("revoked_at")
   userAgent  String?   @map("user_agent")
   ipAddress  String?   @map("ip_address")
+  sessionStartedAt DateTime @default(now()) @map("session_started_at")
+  lastSeenAt       DateTime @default(now()) @map("last_seen_at")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
 

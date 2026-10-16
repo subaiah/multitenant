@@ -59,9 +59,14 @@ export async function issueRefreshToken(
   expiresAt: Date,
   meta: SessionMeta,
   familyId: string = crypto.randomBytes(32).toString('hex'),
+  /** When the session began (kept across rotations, for the maximum session length) */
+  sessionStartedAt: Date = new Date(),
 ): Promise<string> {
   const token = slugToken(owner === 'platform' ? PLATFORM_SLUG : owner.tenantSlug);
-  const data = { userId, token, familyId, expiresAt, userAgent: meta.userAgent, ipAddress: meta.ipAddress };
+  const data = {
+    userId, token, familyId, expiresAt, userAgent: meta.userAgent, ipAddress: meta.ipAddress,
+    sessionStartedAt, lastSeenAt: new Date(),
+  };
   if (owner === 'platform') {
     await controlDb.platformRefreshToken.create({ data });
   } else {
@@ -76,6 +81,8 @@ export interface StoredRefreshToken {
   familyId: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  sessionStartedAt: Date;
+  lastSeenAt: Date;
   owner: SessionOwner;
   /** The account it belongs to, or null if it no longer exists */
   user: { id: string; userType: string; status: string } | null;
@@ -103,8 +110,11 @@ export async function findRefreshToken(value: string): Promise<StoredRefreshToke
   return { ...pick(t), owner: { tenantId: tenant.id, tenantSlug: tenant.slug }, user };
 }
 
-function pick(t: { id: string; userId: string; familyId: string; expiresAt: Date; revokedAt: Date | null }) {
-  return { id: t.id, userId: t.userId, familyId: t.familyId, expiresAt: t.expiresAt, revokedAt: t.revokedAt };
+function pick(t: { id: string; userId: string; familyId: string; expiresAt: Date; revokedAt: Date | null; sessionStartedAt: Date; lastSeenAt: Date }) {
+  return {
+    id: t.id, userId: t.userId, familyId: t.familyId, expiresAt: t.expiresAt, revokedAt: t.revokedAt,
+    sessionStartedAt: t.sessionStartedAt, lastSeenAt: t.lastSeenAt,
+  };
 }
 
 /** Revoke one token (by row) or its whole family (reuse detected). */

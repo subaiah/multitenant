@@ -6,11 +6,14 @@ import { controlDb } from '../lib/prisma.js';
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
+  /** Machine-readable reason for clients (e.g. SESSION_IDLE), sent as `code` */
+  code?: string;
 
-  constructor(message: string, statusCode: number = 500, isOperational: boolean = true) {
+  constructor(message: string, statusCode: number = 500, isOperational: boolean = true, code?: string) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = isOperational;
+    this.code = code;
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -37,6 +40,7 @@ export const errorHandler = async (
     return reply.status(error.statusCode).send({
       error: error.name,
       message: error.message,
+      ...(error.code && { code: error.code }),
     });
   }
 

@@ -97,11 +97,12 @@ Save the `token` and `tenant.id` from the response.
 ### 2. Login
 
 ```bash
-curl -X POST http://localhost:4000/auth/login \
+curl -X POST http://localhost:4000/bff/auth/login -c cookies.txt \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "admin@test.com",
-    "tenantId": "YOUR_TENANT_ID"
+    "email": "admin@acme-corp.com",
+    "password": "admin123",
+    "tenantSlug": "acme-corp"
   }'
 ```
 
@@ -130,11 +131,12 @@ The seed script creates:
 
 ```bash
 # Acme Corporation
-curl -X POST http://localhost:4000/auth/login \
+curl -X POST http://localhost:4000/bff/auth/login -c cookies.txt \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@acme-corp.com",
-    "tenantId": "TENANT_ID_FROM_DB"
+    "password": "admin123",
+    "tenantSlug": "acme-corp"
   }'
 ```
 
