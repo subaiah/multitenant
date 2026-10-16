@@ -21,9 +21,15 @@ ADD COLUMN     "duration_minutes" INTEGER NOT NULL DEFAULT 60,
 ALTER COLUMN "approved_by" DROP NOT NULL,
 ALTER COLUMN "valid_from" DROP NOT NULL,
 ALTER COLUMN "valid_from" DROP DEFAULT,
-ALTER COLUMN "valid_to" DROP NOT NULL,
-DROP COLUMN "status",
-ADD COLUMN     "status" "SupportSessionStatus" NOT NULL DEFAULT 'PENDING';
+ALTER COLUMN "valid_to" DROP NOT NULL;
+
+-- Status becomes an enum, keeping the history (edited by hand: Prisma would
+-- drop and re-add the column). Sessions "active" before this were never
+-- enforced nor approved by anyone else, so they end now.
+UPDATE "support_sessions" SET "status" = 'EXPIRED' WHERE "status" = 'ACTIVE';
+ALTER TABLE "support_sessions" ALTER COLUMN "status" DROP DEFAULT,
+ALTER COLUMN "status" TYPE "SupportSessionStatus" USING "status"::"SupportSessionStatus",
+ALTER COLUMN "status" SET DEFAULT 'PENDING';
 
 -- CreateTable
 CREATE TABLE "platform_roles" (
@@ -57,9 +63,6 @@ CREATE INDEX "platform_role_assignments_role_id_idx" ON "platform_role_assignmen
 
 -- CreateIndex
 CREATE UNIQUE INDEX "platform_role_assignments_platform_user_id_role_id_key" ON "platform_role_assignments"("platform_user_id", "role_id");
-
--- CreateIndex
-CREATE INDEX "support_sessions_tenant_id_status_idx" ON "support_sessions"("tenant_id", "status");
 
 -- CreateIndex
 CREATE INDEX "support_sessions_platform_user_id_tenant_id_status_idx" ON "support_sessions"("platform_user_id", "tenant_id", "status");
