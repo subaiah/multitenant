@@ -211,7 +211,14 @@ jobs:
         env:
           APP: http://localhost
           MAIL_CMD: docker compose -f ../deploy/docker-compose.yml logs --no-color api
-        run: node smoke.mjs | tee smoke.txt; s=${PIPESTATUS[0]}; grep '^FAIL' smoke.txt | while IFS= read -r l; do echo "::error::$l"; done; exit $s
+        run: |
+          test -n "$ADMIN_LINK" || { echo "::error::create-admin printed no invitation link"; exit 1; }
+          set +e
+          node smoke.mjs > smoke.txt 2>&1
+          s=$?
+          cat smoke.txt
+          if [ $s -ne 0 ]; then grep -vE '^\s*$|agent-proxy' smoke.txt | tail -20 | while IFS= read -r l; do echo "::error::$l"; done; fi
+          exit $s
       - name: Backup
         run: |
           deploy/backup.sh "$PWD/backups"
