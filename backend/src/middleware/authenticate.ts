@@ -7,6 +7,7 @@ import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
 import { activeSupportSession, type ActiveSupportSession } from '../lib/support.js';
+import { trialEnded } from '../lib/tenant-lifecycle.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -80,7 +81,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     const tenant = await controlDb.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true,
+        id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true, trialEndsAt: true, closedAt: true,
         databaseConfig: { select: { updatedAt: true } },
       },
     });
@@ -89,13 +90,21 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     }
     // Platform users can still manage suspended tenants
     if (tenant.status === 'SUSPENDED' && !platformUser) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Tenant is suspended' });
+      return reply.status(403).send({ error: 'Forbidden', message: tenant.closedAt ? 'This organization was closed' : 'Tenant is suspended' });
+    }
+    // An ended trial is read-only for the organization's own people
+    if (!platformUser && trialEnded(tenant) && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !request.routeOptions.config?.allowWhenTrialEnded) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        code: 'TRIAL_ENDED',
+        message: `${tenant.name}'s trial has ended, so it's read-only. Contact the platform team to continue.`,
+      });
     }
     // Nobody works inside a tenant until its data is set up
     if (tenant.provisioningStatus !== 'READY') {
       return reply.status(409).send({ error: 'Conflict', message: 'This tenant is not ready yet' });
     }
-    const { provisioningStatus: _, databaseConfig, ...tenantInfo } = tenant;
+    const { provisioningStatus: _, databaseConfig, trialEndsAt: _t, closedAt: _c, ...tenantInfo } = tenant;
     // Platform staff work inside a tenant only through an approved, active
     // support session; a read-only one gets a connection that can't write
     let readOnly = false;

@@ -28,6 +28,7 @@ import { audit } from '../lib/audit.js';
 import { logPlatformActivity } from '../lib/activity.js';
 import { signupRateLimit } from '../lib/rate-limits.js';
 import { requestDomain, tenantForDomain } from '../lib/domains.js';
+import { isBlockedEmail } from '../lib/disposable-email.js';
 
 /** Organization admins choose a strong password */
 export const SIGNUP_PASSWORD_POLICY = 'STRONG' as const;
@@ -41,7 +42,28 @@ const startSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().toLowerCase().email().max(200),
   password: z.string().min(1).max(200),
+  // The bot check's answer (when TURNSTILE_* is set)
+  captchaToken: z.string().max(4096).optional(),
 });
+
+/** Ask Cloudflare whether the sign-up form's bot check was passed */
+async function passedCaptcha(token: string | undefined, ip: string): Promise<boolean> {
+  const turnstile = config.turnstile;
+  if (!turnstile) return true;
+  if (!token) return false;
+  let res: Response;
+  try {
+    res = await fetch(turnstile.verifyUrl, {
+      method: 'POST',
+      body: new URLSearchParams({ secret: turnstile.secretKey, response: token, remoteip: ip }),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    throw new AppError("The bot check couldn't be confirmed just now. Try again in a minute.", 503, true, 'CAPTCHA_UNAVAILABLE');
+  }
+  const body = (await res.json().catch(() => ({}))) as { success?: boolean };
+  return res.ok && body.success === true;
+}
 
 export const signupRoutes: FastifyPluginAsync = async (fastify) => {
   const assertOpen = async (request: Parameters<typeof requestDomain>[0]) => {
@@ -60,6 +82,13 @@ export const signupRoutes: FastifyPluginAsync = async (fastify) => {
     await assertSlugAvailable(data.slug);
     const problem = checkPasswordPolicy(data.password, SIGNUP_PASSWORD_POLICY);
     if (problem) throw new AppError(problem, 400);
+    if (isBlockedEmail(data.email)) {
+      throw new AppError('Use your work email address. Temporary email services can’t be used to sign up.', 400, true, 'EMAIL_NOT_ALLOWED');
+    }
+    // Last, so a mistake in the form doesn't use up the check
+    if (!(await passedCaptcha(data.captchaToken, request.ip))) {
+      throw new AppError('Confirm you’re not a robot, then try again.', 400, true, 'CAPTCHA_FAILED');
+    }
 
     const token = crypto.randomBytes(32).toString('base64url');
     await controlDb.$transaction([
@@ -152,7 +181,9 @@ export const siteRoutes: FastifyPluginAsync = async (fastify) => {
     const on = await requestDomain(request);
     return {
       tenant: on ? { slug: on.tenant.slug, name: on.tenant.name } : null,
-      signup: on ? null : config.selfSignup ? { passwordPolicy: SIGNUP_PASSWORD_POLICY } : null,
+      signup: on || !config.selfSignup
+        ? null
+        : { passwordPolicy: SIGNUP_PASSWORD_POLICY, captchaSiteKey: config.turnstile?.siteKey ?? null, trialDays: config.trialDays },
     };
   });
 };

@@ -13,6 +13,7 @@ import { resumeProvisioning } from './lib/provisioning.js';
 import { checkTenantServer } from './lib/tenant-server-check.js';
 import { latestMigration, tenantsBehind } from './lib/tenant-migrations.js';
 import { startUsageRefresh, stopUsageRefresh } from './lib/tenant-usage.js';
+import { startTenantLifecycle, stopTenantLifecycle } from './lib/tenant-lifecycle.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
@@ -25,6 +26,7 @@ import { twoFactorRoutes } from './routes/two-factor.js';
 import { accountRoutes } from './routes/account.js';
 import { signupRoutes, siteRoutes, tlsAskRoutes } from './routes/signup.js';
 import { customDomainRoutes } from './routes/custom-domain.js';
+import { closureRoutes } from './routes/organization-closure.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
@@ -236,6 +238,7 @@ async function registerRoutes() {
 
     // The organization's own web address (lib/domains.ts)
     await protectedRoutes.register(customDomainRoutes, { prefix: '/custom-domain' });
+    await protectedRoutes.register(closureRoutes, { prefix: '/organization' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
     if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
@@ -342,6 +345,7 @@ async function start() {
     startAuditArchiving((msg, err) => fastify.log.error({ err }, msg));
     startNotifications((msg, err) => fastify.log.error({ err }, msg));
     startRateLimitCleanup((err) => fastify.log.warn({ err }, 'Removing expired rate-limit counters failed'));
+    startTenantLifecycle((msg, err) => fastify.log.error({ err }, msg));
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -355,6 +359,7 @@ const shutdown = async () => {
   stopAuditArchiving();
   stopNotifications();
   stopRateLimitCleanup();
+  stopTenantLifecycle();
   // Let notification work in progress finish (a few seconds at most)
   await Promise.race([notificationsSettled(), new Promise((r) => setTimeout(r, 5000))]);
   await disconnectDatabases();

@@ -74,6 +74,12 @@ export default function SmartLogin() {
           <p className="text-slate-600 dark:text-slate-400">Enter your organization's sign-in address to continue.</p>
         </div>
 
+        {new URLSearchParams(search).get('notice') === 'organization-closed' && (
+          <p role="status" className="p-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-200">
+            The organization was closed, and its administrators were emailed the details. Contact the platform team if that was a mistake.
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label htmlFor="orgSlug" className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Organization address</span>

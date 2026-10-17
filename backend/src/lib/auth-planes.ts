@@ -25,7 +25,7 @@ export interface TenantContext {
 export async function tenantForSignIn(slug: string): Promise<TenantContext> {
   const tenant = await controlDb.tenant.findUnique({ where: { slug } });
   if (!tenant) throw new AppError('Tenant not found', 404);
-  if (tenant.status === 'SUSPENDED') throw new AppError('Tenant is suspended', 403);
+  if (tenant.status === 'SUSPENDED') throw new AppError(tenant.closedAt ? 'This organization was closed' : 'Tenant is suspended', 403);
   if (tenant.provisioningStatus !== 'READY') throw new AppError('This organization is still being set up. Try again in a moment.', 409);
   return { tenant, db: await dbForTenant(tenant.id) };
 }

@@ -127,7 +127,7 @@ test('signing up: email link, a trial organization, its admin signs in with the 
   const email = `founder-${run}@signup.test`;
   const site = await api('GET', '/bff/site');
   assert.equal(site.status, 200);
-  assert.deepEqual(site.json, { tenant: null, signup: { passwordPolicy: 'STRONG' } });
+  assert.deepEqual(site.json, { tenant: null, signup: { passwordPolicy: 'STRONG', captchaSiteKey: null, trialDays: 14 } });
 
   const started = await api('POST', '/bff/signup', { body: signupBody(slug, email) });
   assert.equal(started.status, 202, JSON.stringify(started.json));
@@ -146,6 +146,7 @@ test('signing up: email link, a trial organization, its admin signs in with the 
   const tenant = await controlDb.tenant.findUniqueOrThrow({ where: { slug } });
   trackTenant(tenant.id);
   assert.equal(tenant.status, 'TRIAL');
+  assert.ok(tenant.trialEndsAt && Math.abs(tenant.trialEndsAt.getTime() - (Date.now() + 14 * 86_400_000)) < 60_000, 'a 14-day trial');
   assert.equal(tenant.plan, 'FREE');
   assert.equal(tenant.createdById, null);
 

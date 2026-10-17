@@ -4,6 +4,7 @@ import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { SupportAccessCard } from '../components/SupportAccessCard';
 import { CustomDomainCard } from '../components/CustomDomainCard';
+import { CloseOrganizationCard } from '../components/CloseOrganizationCard';
 import { apiPatch } from '../lib/api-client';
 import { Badge, Card, DataView, PageHeader, formatDate, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -14,6 +15,7 @@ interface Tenant {
   plan: string;
   status: string;
   customDomain: string | null;
+  trialEndsAt: string | null;
   logoUrl: string | null;
   primaryColor: string | null;
   loginTitle: string | null;
@@ -127,6 +129,8 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             <p className="text-xs text-slate-500 mt-4">Only tenant admins can change these settings.</p>
           )}
         </Card>
+
+        <CloseOrganizationCard name={tenant.name} slug={tenant.slug} />
       </div>
 
       <div className="space-y-6">
@@ -134,6 +138,7 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between"><dt className="text-slate-500">Plan</dt><dd className="font-medium">{humanize(tenant.plan)}</dd></div>
             <div className="flex justify-between items-center"><dt className="text-slate-500">Status</dt><dd><Badge value={tenant.status} /></dd></div>
+            {tenant.status === 'TRIAL' && tenant.trialEndsAt && <div className="flex justify-between"><dt className="text-slate-500">Trial ends</dt><dd>{formatDate(tenant.trialEndsAt)}</dd></div>}
             <div className="flex justify-between"><dt className="text-slate-500">Users</dt><dd className="tabular-nums">{tenant._count.users}</dd></div>
             {previewFeatures && <div className="flex justify-between"><dt className="text-slate-500">Deployed apps</dt><dd className="tabular-nums">{tenant._count.applications}</dd></div>}
             <div className="flex justify-between"><dt className="text-slate-500">Member since</dt><dd>{formatDate(tenant.createdAt)}</dd></div>

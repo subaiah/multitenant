@@ -44,11 +44,13 @@
 		@page not path /assets/*
 		header @page Cache-Control "no-cache"
 		header {
-			# What the app may load: only itself, with two exceptions: inline
-			# styles (React and the charts set style attributes) and images from
-			# any https address (tenants brand their sign-in page with a logo URL).
+			# What the app may load: only itself, with three exceptions: inline
+			# styles (React and the charts set style attributes), images from any
+			# https address (tenants brand their sign-in page with a logo URL), and
+			# Cloudflare Turnstile's script and frame from challenges.cloudflare.com
+			# (the sign-up form's optional bot check).
 			# The API sets its own, stricter one.
-			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+			Content-Security-Policy "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		}
 		try_files {path} /index.html
 		file_server

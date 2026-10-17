@@ -30,6 +30,8 @@ export type RoutePermission = string | string[];
 declare module 'fastify' {
   interface FastifyContextConfig {
     permission?: RoutePermission;
+    /** Allowed in an organization whose trial has ended (read-only otherwise; lib/tenant-lifecycle.ts) */
+    allowWhenTrialEnded?: boolean;
   }
   interface FastifyRequest {
     /** Cached for the lifetime of the request; use loadPermissions(). */

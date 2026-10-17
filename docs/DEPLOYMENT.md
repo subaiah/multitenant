@@ -84,6 +84,8 @@ Every setting is described in `backend/.env.example`. The ones a deployment must
 | `EMAIL_TRANSPORT=smtp`, `SMTP_URL`, `MAIL_FROM` | Invitations, password resets, sign-in codes and notifications. The sending domain needs SPF, DKIM and DMARC records, or the mail lands in spam. |
 | `PLATFORM_MFA_REQUIRED` | Two-factor for platform staff. Keep it on. |
 | `SELF_SIGNUP`, `CUSTOM_DOMAINS` | On by default. Whether anyone can create an organization, and whether tenants can use their own domains. See *Self-service sign-up* and *Custom domains* below. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | A bot check on the sign-up form. Set them before opening sign-up to the public. |
+| `TRIAL_DAYS`, `CLOSE_GRACE_DAYS` | How long trials last before the organization becomes read-only, and how long a closed organization is kept before it's deleted. See *Trials and closing an organization*. |
 | `PREVIEW_FEATURES` | Off in production. It hides pages that show sample data: deployed applications and their resource use, the API gateway settings, the backup and encryption switches, and the platform's "coming soon" pages. |
 | `API_DOCS` | Off in production. The interactive API reference at `/api/docs`. |
 | `TENANT_POOL_MAX`, `TENANT_CLIENT_CACHE_MAX`, `POSTGRES_MAX_CONNECTIONS` | See *Database connections*. |
@@ -154,6 +156,31 @@ On by default (`SELF_SIGNUP=true`). The sign-in page links to `/signup`, where s
 Each sign-up is in the platform audit log (`tenant.signed_up`), and platform staff with `tenants:manage` get an in-app notification. Attempts are limited to 10 an hour per IP address, across all API servers.
 
 To turn it off, so that only platform staff create tenants, set `SELF_SIGNUP=false`. The link disappears and `/bff/signup` answers 404.
+
+**Keeping bots and throwaway accounts out:**
+
+- **Bot check.** Set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` to add a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) check to the form. Turnstile is free and doesn't need your site to be on Cloudflare. The API verifies each answer with Cloudflare before anything is created. The bundled Caddyfile's content security policy already allows its script.
+- **Throwaway addresses.** Addresses at common disposable-email services are refused (`SIGNUP_BLOCK_DISPOSABLE=true`, a built-in list). Add more domains with `SIGNUP_BLOCKED_EMAIL_DOMAINS`.
+
+Turn on the bot check before you announce a public sign-up page.
+
+## Trials and closing an organization
+
+**Trials.** A tenant that signs up, or that platform staff create as a trial, gets an end date `TRIAL_DAYS` ahead (default 14; `0` means trials don't end).
+
+- `TRIAL_REMINDER_DAYS` (default 3) before the end, its administrators get an email.
+- When it ends, they get another, and the platform gets an in-app notification and a `tenant.trial_ended` audit entry.
+- From then on the organization is **read-only**. People can sign in and see everything, but changes are refused (`403 TRIAL_ENDED`), and a banner explains why.
+- Platform staff continue it from the tenant's panel: change its status to Active (for example, once it pays), or move the trial's end date.
+
+**Closing.** A tenant administrator can close their organization from its Settings page. They type its address and their password to confirm.
+
+- It is suspended at once: open sessions stop working and nobody can sign in.
+- Its administrators get an email, and platform staff get a notification.
+- After `CLOSE_GRACE_DAYS` (default 30) it is deleted with all its data.
+- Until then, platform staff can **Restore** it from its panel.
+
+A background check every `TENANT_LIFECYCLE_INTERVAL_MS` (default one hour, on one server at a time) sends the trial emails, deletes closed organizations whose time is up, and removes old sign-up requests.
 
 ## Custom domains
 

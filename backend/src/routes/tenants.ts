@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { config } from '../config/env.js';
 import { deprovisionTenant, rotateTenantCredentials, startProvisioning } from '../lib/provisioning.js';
-import { createTenantRecord, slugSchema } from '../lib/new-tenant.js';
+import { createTenantRecord, slugSchema, trialEnd } from '../lib/new-tenant.js';
 import { latestMigration, tenantsBehind } from '../lib/tenant-migrations.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -26,6 +26,8 @@ const updateTenantSchema = z.object({
   // Platform admins only
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']).optional(),
+  // When a trial ends (null: no end); read-only after it
+  trialEndsAt: z.coerce.date().nullable().optional(),
 });
 
 const createTenantSchema = z.object({
@@ -155,6 +157,28 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     await audit(request, 'tenant.provisioning_retried', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug } });
     void startProvisioning(id);
     return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
+  });
+
+  // Undo an organization's own closure during its grace period
+  fastify.post('/:id/restore', {
+    config: { permission: 'tenants:manage' },
+    schema: {
+      tags: ['tenants'],
+      summary: 'Restore an organization its admins closed (before it is deleted)',
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const tenant = await controlDb.tenant.findUnique({ where: { id } });
+    if (!tenant) throw new AppError('Tenant not found', 404);
+    if (!tenant.closedAt) throw new AppError('This organization was not closed', 409);
+    const restored = await controlDb.tenant.update({
+      where: { id },
+      data: { status: tenant.statusBeforeClose ?? 'ACTIVE', closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null },
+    });
+    await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'restored closed tenant', target: tenant.slug, type: 'CONFIG' });
+    await audit(request, 'tenant.restored', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { name: tenant.name, status: restored.status } });
+    return restored;
   });
 
   // List tenants (admin only)
@@ -291,6 +315,7 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
           loginSubtitle: { type: ['string', 'null'] },
           plan: { type: 'string', enum: ['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE'] },
           status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED', 'TRIAL'] },
+          trialEndsAt: { type: ['string', 'null'] },
         },
       },
     },
@@ -304,16 +329,24 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     if (!(await hasPermission(request, 'tenants:manage'))) {
       // Route requires settings:manage otherwise; limit it to the caller's own tenant profile
       const ownTenantProfileOnly =
-        isTenantAdmin(userType) && tenantId === id && data.plan === undefined && data.status === undefined;
+        isTenantAdmin(userType) && tenantId === id && data.plan === undefined && data.status === undefined && data.trialEndsAt === undefined;
       if (!ownTenantProfileOnly) {
         throw new AppError('Platform admin access required', 403);
       }
     }
 
     const before = await controlDb.tenant.findUnique({ where: { id } });
+    if (!before) throw new AppError('Tenant not found', 404);
+    const extra: Record<string, unknown> = {};
+    // Becoming a trial without an end date gets the usual length
+    if (data.status === 'TRIAL' && before.status !== 'TRIAL' && data.trialEndsAt === undefined && !before.trialEndsAt) extra.trialEndsAt = trialEnd();
+    // A new end date: remind and notify again for it
+    if (data.trialEndsAt !== undefined || extra.trialEndsAt) Object.assign(extra, { trialReminderSentAt: null, trialEndedNotifiedAt: null });
+    // Any status but suspended cancels a pending closure (it would otherwise be deleted)
+    if (data.status && data.status !== 'SUSPENDED' && before.closedAt) Object.assign(extra, { closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null });
     const tenant = await controlDb.tenant.update({
       where: { id },
-      data,
+      data: { ...data, ...extra },
     });
 
     // In the tenant's own log once it has one; the platform log before that

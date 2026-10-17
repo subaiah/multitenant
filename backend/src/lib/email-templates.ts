@@ -90,3 +90,42 @@ ${n.link ? button(n.link, 'Open') : ''}
 <p style="font-size:12px;color:#64748b;margin-top:24px">${n.mandatory ? escape(footer) : `<a href="${escape(n.settingsLink)}" style="color:#64748b">Choose which emails you get</a>`}</p>`),
   };
 }
+
+const day = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/** To a trial organization's admins, a few days before the trial ends (lib/tenant-lifecycle.ts). */
+export function trialEndingEmail(to: string, organization: string, endsAt: Date, link: string): Mail {
+  const when = day(endsAt);
+  return {
+    to,
+    subject: `${organization}'s trial ends on ${when}`,
+    text: `${organization}'s trial ends on ${when}. After that it stays available to read, but nobody can make changes until the platform team moves it to a paid plan. Contact them to continue.\n\n${link}`,
+    html: layout(`Your trial ends on ${when}`, `<p><strong>${escape(organization)}</strong>'s trial ends on ${escape(when)}. After that it stays available to read, but nobody can make changes until the platform team moves it to a paid plan.</p>
+<p>Contact them to continue.</p>
+${button(link, `Open ${organization}`)}`),
+  };
+}
+
+/** To a trial organization's admins when the trial has ended. */
+export function trialEndedEmail(to: string, organization: string, link: string): Mail {
+  return {
+    to,
+    subject: `${organization}'s trial has ended`,
+    text: `${organization}'s trial has ended. Your data is safe and you can still sign in and read it, but changes are paused until the platform team moves it to a paid plan. Contact them to continue.\n\n${link}`,
+    html: layout(`${organization}'s trial has ended`, `<p>Your data is safe, and you can still sign in and read it. Changes are paused until the platform team moves <strong>${escape(organization)}</strong> to a paid plan.</p>
+<p>Contact them to continue.</p>
+${button(link, `Open ${organization}`)}`),
+  };
+}
+
+/** To an organization's admins when one of them closes it. */
+export function organizationClosedEmail(to: string, organization: string, closedBy: string, deleteAfter: Date): Mail {
+  const when = day(deleteAfter);
+  return {
+    to,
+    subject: `${organization} was closed`,
+    text: `${closedBy} closed ${organization}. Nobody can sign in to it now, and it and all its data will be deleted on ${when}. If this was a mistake, contact the platform team before then to restore it.`,
+    html: layout(`${organization} was closed`, `<p>${escape(closedBy)} closed <strong>${escape(organization)}</strong>. Nobody can sign in to it now.</p>
+<p>It and all its data will be deleted on <strong>${escape(when)}</strong>. If this was a mistake, contact the platform team before then to restore it.</p>`),
+  };
+}

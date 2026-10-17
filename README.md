@@ -29,7 +29,8 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
 - **Audit log.**
   - Tamper-evident: each tenant's log and the platform's is a signed hash chain.
   - Entries are archived after a year. ([backend/docs/AUDIT_LOG.md](backend/docs/AUDIT_LOG.md))
-- **Self-service sign-up, on by default.** Anyone can create an organization from the sign-in page: they confirm their email address, the organization starts as a trial on the `SIGNUP_PLAN` plan, and they become its administrator. Nothing is created until the address is confirmed. Set `SELF_SIGNUP=false` to turn it off, so only platform staff create tenants.
+- **Self-service sign-up, on by default.** Anyone can create an organization from the sign-in page: they confirm their email address, the organization starts as a trial on the `SIGNUP_PLAN` plan, and they become its administrator. Nothing is created until the address is confirmed. An optional Cloudflare Turnstile check and a block on throwaway email addresses keep bots out. Set `SELF_SIGNUP=false` to turn it off, so only platform staff create tenants.
+- **Trials and closing.** Trials last `TRIAL_DAYS` (default 14). Admins are reminded before the end, and afterwards the organization is read-only until platform staff continue it. Tenant admins can close their own organization; it's deleted after a grace period, during which platform staff can restore it. ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#trials-and-closing-an-organization))
 - **Custom domains.** A tenant can serve the app at its own address, such as `app.acme.com`. It adds the domain on its Settings page, adds a CNAME and a TXT record, and the platform checks the TXT record. Once the domain is verified:
   - the bundled Caddy gets an HTTPS certificate for it on first visit;
   - the address opens straight to that organization's sign-in page and signs in to that organization only;
