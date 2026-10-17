@@ -229,7 +229,7 @@ function AddProviderDialog({ catalog, onClose, onAdd }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <form role="dialog" aria-label="Add identity provider" onSubmit={submit} onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-lg p-6 space-y-4 shadow-xl">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Add identity provider</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>

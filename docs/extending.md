@@ -156,7 +156,7 @@ Every route must declare `config: { permission }`. The route-permission test fai
 
 ### 4. Menu and screens
 
-The `tenantMenu` entries are seeded with the kit's menu by `npm run prisma:seed-menus`. Users only see the entries their permissions allow.
+The `tenantMenu` entries go right after Dashboard in the tenant sidebar; the release step (`npm run migrate`) adds them, as does `npm run prisma:seed-menus`. Users only see the entries their permissions allow. A group of entries can sit under a heading: give the heading a path starting with `#` (`{ label: 'Billing', path: '#billing', icon: 'Package', children: [...] }`); it shows only when someone may open at least one of its entries.
 
 Add the page under `src/product/` in the frontend, and its route in `src/App.tsx` behind the same permission.
 
@@ -166,5 +166,5 @@ Add the page under `src/product/` in the frontend, and its route in `src/App.tsx
 | --- | --- |
 | `permissions`, `resources`, `userTypeGrants` | at startup; merged into the catalogue in `src/utils/permissions.ts` |
 | `routes` | at startup, inside the authenticated, tenant-bound scope |
-| `tenantMenu` | when menus are seeded |
+| `tenantMenu` | at the release step, and when menus are seeded |
 | `onTenantCreated` | when a platform admin creates a tenant, after the kit's defaults (sign-in settings, built-in roles) |

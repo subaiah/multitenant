@@ -2,24 +2,24 @@ import { ReactNode, useState } from 'react';
 import { CheckCircle2, Circle, Eye, EyeOff, Lock } from 'lucide-react';
 import { passwordRules, type PasswordPolicy } from '../lib/password-policy';
 
-/** Centered card used by the public account pages (matches the login screen). */
+/** The frame of the public account pages (the same as the sign-in page). */
 export function AuthCard({ title, subtitle, children }: { title: string; subtitle?: ReactNode; children: ReactNode }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-      <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-8">
-        <h1 className="text-xl font-bold text-slate-800 dark:text-white">{title}</h1>
-        {subtitle && <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{subtitle}</p>}
-        <div className="mt-6">{children}</div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 px-4 pt-16 sm:pt-24 pb-10">
+      <div className="max-w-sm mx-auto">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">{title}</h1>
+        {subtitle && <p className="text-slate-600 dark:text-slate-400 mt-1">{subtitle}</p>}
+        <div className="mt-7">{children}</div>
       </div>
     </div>
   );
 }
 
 export const authInputClass =
-  'w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200';
+  'w-full h-10 px-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500 text-slate-800 dark:text-slate-100';
 
 export const authButtonClass =
-  'w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed';
+  'w-full h-11 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed';
 
 /** Password input with live policy checklist. Calls onValidChange when all rules pass. */
 export function NewPasswordField({ value, onChange, policy }: { value: string; onChange: (v: string) => void; policy: PasswordPolicy }) {

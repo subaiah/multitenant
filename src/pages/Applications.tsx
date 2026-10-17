@@ -77,9 +77,9 @@ export default function Applications() {
               <EmptyState icon={Package} title={status || environment || search ? 'No applications match these filters' : 'No applications deployed yet'} />
             </Card>
           ) : (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+                <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
                   <tr>
                     <th className="px-5 py-3 font-medium">Application</th>
                     <th className="px-5 py-3 font-medium">Status</th>

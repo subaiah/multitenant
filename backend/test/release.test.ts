@@ -214,8 +214,9 @@ test('the first administrator is invited to set a password', async () => {
 test('the release step adds new menu entries and keeps changes to existing ones', async () => {
   const { syncMenus } = await import('../src/lib/menus.js');
   await syncMenus();
+  const people = await controlDb.menuItem.findFirstOrThrow({ where: { portal: 'PLATFORM', parentId: null, path: '#people' } });
   // Someone renamed an entry; a new version added one (here: one went missing)
-  const users = await controlDb.menuItem.findFirstOrThrow({ where: { portal: 'PLATFORM', parentId: null, path: '/platform/users' } });
+  const users = await controlDb.menuItem.findFirstOrThrow({ where: { parentId: people.id, path: '/platform/users' } });
   await controlDb.menuItem.update({ where: { id: users.id }, data: { label: 'Staff' } });
   await controlDb.menuItem.deleteMany({ where: { portal: 'PLATFORM', path: '/platform/support' } });
 
@@ -224,10 +225,22 @@ test('the release step adds new menu entries and keeps changes to existing ones'
   await syncMenus();
   assert.equal((await controlDb.menuItem.findUniqueOrThrow({ where: { id: users.id } })).label, 'Staff');
   assert.equal(await controlDb.menuItem.count({ where: { portal: 'PLATFORM', path: '/platform/support' } }), 1);
-  // Nested entries are matched under their parent (Access and Users share a path)
-  const access = await controlDb.menuItem.findFirstOrThrow({ where: { portal: 'TENANT', parentId: null, path: '/users' } });
-  assert.equal(await controlDb.menuItem.count({ where: { portal: 'TENANT', parentId: access.id, path: '/users' } }), 1);
-  await controlDb.menuItem.update({ where: { id: users.id }, data: { label: 'Platform Users' } });
+  await controlDb.menuItem.update({ where: { id: users.id }, data: { label: 'Platform users' } });
+});
+
+test('a menu from before sections is rebuilt once in the new shape', async () => {
+  const { syncMenus } = await import('../src/lib/menus.js');
+  await syncMenus();
+  // The old shape: "Access" at /users with the people pages under it
+  const access = await controlDb.menuItem.create({ data: { portal: 'TENANT', label: 'Access', path: '/users', order: 2 } });
+  await controlDb.menuItem.create({ data: { portal: 'TENANT', parentId: access.id, label: 'Users', path: '/users', order: 0 } });
+  const oldAudit = await controlDb.menuItem.create({ data: { portal: 'TENANT', label: 'Audit Log', path: '/audit-log', order: 7 } });
+  await syncMenus();
+  assert.equal(await controlDb.menuItem.count({ where: { id: { in: [access.id, oldAudit.id] } } }), 0);
+  assert.equal(await controlDb.menuItem.count({ where: { portal: 'TENANT', path: '/audit-log' } }), 1);
+  const section = await controlDb.menuItem.findFirstOrThrow({ where: { portal: 'TENANT', parentId: null, path: '#people' } });
+  assert.equal(await controlDb.menuItem.count({ where: { portal: 'TENANT', path: '/users' } }), 1);
+  assert.equal(await controlDb.menuItem.count({ where: { parentId: section.id, path: '/users' } }), 1);
 });
 
 test('request logs leave out tokens and sign-in codes', async () => {

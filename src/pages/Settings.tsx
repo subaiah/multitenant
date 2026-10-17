@@ -33,7 +33,7 @@ export default function SettingsPage() {
 }
 
 function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Promise<void> }) {
-  const { hasPermission, reload: reloadSession } = useAuth();
+  const { hasPermission, reload: reloadSession, previewFeatures } = useAuth();
   const canEdit = hasPermission('settings:manage');
   const initial = {
     name: tenant.name,
@@ -100,14 +100,19 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
               </span>
             </label>
           </div>
-          <div className="mt-5 p-5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-center">
-            <p className="text-xs uppercase tracking-wide text-slate-400 mb-3">Preview</p>
-            <div className="w-12 h-12 mx-auto rounded-xl flex items-center justify-center text-white text-lg font-bold" style={{ backgroundColor: form.primaryColor }}>
-              {form.name.charAt(0)}
-            </div>
-            <p className="mt-3 font-semibold text-slate-800 dark:text-white">{form.loginTitle || form.name}</p>
-            <p className="text-sm text-slate-500">{form.loginSubtitle || 'Sign in to your account'}</p>
-          </div>
+          <figure className="mt-5 p-5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+            <figcaption className="text-xs text-slate-500 mb-4">How your sign-in page starts</figcaption>
+            {form.logoUrl ? (
+              <img src={form.logoUrl} alt="" className="h-10 w-auto" />
+            ) : (
+              <div aria-hidden className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg font-semibold" style={{ backgroundColor: form.primaryColor }}>
+                {form.name.charAt(0)}
+              </div>
+            )}
+            <p className="mt-3 text-xl font-semibold tracking-tight text-slate-800 dark:text-white">{form.loginTitle || `Sign in to ${form.name}`}</p>
+            <p className="text-slate-600 dark:text-slate-400">{form.loginSubtitle || 'Use the account your organization gave you.'}</p>
+            <div className="mt-4 h-9 max-w-xs rounded-md text-white text-sm font-medium flex items-center justify-center" style={{ backgroundColor: form.primaryColor }} aria-hidden>Sign in</div>
+          </figure>
 
           {error && <p className="text-sm text-red-600 mt-3" role="alert">{error}</p>}
           {canEdit ? (
@@ -127,7 +132,7 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             <div className="flex justify-between"><dt className="text-slate-500">Plan</dt><dd className="font-medium">{humanize(tenant.plan)}</dd></div>
             <div className="flex justify-between items-center"><dt className="text-slate-500">Status</dt><dd><Badge value={tenant.status} /></dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Users</dt><dd className="tabular-nums">{tenant._count.users}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Deployed apps</dt><dd className="tabular-nums">{tenant._count.applications}</dd></div>
+            {previewFeatures && <div className="flex justify-between"><dt className="text-slate-500">Deployed apps</dt><dd className="tabular-nums">{tenant._count.applications}</dd></div>}
             <div className="flex justify-between"><dt className="text-slate-500">Member since</dt><dd>{formatDate(tenant.createdAt)}</dd></div>
             {tenant.customDomain && <div className="flex justify-between"><dt className="text-slate-500">Custom domain</dt><dd className="font-mono">{tenant.customDomain}</dd></div>}
           </dl>

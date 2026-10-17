@@ -141,9 +141,9 @@ function AssignmentsTab() {
               message={list.data!.assignments.length === 0 ? 'Everyone has the access that comes with their user type. Assign a role to give someone more.' : undefined} />
           </Card>
         ) : (
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+              <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
                 <tr>
                   <th className="px-5 py-3 font-medium">Holder</th>
                   <th className="px-5 py-3 font-medium">Role</th>
@@ -263,7 +263,7 @@ function RolesTab() {
               const perms = rolePermissions(r);
               const areas = [...new Set(perms.map((p) => p.split(':')[0]))].sort();
               return (
-                <div key={r.id} className="flex flex-col bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+                <div key={r.id} className="flex flex-col bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5">
                   <div className="flex items-start justify-between gap-3">
                     <Link to={`/roles/${r.id}`} className="font-semibold text-slate-800 dark:text-white hover:text-blue-600">{r.name}</Link>
                     {r.isSystem && <Badge value="BUILT_IN" />}

@@ -3,7 +3,8 @@ import { Users, Package, Building2, UsersRound, AlertTriangle } from 'lucide-rea
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
-import { Badge, Card, CHART_TOOLTIP, DataView, EmptyState, PageHeader, StatCard, formatRelative, humanize } from '../components/ui';
+import { useTheme } from '../contexts/ThemeContext';
+import { Badge, Card, CHART_TOOLTIP, chartColors, DataView, EmptyState, PageHeader, StatCard, formatRelative, humanize } from '../components/ui';
 
 interface TenantDashboard {
   tenant: { name: string; plan: string; status: string };
@@ -20,6 +21,7 @@ interface TenantDashboard {
 const ENVIRONMENTS = ['PRODUCTION', 'STAGING', 'DEVELOPMENT'];
 
 export default function Dashboard() {
+  const chart = chartColors(useTheme().dark);
   const { user, hasPermission } = useAuth();
   const dashboard = useApi<TenantDashboard>('/bff/dashboard');
 
@@ -42,7 +44,7 @@ export default function Dashboard() {
               />
 
               {failing > 0 && (
-                <div className="flex items-center gap-3 p-4 rounded-xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-700 dark:text-red-300">
+                <div className="flex items-center gap-3 p-4 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-700 dark:text-red-300">
                   <AlertTriangle size={18} />
                   {failing} deployed application{failing === 1 ? ' is' : 's are'} in an error state.
                   <Link to="/applications?status=ERROR" className="font-medium underline">Review</Link>
@@ -53,7 +55,7 @@ export default function Dashboard() {
                 <StatCard label="Users" value={d.users.total} icon={Users} tone="purple" />
                 {apps && <StatCard label="Apps running" value={`${running}/${apps.total}`} icon={Package} tone={failing ? 'red' : 'green'} />}
                 <StatCard label="Groups" value={d.counts.groups} icon={UsersRound} tone="blue" />
-                <StatCard label="Organizations" value={d.counts.organizations} icon={Building2} tone="amber"
+                <StatCard label="Organizations" value={d.counts.organizations} icon={Building2} tone="slate"
                   hint={`${d.counts.entitledApplications} entitled app${d.counts.entitledApplications === 1 ? '' : 's'}`} />
               </div>
 
@@ -61,11 +63,11 @@ export default function Dashboard() {
                 <Card title="Activity" description="Events in this tenant, last 14 days" className="lg:col-span-2">
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={days}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                      <XAxis dataKey="label" stroke="#94a3b8" fontSize={12} />
-                      <YAxis stroke="#94a3b8" fontSize={12} allowDecimals={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} vertical={false} />
+                      <XAxis dataKey="label" stroke={chart.axis} fontSize={12} />
+                      <YAxis stroke={chart.axis} fontSize={12} allowDecimals={false} />
                       <Tooltip {...CHART_TOOLTIP} cursor={{ fill: 'rgba(148,163,184,0.1)' }} formatter={(v) => [v, 'Events']} />
-                      <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="count" fill={chart.accent} radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </Card>

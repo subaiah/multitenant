@@ -4,7 +4,8 @@ import { API_URL, apiGet, apiPost, isMfaStep, type MfaStep } from '../lib/api-cl
 import { TwoFactorSignIn } from '../components/TwoFactor';
 import { useAuth } from '../contexts/AuthContext';
 import { portalHome } from '../lib/permissions';
-import { Mail, Lock, ArrowRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { APP_NAME } from '../lib/brand';
 
 interface TenantInfo {
   id: string | null; // null for the platform portal
@@ -85,10 +86,8 @@ export default function Login() {
   const [error, setError] = useState<string | null>(searchParams.get('sso_error') ? searchParams.get('message') || 'Single sign-on failed' : null);
   // Password or emailed code accepted; two-factor comes next
   const [mfaStep, setMfaStep] = useState<MfaStep | null>(null);
-  const [loginMode, setLoginMode] = useState<'provider-selection' | 'email-password' | 'otp'>(
-    // Arriving with an email (after accepting an invitation or resetting a password): go straight to the password form
-    searchParams.get('email') ? 'email-password' : 'provider-selection',
-  );
+  // Single sign-on buttons and the password form show together; a code sent by email replaces the form
+  const [loginMode, setLoginMode] = useState<'email-password' | 'otp'>('email-password');
   const [email, setEmail] = useState(searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
@@ -144,7 +143,7 @@ export default function Login() {
     setPassword('');
     setOtp('');
     setSubmitting(false);
-    setLoginMode(hasProviders ? 'provider-selection' : 'email-password');
+    setLoginMode('email-password');
   };
 
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {
@@ -220,34 +219,28 @@ export default function Login() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900" role="status" aria-label="Loading">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-slate-300 border-t-blue-600"></div>
       </div>
     );
   }
 
   if (error && !tenant) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 text-center">
-          <AlertCircle size={48} className="mx-auto text-red-500 mb-4" />
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">
-            Tenant Not Found
-          </h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-6">{error}</p>
-          <Link
-            to="/login"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
-          >
-            Go to Login
-            <ArrowRight size={16} />
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 px-4 pt-24">
+        <div className="max-w-sm mx-auto space-y-4">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">We couldn't find that organization</h1>
+          <p className="text-slate-600 dark:text-slate-400">{error}</p>
+          <p className="text-slate-600 dark:text-slate-400">Check the sign-in address you were given, or look up your organization by its name.</p>
+          <Link to="/login" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">
+            Find my organization
           </Link>
         </div>
       </div>
     );
   }
 
-  const primaryColor = tenant?.primaryColor || '#3b82f6';
+  const primaryColor = tenant?.primaryColor || 'var(--color-blue-600)';
   const noticeText = notice === 'invite-accepted'
     ? 'Your account is ready. Sign in with your new password.'
     : notice === 'password-reset'
@@ -262,331 +255,165 @@ export default function Login() {
       ? 'Your session reached its maximum length. Please sign in again.'
       : null;
   const ssoOnly = tenant?.authConfig?.ssoOnly || false;
+  const isPlatform = !tenant?.id;
+  const fieldClass =
+    'w-full h-10 px-3 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25';
+  const quietLink = 'text-sm font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 p-4">
-      <div className="max-w-md w-full">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 px-4 pt-16 sm:pt-24 pb-10">
+      <div className="max-w-sm mx-auto flex flex-col gap-7">
+        <div className="flex flex-col gap-4">
+          {tenant?.logoUrl ? (
+            <img src={tenant.logoUrl} alt={tenant.name} className="h-11 w-auto self-start" />
+          ) : (
+            <div
+              aria-hidden
+              className="w-11 h-11 rounded-lg flex items-center justify-center text-white font-semibold text-xl"
+              style={{ backgroundColor: primaryColor }}
+            >
+              {(isPlatform ? APP_NAME : tenant?.name ?? 'M').charAt(0)}
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">
+              {isPlatform ? `Sign in to ${APP_NAME}` : tenant?.loginTitle || `Sign in to ${tenant?.name}`}
+            </h1>
+            <p className="text-slate-600 dark:text-slate-400">
+              {isPlatform ? 'Platform administration' : tenant?.loginSubtitle || 'Use the account your organization gave you.'}
+            </p>
+          </div>
+        </div>
+
         {timeoutText && (
-          <div role="status" className="mb-6 flex items-center gap-2 p-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300">
-            <Clock size={18} /> {timeoutText}
+          <div role="status" className="flex items-start gap-2 p-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300">
+            <Clock size={18} className="shrink-0 mt-px" /> {timeoutText}
           </div>
         )}
         {noticeText && (
-          <div role="status" className="mb-6 flex items-center gap-2 p-3 rounded-lg border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/10 text-sm text-green-700 dark:text-green-300">
-            <CheckCircle2 size={18} /> {noticeText}
+          <div role="status" className="flex items-start gap-2 p-3 rounded-md border border-green-200 dark:border-green-500/30 bg-green-50 dark:bg-green-500/10 text-sm text-green-800 dark:text-green-300">
+            <CheckCircle2 size={18} className="shrink-0 mt-px" /> {noticeText}
+          </div>
+        )}
+        {error && (
+          <div role="alert" className="flex items-start gap-2 p-3 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-800 dark:text-red-300">
+            <AlertCircle size={18} className="shrink-0 mt-px" /> {error}
           </div>
         )}
 
-        {/* Logo and Branding */}
-        <div className="text-center mb-8">
-          {tenant?.logoUrl ? (
-            <img
-              src={tenant.logoUrl}
-              alt={tenant.name}
-              className="h-16 mx-auto mb-4"
-            />
-          ) : (
-            <div
-              className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center text-white font-bold text-2xl"
+        {mfaStep && (
+          <TwoFactorSignIn step={mfaStep} primaryColor={primaryColor} onSignedIn={() => void finishSignIn()} onCancel={restart} />
+        )}
+
+        {!mfaStep && loginMode !== 'otp' && (
+          <>
+            {hasProviders && (
+              <div className="flex flex-col gap-3">
+                {tenant.authConfig?.providers.map((provider) => {
+                  const info = providerDetails[provider.provider];
+                  if (!info) return null;
+                  return (
+                    <button
+                      key={provider.id}
+                      onClick={() => handleProviderLogin(provider.id)}
+                      disabled={submitting}
+                      className="h-11 w-full flex items-center justify-center gap-3 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-medium disabled:opacity-50"
+                    >
+                      <span aria-hidden className="min-w-6 h-6 px-1 rounded bg-slate-100 dark:bg-slate-700 text-[11px] font-semibold flex items-center justify-center">{info.icon}</span>
+                      Continue with {info.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {hasProviders && !ssoOnly && (
+              <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+                <span className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />or with your email<span className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+              </div>
+            )}
+
+            {!ssoOnly && (
+              <form onSubmit={handleEmailPasswordLogin} className="flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Email</span>
+                  <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required className={fieldClass} />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Password</span>
+                    <Link to={`/${tenant?.slug ?? tenantSlug}/forgot-password`} className={quietLink}>Forgot password?</Link>
+                  </span>
+                  <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required className={fieldClass} />
+                </label>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="h-11 w-full flex items-center justify-center gap-2 rounded-md text-white font-medium disabled:opacity-60"
+                  style={{ backgroundColor: primaryColor }}
+                >
+                  {submitting && <span className="animate-spin rounded-full h-4 w-4 border-2 border-white/40 border-t-white" aria-hidden />}
+                  {submitting ? 'Signing in…' : 'Sign in'}
+                </button>
+                {tenant?.authConfig?.otpEnabled && (
+                  <button type="button" onClick={handleRequestOtp} disabled={submitting || !email} className={`${quietLink} self-center disabled:opacity-50`}>
+                    Email me a sign-in code instead
+                  </button>
+                )}
+              </form>
+            )}
+          </>
+        )}
+
+        {!mfaStep && loginMode === 'otp' && (
+          <form onSubmit={handleVerifyOtp} className="flex flex-col gap-4">
+            {devOtp && (
+              <p className="p-3 rounded-md border border-dashed border-green-400 bg-green-50 dark:bg-green-500/10 text-sm text-green-800 dark:text-green-300">
+                Development only, the code is <span className="font-mono text-base font-semibold tracking-widest">{devOtp}</span>
+              </p>
+            )}
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Sign-in code</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                required
+                maxLength={6}
+                className={`${fieldClass} h-12 text-center text-2xl font-mono tracking-widest`}
+                placeholder="000000"
+              />
+              <span className="text-sm text-slate-600 dark:text-slate-400">We sent a 6-digit code to {email}.</span>
+            </label>
+            <button
+              type="submit"
+              disabled={submitting || otp.length !== 6}
+              className="h-11 w-full rounded-md text-white font-medium disabled:opacity-60"
               style={{ backgroundColor: primaryColor }}
             >
-              {tenant?.name.charAt(0) || 'M'}
-            </div>
-          )}
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white mb-2">
-            {tenant?.loginTitle || 'Welcome'}
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400">
-            {tenant?.loginSubtitle || 'Sign in to your account'}
-          </p>
-          {tenant && (
-            <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
-              {tenant.name}
-            </p>
-          )}
-        </div>
+              {submitting ? 'Checking…' : 'Sign in'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode('email-password');
+                setOtp('');
+                setDevOtp(null);
+              }}
+              className={`${quietLink} self-center`}
+            >
+              Use my password instead
+            </button>
+          </form>
+        )}
 
-        {/* Login Card */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8">
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-lg">
-              <div className="flex items-start gap-3">
-                <AlertCircle size={20} className="text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
-              </div>
-            </div>
-          )}
-
-          {mfaStep && (
-            <TwoFactorSignIn step={mfaStep} primaryColor={primaryColor} onSignedIn={() => void finishSignIn()} onCancel={restart} />
-          )}
-
-          {/* Provider Selection */}
-          {!mfaStep && loginMode === 'provider-selection' && hasProviders && (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-600 dark:text-slate-400 text-center mb-6">
-                Choose your sign-in method
-              </p>
-
-              {tenant.authConfig?.providers.map((provider) => {
-                const providerInfo = providerDetails[provider.provider];
-                if (!providerInfo) return null;
-
-                return (
-                  <button
-                    key={provider.id}
-                    onClick={() => handleProviderLogin(provider.id)}
-                    disabled={submitting}
-                    className={`w-full flex items-center justify-center gap-3 px-6 py-3 ${providerInfo.color} text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md`}
-                  >
-                    <span className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-sm font-bold">
-                      {providerInfo.icon}
-                    </span>
-                    <span>Continue with {providerInfo.name}</span>
-                  </button>
-                );
-              })}
-
-              {!ssoOnly && (
-                <>
-                  <div className="relative my-6">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-slate-200 dark:border-slate-700"></div>
-                    </div>
-                    <div className="relative flex justify-center text-sm">
-                      <span className="px-4 bg-white dark:bg-slate-800 text-slate-500">
-                        or continue with email
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setLoginMode('email-password')}
-                    className="w-full flex items-center justify-center gap-3 px-6 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium rounded-lg transition-colors"
-                  >
-                    <Mail size={20} />
-                    <span>Sign in with Email</span>
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Email/Password Login */}
-          {!mfaStep && (loginMode === 'email-password' || (!hasProviders && loginMode === 'provider-selection')) && (
-            <form onSubmit={handleEmailPasswordLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200"
-                    placeholder="you@example.com"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Password
-                  </label>
-                  <Link to={`/${tenant?.slug ?? tenantSlug}/forgot-password`} className="text-xs font-medium text-blue-600 hover:text-blue-700">
-                    Forgot password?
-                  </Link>
-                </div>
-                <div className="relative">
-                  <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200"
-                    placeholder="••••••••"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
-                style={{ backgroundColor: primaryColor }}
-              >
-                {submitting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Signing in...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Sign In with Password</span>
-                    <ArrowRight size={16} />
-                  </>
-                )}
-              </button>
-
-              {/* OTP Option */}
-              {tenant?.authConfig?.otpEnabled && (
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-slate-200 dark:border-slate-700"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-4 bg-white dark:bg-slate-800 text-slate-500">or</span>
-                  </div>
-                </div>
-              )}
-
-              {tenant?.authConfig?.otpEnabled && (
-                <button
-                  type="button"
-                  onClick={handleRequestOtp}
-                  disabled={submitting || !email}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {submitting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-slate-600"></div>
-                      <span>Requesting OTP...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Sign In with OTP</span>
-                      <ArrowRight size={16} />
-                    </>
-                  )}
-                </button>
-              )}
-
-              {hasProviders && loginMode === 'email-password' && (
-                <button
-                  type="button"
-                  onClick={() => setLoginMode('provider-selection')}
-                  className="w-full text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-                >
-                  ← Back to sign-in options
-                </button>
-              )}
-            </form>
-          )}
-
-          {/* OTP Login */}
-          {!mfaStep && loginMode === 'otp' && (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              {/* Development OTP Display */}
-              {devOtp && (
-                <div className="p-4 bg-green-50 dark:bg-green-500/10 border-2 border-green-300 dark:border-green-500/50 rounded-lg">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 size={20} className="text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-green-800 dark:text-green-300 mb-2">
-                        Development Mode - Your OTP:
-                      </p>
-                      <div className="bg-white dark:bg-slate-900 px-4 py-3 rounded-lg border-2 border-dashed border-green-400 dark:border-green-500">
-                        <p className="text-3xl font-mono font-bold text-center text-green-700 dark:text-green-400 tracking-widest">
-                          {devOtp}
-                        </p>
-                      </div>
-                      <p className="text-xs text-green-700 dark:text-green-400 mt-2">
-                        This OTP is shown for development purposes only
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
-                  Enter OTP Code
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    required
-                    maxLength={6}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-700 dark:text-slate-200 text-center text-2xl font-mono tracking-widest"
-                    placeholder="000000"
-                  />
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-                  Enter the 6-digit code sent to {email}
-                </p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting || otp.length !== 6}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
-                style={{ backgroundColor: primaryColor }}
-              >
-                {submitting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Verifying...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Verify & Sign In</span>
-                    <ArrowRight size={16} />
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode('email-password');
-                  setOtp('');
-                  setDevOtp(null);
-                }}
-                className="w-full text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-              >
-                ← Back to email/password
-              </button>
-            </form>
-          )}
-
-          {/* No providers configured */}
-          {!mfaStep && !hasProviders && !ssoOnly && loginMode !== 'otp' && (
-            <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30 rounded-lg">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 size={20} className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-                    No SSO providers configured
-                  </p>
-                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
-                    Use email and password to sign in
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="text-center mt-8">
-          {!tenantSlug && (
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Don't have an account? Ask your organization's administrator for an invitation.
-            </p>
-          )}
-          {tenantSlug && (
-            <p className="text-xs text-slate-500 dark:text-slate-500">
-              Protected by multi-tenant authentication
-            </p>
-          )}
-        </div>
+        <p className="pt-5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400">
+          {isPlatform
+            ? 'Platform accounts are created by an administrator.'
+            : `No account yet? Ask an administrator at ${tenant?.name} to invite you.`}
+        </p>
       </div>
     </div>
   );

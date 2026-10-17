@@ -2,6 +2,79 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * The design tokens. Pages use Tailwind's names (slate-*, blue-*); this maps
+ * them onto the kit's own palette, so a product re-skins the whole app by
+ * changing the values here:
+ *   slate  the neutrals: ink text, rules, surfaces (cool grey)
+ *   blue   the accent: actions, links, focus, the current page (verdigris)
+ *   sidebar the navigation column (graphite), the same in both themes
+ */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-slate-50: #f5f6f8;
+  --color-slate-100: #eceef2;
+  --color-slate-200: #dfe3e9;
+  --color-slate-300: #c9cfd8;
+  --color-slate-400: #9aa2af;
+  --color-slate-500: #687182;
+  --color-slate-600: #535c6c;
+  --color-slate-700: #353e4d;
+  --color-slate-800: #1d2532;
+  --color-slate-900: #131923;
+  --color-slate-950: #0b1017;
+
+  --color-blue-50: #e8f5f2;
+  --color-blue-100: #cdebe4;
+  --color-blue-200: #9fd8cb;
+  --color-blue-300: #67c0ad;
+  --color-blue-400: #3aa894;
+  --color-blue-500: #148e7a;
+  --color-blue-600: #0b7a6a;
+  --color-blue-700: #075e52;
+  --color-blue-800: #064c43;
+  --color-blue-900: #053d37;
+  --color-blue-950: #032622;
+
+  --color-sidebar: #1c2128;
+  --color-sidebar-raised: #2a313b;
+  --color-sidebar-line: #2e3640;
+  --color-sidebar-ink: #d5dae1;
+  --color-sidebar-muted: #8b94a3;
+  --color-sidebar-accent: #67c0ad;
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 0;
+}
+
+body {
+  background: var(--color-slate-50);
+  color: var(--color-slate-800);
+}
+
+.dark body {
+  background: var(--color-slate-900);
+  color: var(--color-slate-100);
+}
+
+/* One focus style everywhere: visible on light, dark and the sidebar */
+:focus-visible {
+  outline: 2px solid var(--color-blue-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -13,30 +86,30 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--color-slate-300);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--color-slate-400);
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: var(--color-slate-700);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: var(--color-slate-600);
 }
 
 /* Smooth transitions */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--color-slate-300) transparent;
 }
 
 .dark * {
-  scrollbar-color: #475569 transparent;
+  scrollbar-color: var(--color-slate-700) transparent;
 }
 
 /* Animation for deploying status */

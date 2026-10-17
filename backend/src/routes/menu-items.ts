@@ -85,7 +85,9 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const filteredItems = menuItems.filter(visible).map(item => ({
       ...item,
       children: item.children.filter(visible),
-    }));
+    }))
+      // A section (path "#…") with nothing left in it isn't shown
+      .filter((item) => !item.path.startsWith('#') || item.children.length > 0);
     
     return { menuItems: filteredItems };
   });

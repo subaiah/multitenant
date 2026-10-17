@@ -111,7 +111,7 @@ try {
   await admin.waitForLoadState('networkidle');
   await admin.screenshot({ path: `${SHOTS}/platform-dashboard.png`, fullPage: true });
   const platformMenu = await admin.locator('nav').innerText();
-  check('platform "coming soon" pages are hidden', !/Global Policies/.test(platformMenu), platformMenu.replace(/\s+/g, ' '));
+  check('platform "coming soon" pages are hidden', !/Global policies/i.test(platformMenu), platformMenu.replace(/\s+/g, ' '));
 
   // ---- 2. a tenant in its own database
   await admin.goto(`${APP}/platform/tenants`);
@@ -142,7 +142,7 @@ try {
   await owner.getByText(/Welcome back/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/tenant-dashboard.png`, fullPage: true });
   const tenantMenu = await owner.locator('nav').innerText();
-  check('sample-data pages are hidden', !/Infrastructure/.test(tenantMenu) && (await owner.getByText('Apps running').count()) === 0);
+  check('sample-data pages are hidden', !/Infrastructure/i.test(tenantMenu) && (await owner.getByText('Apps running').count()) === 0);
   await owner.goto(`${APP}/users`);
   await owner.locator('tr', { hasText: TENANT.admin }).waitFor();
   check('their Users page lists them', true);

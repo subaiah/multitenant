@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Building2, ArrowRight } from 'lucide-react';
+import { APP_NAME } from '../lib/brand';
 import { apiGet } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
 import { portalHome } from '../lib/permissions';
@@ -55,77 +55,49 @@ export default function SmartLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 p-4">
-      <div className="max-w-md w-full">
-        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full mb-4">
-              <Building2 className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
-              Welcome Back
-            </h1>
-            <p className="text-slate-600 dark:text-slate-400">
-              Enter your organization slug to continue
-            </p>
-          </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 px-4 pt-16 sm:pt-24 pb-10">
+      <div className="max-w-sm mx-auto flex flex-col gap-7">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">Sign in to {APP_NAME}</h1>
+          <p className="text-slate-600 dark:text-slate-400">Enter your organization's sign-in address to continue.</p>
+        </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="orgSlug" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                Organization Slug
-              </label>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <label htmlFor="orgSlug" className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Organization address</span>
+            <span className="flex items-center h-10 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/25">
+              <span className="pl-3 text-slate-500 font-mono text-sm" aria-hidden>/</span>
               <input
                 id="orgSlug"
                 type="text"
+                autoComplete="organization"
                 value={orgSlug}
                 onChange={(e) => setOrgSlug(e.target.value)}
-                placeholder="e.g., acme-corp"
-                className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="acme-corp"
+                className="flex-1 min-w-0 h-full px-1 bg-transparent font-mono text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
                 disabled={loading}
               />
-              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                This is the unique identifier for your organization
-              </p>
-            </div>
+            </span>
+            <span className="text-sm text-slate-600 dark:text-slate-400">It's in the invitation email, after the site's address.</span>
+          </label>
 
-            {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
-              </div>
-            )}
+          {error && (
+            <p role="alert" className="p-3 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-800 dark:text-red-300">{error}</p>
+          )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Verifying...</span>
-                </>
-              ) : (
-                <>
-                  <span>Continue</span>
-                  <ArrowRight size={20} />
-                </>
-              )}
-            </button>
-          </form>
+          <button
+            type="submit"
+            disabled={loading}
+            className="h-11 w-full flex items-center justify-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-60"
+          >
+            {loading && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />}
+            {loading ? 'Finding your organization…' : 'Continue'}
+          </button>
+        </form>
 
-          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
-            <p className="text-center text-sm text-slate-600 dark:text-slate-400">
-              Don't have an account? Ask your organization's administrator for an invitation.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 text-center">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Protected by multi-tenant authentication
-          </p>
-        </div>
+        <p className="pt-5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400">
+          No account yet? Ask your organization's administrator to invite you. Platform staff sign in at <a className="font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300" href="/platform/login">/platform/login</a>.
+        </p>
       </div>
     </div>
   );

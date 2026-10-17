@@ -157,7 +157,7 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
           <ArrowLeft size={14} />Roles
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{title}</h1>
+          <h1 className="text-2xl font-semibold text-slate-800 dark:text-white">{title}</h1>
           {builtIn && <Badge value="BUILT_IN" />}
         </div>
         {builtIn && (
@@ -171,7 +171,7 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
         <div className="space-y-6 min-w-0">
-          <section aria-label="Details" className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+          <section aria-label="Details" className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 space-y-4">
             <label className="block text-sm">
               <span className="text-slate-600 dark:text-slate-300">Name</span>
               <input required minLength={2} maxLength={50} value={name} disabled={!editable} onChange={(e) => setName(e.target.value)}
@@ -217,7 +217,7 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
                 const allOn = grantable.length > 0 && grantable.every((p) => selected.has(p.name));
                 return (
                   <fieldset key={r.resource} aria-label={r.label}
-                    className={`bg-white dark:bg-slate-800 rounded-xl border p-4 ${on > 0 ? 'border-blue-300 dark:border-blue-500/40' : 'border-slate-200 dark:border-slate-700'}`}>
+                    className={`bg-white dark:bg-slate-800 rounded-lg border p-4 ${on > 0 ? 'border-blue-300 dark:border-blue-500/40' : 'border-slate-200 dark:border-slate-700'}`}>
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div>
                         <legend className="font-medium text-slate-800 dark:text-white">{r.label}</legend>
@@ -258,9 +258,9 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
         </div>
 
         <aside aria-label="Summary" className="lg:sticky lg:top-6 space-y-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 space-y-4">
             <div>
-              <p className="text-3xl font-bold text-slate-800 dark:text-white">{selected.size}</p>
+              <p className="text-3xl font-semibold text-slate-800 dark:text-white">{selected.size}</p>
               <p className="text-sm text-slate-500">{selected.size === 1 ? 'permission' : 'permissions'} selected</p>
             </div>
 
@@ -314,7 +314,7 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
           </div>
 
           {role && (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5" aria-label="Held by">
+            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5" aria-label="Held by">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-slate-800 dark:text-white">Held by</h3>
                 <Link to={`/role-assignments?role=${encodeURIComponent(role.name)}`} className="text-xs text-blue-600 hover:text-blue-700">Manage</Link>

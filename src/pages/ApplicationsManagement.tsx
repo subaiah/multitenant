@@ -167,7 +167,7 @@ export default function ApplicationsManagement() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Applications</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Applications</h1>
         <p className="text-slate-600 dark:text-slate-400 mt-1">
           Manage applications and their permissions
         </p>
@@ -346,7 +346,7 @@ export default function ApplicationsManagement() {
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
               Create Application
             </h2>
             <div className="space-y-4">
@@ -428,7 +428,7 @@ export default function ApplicationsManagement() {
       {showEditModal && selectedApp && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
               Edit Application
             </h2>
             <div className="space-y-4">
@@ -492,7 +492,7 @@ export default function ApplicationsManagement() {
       {showPermissionModal && selectedApp && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-slate-800 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
               Add Permission
             </h2>
             <div className="space-y-4">

@@ -13,7 +13,7 @@ export function Dialog({ title, onClose, onSubmit, children, wide = false }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
       <form role="dialog" aria-label={title} onSubmit={onSubmit ?? ((e) => e.preventDefault())} onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
-        className={`w-full ${wide ? 'max-w-lg' : 'max-w-md'} max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-800 rounded-xl p-6 space-y-4 shadow-xl`}>
+        className={`w-full ${wide ? 'max-w-lg' : 'max-w-md'} max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-800 rounded-lg p-6 space-y-4 shadow-xl`}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">{title}</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>

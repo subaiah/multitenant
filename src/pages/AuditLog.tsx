@@ -11,7 +11,7 @@ import {
 import { API_URL, apiGet, apiPost } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
-import { Card, EmptyState, ErrorState, LoadingState, PageHeader, humanize, inputClass, secondaryButtonClass, selectClass } from '../components/ui';
+import { Card, EmptyState, ErrorState, LoadingState, PageHeader, humanize, inputClass, secondaryButtonClass, selectClass, formatDateTime } from '../components/ui';
 
 interface Entry {
   id: string;
@@ -198,7 +198,7 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
               <p className="mt-1 text-xs opacity-80">
                 {report.entries.toLocaleString()} live entr{report.entries === 1 ? 'y' : 'ies'}
                 {report.archives > 0 && ` and ${report.archivedEntries.toLocaleString()} in ${report.archives} archive file${report.archives === 1 ? '' : 's'}`} checked
-                {report.lastSeq ? ` (up to #${report.lastSeq})` : ''} · {new Date(report.verifiedAt).toLocaleString()}
+                {report.lastSeq ? ` (up to #${report.lastSeq})` : ''} · {formatDateTime(report.verifiedAt)}
               </p>
               {!report.ok && (
                 <ul className="mt-2 list-disc pl-5 space-y-0.5">
@@ -249,9 +249,9 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
       {error ? <ErrorState error={error} onRetry={() => void load()} /> : rows.length === 0 && loading ? <LoadingState /> : rows.length === 0 ? (
         <Card><EmptyState title={anyFilter ? 'No entries match these filters' : 'Nothing recorded yet'} /></Card>
       ) : (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900/50 text-left text-xs uppercase text-slate-500 dark:text-slate-400">
+            <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
               <tr>
                 <th className="w-8" />
                 <th className="px-3 py-3 font-medium">When</th>
@@ -270,7 +270,7 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
                   <Fragment key={e.id}>
                     <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40" onClick={() => setOpen(isOpen ? null : e.id)} aria-expanded={isOpen}>
                       <td className="pl-3 text-slate-400">{isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-500" title={e.occurredAt}>{new Date(e.occurredAt).toLocaleString()}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-500" title={e.occurredAt}>{formatDateTime(e.occurredAt)}</td>
                       <td className="px-3 py-2.5">
                         <span className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                           <Actor size={14} className="text-slate-400 shrink-0" aria-label={ACTORS[e.actorType].label} />
