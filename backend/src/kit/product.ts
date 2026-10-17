@@ -66,6 +66,14 @@ export interface ProductModule {
    */
   notificationTypes?: Record<string, NotificationType>;
 
+  /**
+   * What an organization's data export leaves out of the product's tables
+   * (lib/data-export.ts): whole tables (caches, queues) and columns holding
+   * secrets, e.g. { tables: ['job_queue'], columns: { webhooks: ['signing_secret'] } }.
+   * Every other tenant table is exported.
+   */
+  exportExclusions?: { tables?: string[]; columns?: Record<string, string[]> };
+
   /** Runs when a tenant is created, after the kit's defaults (seed product data here). */
   onTenantCreated?: (tenantId: string, db: TenantDb) => Promise<void>;
 }

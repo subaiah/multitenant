@@ -609,3 +609,34 @@ model SignupRequest {
   @@index([expiresAt])
   @@map("signup_requests")
 }
+
+// An organization's data, downloaded as a ZIP of CSV files (lib/data-export.ts).
+// The file is in EXPORT_DIR; the row says who asked, how it went, and until when
+// it can be downloaded.
+enum DataExportStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+}
+
+model DataExport {
+  id             String           @id @default(uuid())
+  tenantId       String           @map("tenant_id")
+  requestedById  String?          @map("requested_by_id")
+  requestedBy    String?          @map("requested_by")
+  status         DataExportStatus @default(PENDING)
+  error          String?
+  sizeBytes      BigInt?          @map("size_bytes")
+  /// Tables and row counts, as in the file's manifest
+  tables         Json?
+  createdAt      DateTime         @default(now()) @map("created_at")
+  startedAt      DateTime?        @map("started_at")
+  finishedAt     DateTime?        @map("finished_at")
+  expiresAt      DateTime?        @map("expires_at")
+  downloadCount  Int              @default(0) @map("download_count")
+
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@map("data_exports")
+}

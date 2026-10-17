@@ -129,3 +129,16 @@ export function organizationClosedEmail(to: string, organization: string, closed
 <p>It and all its data will be deleted on <strong>${escape(when)}</strong>. If this was a mistake, contact the platform team before then to restore it.</p>`),
   };
 }
+
+/** To whoever asked for their organization's data export, when it's ready. */
+export function dataExportReadyEmail(to: string, organization: string, link: string, expiresAt: Date): Mail {
+  const when = day(expiresAt);
+  return {
+    to,
+    subject: `${organization}'s data export is ready`,
+    text: `The export of ${organization}'s data you asked for is ready. Download it from the organization's Settings page until ${when}: ${link}`,
+    html: layout(`Your data export is ready`, `<p>The export of <strong>${escape(organization)}</strong>'s data you asked for is ready. Download it from the organization's Settings page until ${escape(when)}.</p>
+${button(link, 'Go to Settings')}
+<p style="color:#475569">For safety the file itself isn't attached: you sign in to download it.</p>`),
+  };
+}

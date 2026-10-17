@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { SupportAccessCard } from '../components/SupportAccessCard';
 import { CustomDomainCard } from '../components/CustomDomainCard';
 import { CloseOrganizationCard } from '../components/CloseOrganizationCard';
+import { DataExportCard } from '../components/DataExportCard';
 import { apiPatch } from '../lib/api-client';
 import { Badge, Card, DataView, PageHeader, formatDate, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -129,6 +130,8 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             <p className="text-xs text-slate-500 mt-4">Only tenant admins can change these settings.</p>
           )}
         </Card>
+
+        <DataExportCard />
 
         <CloseOrganizationCard name={tenant.name} slug={tenant.slug} />
       </div>

@@ -180,7 +180,24 @@ Turn on the bot check before you announce a public sign-up page.
 - After `CLOSE_GRACE_DAYS` (default 30) it is deleted with all its data.
 - Until then, platform staff can **Restore** it from its panel.
 
-A background check every `TENANT_LIFECYCLE_INTERVAL_MS` (default one hour, on one server at a time) sends the trial emails, deletes closed organizations whose time is up, and removes old sign-up requests.
+## Data exports
+
+A tenant's administrators can export all of their organization's data from Settings. The export also works on an ended trial and before closing.
+
+- **Format.** A ZIP with:
+  - one CSV file per tenant table (the product's own tables too), in UTF-8 with a header row;
+  - `manifest.json`, listing the tables, columns and row counts;
+  - a `README.txt`.
+- **Isolation.** It's read in one read-only transaction as the tenant's own database role, so row-level security keeps every other tenant's rows out.
+- **Left out:** password hashes, two-factor secrets and recovery codes, SSO client secrets, and short-lived sign-in records. A product leaves out more with `exportExclusions` in `src/product/index.ts`.
+- **Spreadsheet safety.** Text that starts like a formula is prefixed with `'` so spreadsheet apps don't run it.
+- **Background work.** Exports are built in the background. The person who asked gets an email when it's ready, and downloads it from Settings by signing in (the file is never attached to the email).
+- **Storage.** Files are kept in `EXPORT_DIR` (`/data/exports` in the image, a volume in Compose) for `EXPORT_RETENTION_DAYS` (default 7), then removed. With more than one API server, `EXPORT_DIR` must be shared storage.
+- **Who.** Only the organization's administrators, at most 5 exports a day. Platform staff can't export a tenant's data; support access stays within approved sessions in the app.
+
+Requests and downloads are recorded in the organization's audit log.
+
+A background check every `TENANT_LIFECYCLE_INTERVAL_MS` (default one hour, on one server at a time) sends the trial emails, deletes closed organizations whose time is up, removes old sign-up requests and expired data exports, and finishes exports a restart interrupted.
 
 ## Custom domains
 

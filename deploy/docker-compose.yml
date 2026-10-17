@@ -98,6 +98,7 @@ services:
     environment: *api-env
     volumes:
       - audit-archive:/data/audit-archive
+      - exports:/data/exports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -127,6 +128,8 @@ volumes:
   pgdata:
   # Audit log entries past AUDIT_RETENTION_DAYS: back these up with the database
   audit-archive:
+  # Organizations' data exports, kept EXPORT_RETENTION_DAYS (no need to back up)
+  exports:
   # Caddy's certificates
   caddy-data:
   caddy-config:

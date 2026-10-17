@@ -37,7 +37,8 @@ RUN npm ci --omit=dev --omit=optional --no-audit --no-fund && npm cache clean --
 FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production \
     PORT=4000 \
-    AUDIT_ARCHIVE_DIR=/data/audit-archive
+    AUDIT_ARCHIVE_DIR=/data/audit-archive \
+    EXPORT_DIR=/data/exports
 WORKDIR /app
 COPY --from=deps --chown=root:root /app/node_modules ./node_modules
 COPY --from=build --chown=root:root /app/dist ./dist
@@ -47,9 +48,9 @@ COPY --chown=root:root package.json ./
 COPY --chown=root:root prisma/control/migrations ./prisma/control/migrations
 COPY --chown=root:root prisma/tenant/migrations ./prisma/tenant/migrations
 COPY --chown=root:root prisma/tenant/setup-roles.sql ./prisma/tenant/setup-roles.sql
-# Audit archives must outlive the container: mount a volume here
-RUN mkdir -p /data/audit-archive && chown node:node /data/audit-archive
-VOLUME ["/data/audit-archive"]
+# Audit archives and data exports must outlive the container: mount volumes here
+RUN mkdir -p /data/audit-archive /data/exports && chown node:node /data/audit-archive /data/exports
+VOLUME ["/data/audit-archive", "/data/exports"]
 # The code is owned by root and read-only to the server's own user
 USER node
 EXPOSE 4000

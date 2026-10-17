@@ -27,6 +27,7 @@ import { accountRoutes } from './routes/account.js';
 import { signupRoutes, siteRoutes, tlsAskRoutes } from './routes/signup.js';
 import { customDomainRoutes } from './routes/custom-domain.js';
 import { closureRoutes } from './routes/organization-closure.js';
+import { dataExportRoutes } from './routes/data-exports.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
@@ -239,6 +240,7 @@ async function registerRoutes() {
     // The organization's own web address (lib/domains.ts)
     await protectedRoutes.register(customDomainRoutes, { prefix: '/custom-domain' });
     await protectedRoutes.register(closureRoutes, { prefix: '/organization' });
+    await protectedRoutes.register(dataExportRoutes, { prefix: '/data-exports' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
     if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });

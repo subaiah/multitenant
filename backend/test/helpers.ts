@@ -24,6 +24,7 @@ process.env.AUDIT_ARCHIVE_INTERVAL_MS ??= '0';
 process.env.NOTIFICATION_POLL_MS ??= '0';
 // Audit archives (also written when test tenants are deleted) go somewhere disposable
 process.env.AUDIT_ARCHIVE_DIR ??= join(tmpdir(), 'multitenant-test-audit-archive');
+process.env.EXPORT_DIR ??= join(tmpdir(), 'multitenant-test-exports');
 
 export const PASSWORD = 'correct-horse-battery';
 // A port the OS says is free (a fixed range could hit a dev server already
