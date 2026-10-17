@@ -45,6 +45,9 @@ export interface NewTenant {
   createdById: string | null;
 }
 
+/** When a trial starting now ends (TRIAL_DAYS), or null for no end */
+export const trialEnd = (from = new Date()) => (config.trialDays > 0 ? new Date(from.getTime() + config.trialDays * 86_400_000) : null);
+
 export async function createTenantRecord(data: NewTenant) {
   await assertSlugAvailable(data.slug);
   return controlDb.tenant.create({
@@ -56,6 +59,7 @@ export async function createTenantRecord(data: NewTenant) {
       loginTitle: `Welcome to ${data.name}`,
       loginSubtitle: 'Sign in to your account',
       provisioningStatus: 'PENDING',
+      trialEndsAt: data.status === 'TRIAL' ? trialEnd() : null,
       initialAdminEmail: data.adminEmail,
       initialAdminName: data.adminName,
       createdById: data.createdById,

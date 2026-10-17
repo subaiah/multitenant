@@ -17,6 +17,10 @@ interface Tenant {
   status: string;
   primaryColor: string | null;
   customDomain: string | null;
+  trialEndsAt: string | null;
+  closedAt: string | null;
+  closedBy: string | null;
+  deleteAfter: string | null;
   createdAt: string;
   lastActiveAt: string | null;
   _count: { users: number; applications: number };
@@ -26,6 +30,11 @@ interface Tenant {
   provisioningError: string | null;
   migration: { last: string | null; at: string | null; error: string | null; behind: boolean } | null;
 }
+/** What the status badge says: closing and ended trials are worth seeing at a glance */
+const displayStatus = (t: Tenant) =>
+  t.closedAt ? 'CLOSING' : t.status === 'TRIAL' && t.trialEndsAt && new Date(t.trialEndsAt) <= new Date() ? 'TRIAL_ENDED' : t.status;
+const dateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : '');
+
 type Isolation = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
 
 const ISOLATION: Record<Isolation, { label: string; description: string }> = {
@@ -151,7 +160,7 @@ export default function Tenants() {
                     </div>
                     <div className="flex flex-wrap gap-2 mt-3">
                       <Badge value={t.plan} className="!bg-slate-100 dark:!bg-slate-700" />
-                      <Badge value={t.status} />
+                      <Badge value={displayStatus(t)} />
                       {t.isolation && t.isolation !== 'SHARED_TABLES' && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300"><Database size={12} />{ISOLATION[t.isolation].label}</span>
                       )}
@@ -208,10 +217,25 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
   const canManage = hasPermission('tenants:manage');
   const [plan, setPlan] = useState(tenant.plan);
   const [status, setStatus] = useState(tenant.status);
+  const [trialEnds, setTrialEnds] = useState(dateInput(tenant.trialEndsAt));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState<'retry' | 'delete' | 'rotate' | null>(null);
-  const dirty = plan !== tenant.plan || status !== tenant.status;
+  const [working, setWorking] = useState<'retry' | 'delete' | 'rotate' | 'restore' | null>(null);
+  const trialChanged = status === 'TRIAL' && trialEnds !== dateInput(tenant.trialEndsAt);
+  const dirty = plan !== tenant.plan || status !== tenant.status || trialChanged;
+
+  const restore = async () => {
+    setWorking('restore');
+    setError(null);
+    try {
+      await apiPost(`/tenants/${tenant.id}/restore`);
+      await onChanged(`${tenant.name} was restored. Its people can sign in again.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Restore failed');
+    } finally {
+      setWorking(null);
+    }
+  };
 
   const retry = async () => {
     setWorking('retry');
@@ -260,7 +284,8 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
     setSaving(true);
     setError(null);
     try {
-      await apiPatch(`/tenants/${tenant.id}`, { plan, status });
+      // A date means the end of that day (UTC); empty means no end
+      await apiPatch(`/tenants/${tenant.id}`, { plan, status, ...(trialChanged && { trialEndsAt: trialEnds ? `${trialEnds}T23:59:59.000Z` : null }) });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -320,6 +345,20 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
           )}
         </section>
 
+        {tenant.closedAt && (
+          <section aria-label="Closed" className="p-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm space-y-2">
+            <p className="font-medium text-red-800 dark:text-red-300">Closed by its admins</p>
+            <p className="text-red-800/90 dark:text-red-300/90">
+              {tenant.closedBy ?? 'An administrator'} closed it on {formatDate(tenant.closedAt)}. It will be deleted on {formatDate(tenant.deleteAfter)} unless restored.
+            </p>
+            {canManage && (
+              <button onClick={restore} disabled={working !== null} className={secondaryButtonClass}>
+                {working === 'restore' ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}Restore
+              </button>
+            )}
+          </section>
+        )}
+
         <div className="space-y-3">
           <label className="block text-sm">
             <span className="text-slate-600 dark:text-slate-300">Plan</span>
@@ -333,6 +372,13 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
               {STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
             </select>
           </label>
+          {status === 'TRIAL' && (
+            <label className="block text-sm">
+              <span className="text-slate-600 dark:text-slate-300">Trial ends</span>
+              <input type="date" value={trialEnds} disabled={!canManage} onChange={(e) => setTrialEnds(e.target.value)} className={`${inputClass} mt-1`} />
+              <span className="block mt-1 text-xs text-slate-500">After this date the organization is read-only. Leave empty for no end.</span>
+            </label>
+          )}
           {!canManage && <p className="text-xs text-slate-500">Only platform admins can change plan or status.</p>}
           {status === 'SUSPENDED' && tenant.status !== 'SUSPENDED' && (
             <p className="text-xs text-red-600 dark:text-red-400">Suspending blocks every user in this tenant from signing in.</p>

@@ -92,6 +92,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
         id: true,
         slug: true,
         status: true,
+        closedAt: true,
       },
     });
 
@@ -104,7 +105,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     if (tenant.status === 'SUSPENDED') {
-      throw new AppError('Organization is suspended', 403);
+      throw new AppError(tenant.closedAt ? 'This organization was closed' : 'Organization is suspended', 403);
     }
 
     return {

@@ -10,10 +10,11 @@ import { APP_NAME } from '../lib/brand';
 import type { PasswordPolicy } from '../lib/password-policy';
 import { AuthCard, NewPasswordField, authButtonClass, authInputClass, meetsPolicy } from '../components/AuthCard';
 import { LoadingState } from '../components/ui';
+import { Turnstile } from '../components/Turnstile';
 
 export interface SiteInfo {
   tenant: { slug: string; name: string } | null;
-  signup: { passwordPolicy: PasswordPolicy } | null;
+  signup: { passwordPolicy: PasswordPolicy; captchaSiteKey?: string | null; trialDays?: number } | null;
 }
 
 /** "Acme Corp." -> "acme-corp" */
@@ -51,6 +52,8 @@ export default function SignUp() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   useEffect(() => {
     apiGet<SiteInfo>('/bff/site', { skipAuth: true })
@@ -69,10 +72,12 @@ export default function SignUp() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await apiPost<{ email: string }>('/bff/signup', { organization, slug: effectiveSlug, name, email, password }, { skipAuth: true });
+      const res = await apiPost<{ email: string }>('/bff/signup', { organization, slug: effectiveSlug, name, email, password, captchaToken: captcha ?? undefined }, { skipAuth: true });
       setSentTo(res.email);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign up');
+      // Each answer works once
+      if (site?.signup?.captchaSiteKey) setCaptchaReset((n) => n + 1);
     } finally {
       setSubmitting(false);
     }
@@ -98,10 +103,11 @@ export default function SignUp() {
   }
 
   const slugOk = SLUG.test(effectiveSlug);
-  const ready = organization.trim().length >= 2 && slugOk && name.trim().length >= 2 && email.includes('@') && meetsPolicy(password, site.signup.passwordPolicy);
+  const needsCaptcha = !!site.signup.captchaSiteKey;
+  const ready = (!needsCaptcha || !!captcha) && organization.trim().length >= 2 && slugOk && name.trim().length >= 2 && email.includes('@') && meetsPolicy(password, site.signup.passwordPolicy);
 
   return (
-    <AuthCard title={`Create an organization on ${APP_NAME}`} subtitle="You'll be its administrator, and can invite your team once it's ready.">
+    <AuthCard title={`Create an organization on ${APP_NAME}`} subtitle={`You'll be its administrator, and can invite your team once it's ready.${site.signup.trialDays ? ` It starts with a free ${site.signup.trialDays}-day trial.` : ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <Field id="organization" label="Organization name">
           <input id="organization" className={authInputClass} autoComplete="organization" required value={organization}
@@ -123,6 +129,7 @@ export default function SignUp() {
           <input id="email" type="email" className={authInputClass} autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} />
         </Field>
         <NewPasswordField label="Password" value={password} onChange={setPassword} policy={site.signup.passwordPolicy} />
+        {site.signup.captchaSiteKey && <Turnstile siteKey={site.signup.captchaSiteKey} onToken={setCaptcha} resetKey={captchaReset} />}
         {error && <p className="p-3 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm text-red-800 dark:text-red-300" role="alert">{error}</p>}
         <button type="submit" disabled={submitting || !ready} className={authButtonClass}>
           {submitting ? 'Sending…' : 'Create organization'}

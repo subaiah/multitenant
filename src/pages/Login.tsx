@@ -226,12 +226,16 @@ export default function Login() {
   }
 
   if (error && !tenant) {
+    // It exists but can't be signed in to (closed or suspended), or it doesn't exist
+    const unavailable = /closed|suspended/i.test(error);
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 px-4 pt-24">
         <div className="max-w-sm mx-auto space-y-4">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">We couldn't find that organization</h1>
-          <p className="text-slate-600 dark:text-slate-400">{error}</p>
-          <p className="text-slate-600 dark:text-slate-400">Check the sign-in address you were given, or look up your organization by its name.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">
+            {unavailable ? 'This organization isn’t available' : "We couldn't find that organization"}
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400">{error}{unavailable && '. Contact the platform team if you think that’s a mistake.'}</p>
+          {!unavailable && <p className="text-slate-600 dark:text-slate-400">Check the sign-in address you were given, or look up your organization by its name.</p>}
           <Link to="/login" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">
             Find my organization
           </Link>

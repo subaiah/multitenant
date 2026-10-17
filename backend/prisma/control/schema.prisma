@@ -31,6 +31,15 @@ model Tenant {
   customDomainVerifiedAt DateTime? @map("custom_domain_verified_at")
   customDomainCheckedAt  DateTime? @map("custom_domain_checked_at")
   customDomainError      String?   @map("custom_domain_error")
+  // Trials (lib/tenant-lifecycle.ts): read-only once trialEndsAt passes
+  trialEndsAt            DateTime? @map("trial_ends_at")
+  trialReminderSentAt    DateTime? @map("trial_reminder_sent_at")
+  trialEndedNotifiedAt   DateTime? @map("trial_ended_notified_at")
+  // Closed by its own admins: suspended, then deleted after deleteAfter
+  closedAt               DateTime? @map("closed_at")
+  closedBy               String?   @map("closed_by")
+  deleteAfter            DateTime? @map("delete_after")
+  statusBeforeClose      TenantStatus? @map("status_before_close")
   loginTitle      String?      @map("login_title")
   loginSubtitle   String?      @map("login_subtitle")
 

@@ -151,7 +151,7 @@ export interface CurrentUser {
     userType: string;
     portal: 'PLATFORM' | 'TENANT';
   };
-  tenant: { id: string; name: string; slug: string; primaryColor?: string | null; logoUrl?: string | null } | null;
+  tenant: { id: string; name: string; slug: string; primaryColor?: string | null; logoUrl?: string | null; status?: string; trialEndsAt?: string | null } | null;
   /** Optional parts of the app this server shows (PREVIEW_FEATURES) */
   features?: { preview: boolean };
 }

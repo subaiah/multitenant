@@ -17,8 +17,10 @@ export function initials(name: string) {
   return ((words[0]?.[0] ?? '') + (words.length > 1 ? words[words.length - 1][0] : words[0]?.[1] ?? '')).toUpperCase();
 }
 
-export default function AppShell({ portal, mark, title, subtitle, notificationsPath }: {
+export default function AppShell({ portal, mark, title, subtitle, notificationsPath, banner }: {
   portal: 'PLATFORM' | 'TENANT';
+  /** Shown above every page (an organization's trial, say) */
+  banner?: ReactNode;
   /** The square at the top: the organization's or the product's */
   mark: ReactNode;
   title: string;
@@ -94,6 +96,7 @@ export default function AppShell({ portal, mark, title, subtitle, notificationsP
           </button>
           <span className="font-semibold truncate">{title}</span>
         </div>
+        {banner}
         <main className="flex-1 overflow-auto">
           <Suspense fallback={<LoadingState />}>
             <Outlet />

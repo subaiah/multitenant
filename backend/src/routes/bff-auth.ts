@@ -433,7 +433,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const [user, tenant] = session.tenantId
       ? await Promise.all([
           (await dbForTenant(session.tenantId)).user.findFirst({ where: { id: session.id, tenantId: session.tenantId }, select }),
-          controlDb.tenant.findUnique({ where: { id: session.tenantId }, select: { id: true, name: true, slug: true, primaryColor: true, logoUrl: true } }),
+          controlDb.tenant.findUnique({ where: { id: session.tenantId }, select: { id: true, name: true, slug: true, primaryColor: true, logoUrl: true, status: true, trialEndsAt: true } }),
         ])
       : [await controlDb.platformUser.findUnique({ where: { id: session.id }, select }), null];
     if (!user) {

@@ -144,6 +144,8 @@ const BADGE: Record<string, string> = {
   SCHEDULED: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400',
   EXPIRED: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400',
   SUSPENDED: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
+  CLOSING: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
+  TRIAL_ENDED: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
   ERROR: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
   INACTIVE: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
   STOPPED: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',

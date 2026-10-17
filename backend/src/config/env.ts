@@ -92,6 +92,25 @@ const envSchema = z.object({
   SELF_SIGNUP: z.enum(['true', 'false']).default('true'),
   // The plan an organization that signed itself up starts on (as a trial)
   SIGNUP_PLAN: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('FREE'),
+  // A bot check on the sign-up form (Cloudflare Turnstile): both keys, or neither
+  TURNSTILE_SITE_KEY: z.string().optional(),
+  TURNSTILE_SECRET_KEY: z.string().optional(),
+  TURNSTILE_VERIFY_URL: z.string().url().default('https://challenges.cloudflare.com/turnstile/v0/siteverify'),
+  // Refuse throwaway email addresses (a built-in list, lib/disposable-email.ts),
+  // plus any domains listed here ("example.com,example.org")
+  SIGNUP_BLOCK_DISPOSABLE: z.enum(['true', 'false']).default('true'),
+  SIGNUP_BLOCKED_EMAIL_DOMAINS: z.string().optional(),
+
+  // Trials (lib/tenant-lifecycle.ts): how long a new trial lasts (0 = no end),
+  // and how many days before the end its admins are reminded. When it ends the
+  // organization is read-only until platform staff change its status.
+  TRIAL_DAYS: z.string().default('14').transform(Number).pipe(z.number().int().min(0)),
+  TRIAL_REMINDER_DAYS: z.string().default('3').transform(Number).pipe(z.number().int().min(0)),
+  // An organization its admins close is kept (suspended) this many days, so
+  // platform staff can restore it, then deleted
+  CLOSE_GRACE_DAYS: z.string().default('30').transform(Number).pipe(z.number().int().min(0)),
+  // How often trials, closures and old sign-up requests are checked (0 = never)
+  TENANT_LIFECYCLE_INTERVAL_MS: z.string().default('3600000').transform(Number),
 
   // Custom domains (lib/domains.ts): organizations can use their own web
   // address. Tenants point it (CNAME) at CUSTOM_DOMAIN_TARGET, by default
@@ -129,6 +148,9 @@ const envSchema = z.object({
   }
   if (env.EMAIL_TRANSPORT === 'file' && !env.MAIL_OUTBOX_FILE) {
     ctx.addIssue({ code: 'custom', path: ['MAIL_OUTBOX_FILE'], message: 'MAIL_OUTBOX_FILE is required when EMAIL_TRANSPORT=file' });
+  }
+  if (!env.TURNSTILE_SITE_KEY !== !env.TURNSTILE_SECRET_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['TURNSTILE_SECRET_KEY'], message: 'Set both TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY, or neither' });
   }
   if (env.TENANT_DATABASE_URL === env.DATABASE_URL) {
     ctx.addIssue({ code: 'custom', path: ['TENANT_DATABASE_URL'], message: 'TENANT_DATABASE_URL must be a different database from DATABASE_URL' });
@@ -264,6 +286,15 @@ export const config = {
   supportMaxHours: env.SUPPORT_MAX_HOURS,
   selfSignup: env.SELF_SIGNUP === 'true',
   signupPlan: env.SIGNUP_PLAN,
+  turnstile: env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY
+    ? { siteKey: env.TURNSTILE_SITE_KEY, secretKey: env.TURNSTILE_SECRET_KEY, verifyUrl: env.TURNSTILE_VERIFY_URL }
+    : null,
+  signupBlockDisposable: env.SIGNUP_BLOCK_DISPOSABLE === 'true',
+  signupBlockedDomains: (env.SIGNUP_BLOCKED_EMAIL_DOMAINS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  trialDays: env.TRIAL_DAYS,
+  trialReminderDays: env.TRIAL_REMINDER_DAYS,
+  closeGraceDays: env.CLOSE_GRACE_DAYS,
+  tenantLifecycleIntervalMs: env.TENANT_LIFECYCLE_INTERVAL_MS,
   customDomains: env.CUSTOM_DOMAINS === 'true',
   customDomainTarget: env.CUSTOM_DOMAIN_TARGET || new URL(env.FRONTEND_URL).hostname,
   dnsServers: env.DNS_SERVERS ? env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean) : [],

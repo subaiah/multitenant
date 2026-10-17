@@ -110,6 +110,9 @@ export const KIT_AUDIT_EVENTS = {
   // Platform: tenants
   'tenant.created': p('Tenant created', 'tenant'),
   'tenant.signed_up': p('Organization signed up', 'tenant'),
+  'tenant.trial_ended': p('Trial ended', 'tenant'),
+  'tenant.closed': p('Organization closed by its admins', 'tenant'),
+  'tenant.restored': p('Closed organization restored', 'tenant'),
   'tenant.updated': p('Tenant changed', 'tenant'),
   'tenant.deleted': p('Tenant deleted', 'tenant'),
   'tenant.provisioned': p('Tenant set up', 'tenant'),

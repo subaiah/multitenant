@@ -19,6 +19,7 @@ if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must point at a tes
 if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must point at a test tenant database (as the migration owner)');
 // Background jobs would race the tests' own provisioning and cleanup
 process.env.TENANT_USAGE_REFRESH_MS ??= '0';
+process.env.TENANT_LIFECYCLE_INTERVAL_MS ??= '0';
 process.env.AUDIT_ARCHIVE_INTERVAL_MS ??= '0';
 process.env.NOTIFICATION_POLL_MS ??= '0';
 // Audit archives (also written when test tenants are deleted) go somewhere disposable
