@@ -136,7 +136,7 @@ test('signing up: email link, a trial organization, its admin signs in with the 
   const row = await controlDb.signupRequest.findFirstOrThrow({ where: { email } });
   assert.ok(row.passwordHash && !row.passwordHash.includes(STRONG), 'only a hash of the password is kept');
   const mail = inbox(email).at(-1);
-  assert.ok(mail?.text.includes('http://app.test/signup/verify?token='), mail?.text);
+  assert.ok(mail?.text.includes('http://app.test/signup/verify?token='), String(mail?.text));
   const token = tokenFrom(mail);
   assert.notEqual(row.tokenHash, token, 'the token is stored hashed');
 
@@ -304,7 +304,7 @@ test('custom domain: pending until its TXT record is found, then the app, emails
   // Emails link to the domain
   await api('POST', '/bff/account/password/forgot', { body: { tenantSlug: A.slug, email: A.userEmail } });
   const reset = inbox(A.userEmail).at(-1);
-  assert.ok(reset?.text.includes(`https://${domain}/reset-password?token=`), reset?.text);
+  assert.ok(reset?.text.includes(`https://${domain}/reset-password?token=`), String(reset?.text));
 
   // Single sign-on can return to either address; the tenant registers both
   const sso = await api('GET', '/auth-config', { cookie: admin.cookie });
