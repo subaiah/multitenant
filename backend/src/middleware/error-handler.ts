@@ -67,6 +67,10 @@ export const errorHandler = async (
       message: name ? `${name}'s data is temporarily unavailable. Try again shortly.` : 'The database is temporarily unavailable. Try again shortly.',
     });
   }
+  if (dbKind === 'read-only') {
+    request.log.warn({ securityEvent: 'support-read-only', tenantId: request.tenant?.id, userId: request.user?.userId, route: request.routeOptions?.url }, 'Write refused in a read-only support session');
+    return reply.status(403).send({ error: 'Forbidden', code: 'SUPPORT_READ_ONLY', message: 'This support session is read-only, so changes are not allowed.' });
+  }
   if (dbKind === 'denied') {
     request.log.warn(
       { securityEvent: 'tenant-isolation', tenantId: request.tenant?.id, userId: request.user?.userId, route: request.routeOptions?.url, method: request.method, err: error },

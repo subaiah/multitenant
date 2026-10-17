@@ -6,6 +6,7 @@ import { classifyDatabaseError } from '../lib/db-errors.js';
 import { config } from '../config/env.js';
 import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
+import { activeSupportSession, type ActiveSupportSession } from '../lib/support.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -25,6 +26,8 @@ declare module 'fastify' {
      * tenant have no tenant client; using it throws.
      */
     db: TenantDb;
+    /** A platform user's support session for request.tenant (lib/support.ts) */
+    supportSession?: ActiveSupportSession;
   }
 }
 
@@ -39,7 +42,8 @@ declare module 'fastify' {
  * 3. Resolves the tenant:
  *    - tenant users: always the tenant in their token. An `x-tenant-id`
  *      header is optional; if sent, it must match.
- *    - platform users: the tenant named by `x-tenant-id`, if any.
+ *    - platform users: the tenant named by `x-tenant-id`, if any, and only
+ *      with an active support session for it (lib/support.ts).
  */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -92,9 +96,24 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       return reply.status(409).send({ error: 'Conflict', message: 'This tenant is not ready yet' });
     }
     const { provisioningStatus: _, databaseConfig, ...tenantInfo } = tenant;
+    // Platform staff work inside a tenant only through an approved, active
+    // support session; a read-only one gets a connection that can't write
+    let readOnly = false;
+    if (platformUser) {
+      const session = await activeSupportSession(userId, tenant.id);
+      if (!session) {
+        return reply.status(403).send({
+          error: 'Forbidden',
+          code: 'SUPPORT_SESSION_REQUIRED',
+          message: `Working in ${tenant.name} needs an approved support session`,
+        });
+      }
+      request.supportSession = session;
+      readOnly = session.access === 'READ_ONLY';
+    }
     request.tenant = tenantInfo;
     // The config's version, so a change made on another server (rotated credentials) applies at once
-    request.db = await dbForTenant(tenant.id, databaseConfig?.updatedAt);
+    request.db = await dbForTenant(tenant.id, databaseConfig?.updatedAt, { readOnly });
     return;
   }
 

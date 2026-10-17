@@ -244,7 +244,11 @@ export const KIT_NOTIFICATION_TYPES: Record<string, NotificationType> = {
     scope: 'tenant',
     defaults: { inApp: true, email: true },
     audience: () => ({ permission: 'audit:read' }),
-    render: (e) => ({ title: 'A platform support session started', body: `${who(e)} can work in your organization until ${d(e, 'validTo') ? new Date(d(e, 'validTo')!).toUTCString() : 'it ends'}. Reason: ${d(e, 'reason') ?? '—'}. Everything they do is in the audit log.`, link: '/audit-log' }),
+    render: (e) => ({
+      title: `Platform support has ${d(e, 'access') === 'READ_WRITE' ? 'read-write' : 'read-only'} access to your organization`,
+      body: `${who(e)} can work in your organization until ${d(e, 'validTo') ? new Date(d(e, 'validTo')!).toUTCString() : 'it ends'}. Reason: ${d(e, 'reason') ?? '—'}. Everything they do is in the audit log, and you can end it from Settings.`,
+      link: '/settings',
+    }),
   },
 
   // ---- Platform
@@ -305,13 +309,44 @@ export const KIT_NOTIFICATION_TYPES: Record<string, NotificationType> = {
     audience: () => ({ permission: 'tenants:manage', excludeActor: true }),
     render: (e) => ({ title: `${e.resource.label} was deleted`, body: `${who(e)} deleted the tenant and its data (its audit log was archived).`, link: '/platform/tenants' }),
   },
-  'support_session.created': {
-    label: 'Support session started',
-    description: 'Someone started a support session in a tenant',
+  'support_session.requested': {
+    label: 'Support access requested',
+    description: 'Someone asked for access to a tenant (for people who approve support sessions)',
     category: 'support',
     scope: 'platform',
-    defaults: { inApp: true, email: false },
+    defaults: { inApp: true, email: true },
     audience: () => ({ permission: 'support:manage', excludeActor: true }),
-    render: (e) => ({ title: `${who(e)} started a support session in ${e.resource.label}`, body: d(e, 'reason') ? `Reason: ${d(e, 'reason')}` : undefined, link: '/platform/audit' }),
+    render: (e) => ({
+      title: `${who(e)} asks for ${d(e, 'access') === 'READ_WRITE' ? 'read-write' : 'read-only'} access to ${e.resource.label}`,
+      body: `Reason: ${d(e, 'reason') ?? '—'}`,
+      link: '/platform/support',
+    }),
+  },
+  'support_session.approved': {
+    label: 'Your support access approved',
+    description: 'A support session you asked for was approved and has started',
+    category: 'support',
+    scope: 'platform',
+    defaults: { inApp: true, email: true },
+    audience: (e) => ({ userIds: [d(e, 'requesterId')], excludeActor: true }),
+    render: (e) => ({ title: `Your access to ${e.resource.label} was approved`, body: `${who(e)} approved it${d(e, 'validTo') ? `; it lasts until ${new Date(d(e, 'validTo')!).toUTCString()}` : ''}.`, link: '/platform/support' }),
+  },
+  'support_session.rejected': {
+    label: 'Your support access rejected',
+    description: 'A support session you asked for was rejected',
+    category: 'support',
+    scope: 'platform',
+    defaults: { inApp: true, email: true },
+    audience: (e) => ({ userIds: [d(e, 'requesterId')], excludeActor: true }),
+    render: (e) => ({ title: `Your access to ${e.resource.label} was rejected`, body: d(e, 'note') ? `Note: ${d(e, 'note')}` : undefined, link: '/platform/support' }),
+  },
+  'platform_role.assigned': {
+    label: 'Platform role given to you',
+    description: 'You were given a platform role',
+    category: 'security',
+    scope: 'platform',
+    defaults: { inApp: true, email: true },
+    audience: (e) => ({ userIds: [d(e, 'userId')], excludeActor: true }),
+    render: (e) => ({ title: `You were given the ${e.resource.label} platform role`, body: `${who(e)} gave it to you.`, link: '/platform/users' }),
   },
 };

@@ -6,7 +6,13 @@
  *
  * A refresh reads each target once, as the platform role (which bypasses
  * row-level security), and covers every READY tenant on it.
+ *
+ * With several servers, the background refresh runs on one at a time
+ * (an advisory lock in the control plane) and is skipped when another server
+ * refreshed recently. Snapshots are only written for tenants still READY, so
+ * a tenant deleted during a refresh doesn't come back as a stale row.
  */
+import pg from 'pg';
 import { config } from '../config/env.js';
 import { controlDb } from './prisma.js';
 import { platformDb, targetOf, describeTarget, type Target } from './tenant-targets.js';
@@ -91,7 +97,13 @@ async function refreshTarget(target: Target, ids: string[]): Promise<number> {
   };
 
   const now = new Date();
+  // Tenants deleted (or being deleted) since the refresh started get no snapshot
+  const stillReady = new Set(
+    (await controlDb.tenant.findMany({ where: { id: { in: ids }, provisioningStatus: 'READY' }, select: { id: true } })).map((t) => t.id),
+  );
+  let written = 0;
   for (const tenantId of ids) {
+    if (!stillReady.has(tenantId)) continue;
     const appsByStatus: Record<string, number> = {};
     for (const a of apps) if (a.tenantId === tenantId) appsByStatus[a.status] = a._count;
     const recentActivity: RecentActivity[] = recent
@@ -113,9 +125,41 @@ async function refreshTarget(target: Target, ids: string[]): Promise<number> {
       recentActivity: recentActivity as unknown as object,
       refreshedAt: now,
     };
-    await controlDb.tenantUsage.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+    try {
+      await controlDb.tenantUsage.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+      written++;
+    } catch (err) {
+      // Deleted in the last moment (foreign key): nothing to keep
+      if ((err as { code?: string }).code !== 'P2003') throw err;
+    }
   }
-  return ids.length;
+  return written;
+}
+
+/**
+ * The background refresh: on one server at a time, and not again if a
+ * refresh finished within most of the interval (another server did it).
+ */
+export async function refreshTenantUsageOnce(): Promise<{ refreshed: number; failed: string[]; skipped?: 'busy' | 'fresh' }> {
+  const c = new pg.Client({ connectionString: config.databaseUrl });
+  await c.connect();
+  try {
+    if (!(await c.query("SELECT pg_try_advisory_lock(hashtext('tenant-usage-refresh')) AS ok")).rows[0].ok) {
+      return { refreshed: 0, failed: [], skipped: 'busy' };
+    }
+    try {
+      const latest = await controlDb.tenantUsage.aggregate({ _max: { refreshedAt: true } });
+      const freshFor = config.tenantUsageRefreshMs * 0.8;
+      if (freshFor > 0 && latest._max.refreshedAt && Date.now() - latest._max.refreshedAt.getTime() < freshFor) {
+        return { refreshed: 0, failed: [], skipped: 'fresh' };
+      }
+      return await refreshTenantUsage();
+    } finally {
+      await c.query("SELECT pg_advisory_unlock(hashtext('tenant-usage-refresh'))").catch(() => {});
+    }
+  } finally {
+    await c.end().catch(() => {});
+  }
 }
 
 let timer: NodeJS.Timeout | undefined;
@@ -126,7 +170,7 @@ export function startUsageRefresh(log: (msg: string) => void = () => {}, onTick?
   const run = () =>
     (onTick?.() ?? Promise.resolve())
       .catch((err) => log(`background job failed: ${(err as Error).message}`))
-      .then(() => refreshTenantUsage())
+      .then(() => refreshTenantUsageOnce())
       .then(({ failed }) => failed.forEach((f) => log(`usage refresh failed for ${f}`)))
       .catch((err) => log(`usage refresh failed: ${(err as Error).message}`));
   setTimeout(run, 2_000).unref();

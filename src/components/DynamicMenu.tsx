@@ -16,6 +16,7 @@ import {
   KeyRound,
   Code,
   ScrollText,
+  LifeBuoy,
   ChevronDown,
   ChevronRight,
   LucideIcon,
@@ -38,6 +39,7 @@ const iconMap: Record<string, LucideIcon> = {
   KeyRound,
   Code,
   ScrollText,
+  LifeBuoy,
 };
 
 interface DynamicMenuProps {
