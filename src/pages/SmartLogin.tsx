@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { APP_NAME } from '../lib/brand';
 import { apiGet } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
 import { portalHome } from '../lib/permissions';
+import type { SiteInfo } from './SignUp';
 
 export default function SmartLogin() {
   const [orgSlug, setOrgSlug] = useState('');
@@ -13,6 +14,17 @@ export default function SmartLogin() {
   // Keep a notice (e.g. why the session ended) for the organization's sign-in page
   const { search } = useLocation();
   const { user, loading: authLoading } = useAuth();
+  const [signupOpen, setSignupOpen] = useState(false);
+
+  // On an organization's own domain, go straight to its sign-in page
+  useEffect(() => {
+    apiGet<SiteInfo>('/bff/site', { skipAuth: true })
+      .then((s) => {
+        if (s.tenant) navigate(`/${s.tenant.slug}/login${search}`, { replace: true });
+        else setSignupOpen(!!s.signup);
+      })
+      .catch(() => {});
+  }, [navigate, search]);
 
   // Already signed in: skip the org picker
   useEffect(() => {
@@ -96,7 +108,12 @@ export default function SmartLogin() {
         </form>
 
         <p className="pt-5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400">
-          No account yet? Ask your organization's administrator to invite you. Platform staff sign in at <a className="font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300" href="/platform/login">/platform/login</a>.
+          {signupOpen ? (
+            <>New here? <Link to="/signup" className="font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300">Create an organization</Link>. Joining an existing one? Ask its administrator to invite you. </>
+          ) : (
+            <>No account yet? Ask your organization's administrator to invite you. </>
+          )}
+          Platform staff sign in at <a className="font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300" href="/platform/login">/platform/login</a>.
         </p>
       </div>
     </div>

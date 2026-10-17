@@ -17,7 +17,10 @@
  * to look in.
  */
 import * as oidc from 'openid-client';
+import type { FastifyRequest } from 'fastify';
 import { config } from '../config/env.js';
+import { controlDb } from './prisma.js';
+import { apiPathPrefix, requestDomain } from './domains.js';
 import { AppError } from '../middleware/error-handler.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { slugToken, tenantForSignIn, tokenSlug } from './auth-planes.js';
@@ -25,6 +28,23 @@ import type { TenantDb } from './tenant-db.js';
 
 export const SSO_CALLBACK_PATH = '/bff/auth/sso/callback';
 export const ssoRedirectUri = () => `${config.bffUrl.replace(/\/$/, '')}${SSO_CALLBACK_PATH}`;
+
+/**
+ * The callback for a sign-in started on this request's address: the
+ * platform's (BFF_URL), or a tenant's verified custom domain, which the
+ * organization registers with its identity provider as well (lib/domains.ts).
+ */
+export async function ssoRedirectUriFor(request: FastifyRequest): Promise<string> {
+  const on = await requestDomain(request);
+  return on ? `${request.protocol}://${on.hostname}${apiPathPrefix()}${SSO_CALLBACK_PATH}` : ssoRedirectUri();
+}
+
+/** Every callback address a tenant's providers may use: the platform's, and its verified domain's */
+export async function ssoRedirectUrisForTenant(tenantId: string): Promise<string[]> {
+  const t = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { customDomain: true, customDomainStatus: true } });
+  const own = t?.customDomain && t.customDomainStatus === 'VERIFIED' && config.customDomains ? [`https://${t.customDomain}${apiPathPrefix()}${SSO_CALLBACK_PATH}`] : [];
+  return [ssoRedirectUri(), ...own];
+}
 
 const ATTEMPT_MINUTES = 10;
 
@@ -101,7 +121,7 @@ function scopesFor(p: Provider): string {
 }
 
 /** Where to send the browser to sign in with a provider. */
-export async function startSso(tenantSlug: string, providerId: string): Promise<URL> {
+export async function startSso(tenantSlug: string, providerId: string, redirectUri = ssoRedirectUri()): Promise<URL> {
   const { tenant, db } = await tenantForSignIn(tenantSlug);
   const provider = await db.authProvider.findFirst({ where: { id: providerId, tenantId: tenant.id, enabled: true } });
   if (!provider) throw new AppError('This sign-in option is not available', 404);
@@ -118,7 +138,7 @@ export async function startSso(tenantSlug: string, providerId: string): Promise<
       tenantId: tenant.id,
       state,
       providerId: provider.id,
-      redirectUri: ssoRedirectUri(),
+      redirectUri,
       codeVerifier,
       nonce,
       expiresAt: new Date(Date.now() + ATTEMPT_MINUTES * 60_000),
@@ -126,7 +146,7 @@ export async function startSso(tenantSlug: string, providerId: string): Promise<
   });
 
   const params: Record<string, string> = {
-    redirect_uri: ssoRedirectUri(),
+    redirect_uri: redirectUri,
     scope: scopesFor(provider),
     state,
     code_challenge: await oidc.calculatePKCECodeChallenge(codeVerifier),
@@ -169,7 +189,9 @@ export async function finishSso(callbackUrl: URL) {
   const attempt = await db.oAuthSession.findUnique({ where: { state } });
   // Single use: whoever deletes it first carries on
   const claimed = attempt ? await db.oAuthSession.deleteMany({ where: { id: attempt.id } }) : { count: 0 };
-  if (!attempt || claimed.count !== 1 || attempt.tenantId !== tenant.id || attempt.expiresAt < new Date()) {
+  // ...and it must come back to the address it started from
+  const returnedTo = `${callbackUrl.origin}${callbackUrl.pathname}`;
+  if (!attempt || claimed.count !== 1 || attempt.tenantId !== tenant.id || attempt.expiresAt < new Date() || (attempt.redirectUri && attempt.redirectUri !== returnedTo)) {
     throw Object.assign(new SsoError('This sign-in has expired. Please start again.', 'SSO_EXPIRED'), { tenantSlug: slug });
   }
   const fail = (message: string, code: string) => Object.assign(new SsoError(message, code), { tenantSlug: slug });

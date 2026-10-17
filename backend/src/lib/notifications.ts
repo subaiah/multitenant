@@ -19,6 +19,7 @@
  * several servers can run the sweep.
  */
 import { config } from '../config/env.js';
+import { appOriginForTenant } from './domains.js';
 import { controlDb } from './prisma.js';
 import { dbForTenant } from './tenant-db.js';
 import { sendMail } from './mailer.js';
@@ -318,8 +319,10 @@ async function fanOut(chain: string, row: OutboxRow) {
 
   const content = type.render(payload.event);
   const ids = people.map((p) => p.id);
-  const settingsLink = `${config.frontendUrl}${chain === PLATFORM_CHAIN ? '/platform/notifications' : '/notifications'}?tab=preferences`;
-  const link = content.link ? `${config.frontendUrl}${content.link}` : null;
+  // Email links: the organization's own domain once verified (lib/domains.ts)
+  const origin = await appOriginForTenant(chain === PLATFORM_CHAIN ? null : chain);
+  const settingsLink = `${origin}${chain === PLATFORM_CHAIN ? '/platform/notifications' : '/notifications'}?tab=preferences`;
+  const link = content.link ? `${origin}${content.link}` : null;
 
   if (chain === PLATFORM_CHAIN) {
     const prefs = await controlDb.platformNotificationPreference.findMany({ where: { userId: { in: ids }, type: payload.type } });

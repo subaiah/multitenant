@@ -17,7 +17,8 @@ import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/se
 import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
 import { audit } from '../lib/audit.js';
 import { mfaRoutes } from './mfa.js';
-import { finishSso, SsoError, ssoRedirectUri, startSso, userForIdentity } from '../lib/sso.js';
+import { finishSso, SsoError, ssoRedirectUriFor, startSso, userForIdentity } from '../lib/sso.js';
+import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
 
@@ -47,11 +48,11 @@ const mfaNext = (r: NonNullable<SignInResult>) => ({
 });
 
 /** Back to the sign-in page with a message (SSO happens in full-page redirects, not API calls). */
-function ssoErrorRedirect(slug: string, err: unknown): string {
-  const code = err instanceof SsoError ? err.code : err instanceof AppError && err.statusCode === 404 ? 'SSO_UNAVAILABLE' : 'SSO_FAILED';
+function ssoErrorRedirect(appOrigin: string, slug: string, err: unknown): string {
+  const code = err instanceof SsoError ? err.code : err instanceof AppError && err.code ? err.code : err instanceof AppError && err.statusCode === 404 ? 'SSO_UNAVAILABLE' : 'SSO_FAILED';
   const message = err instanceof SsoError || err instanceof AppError ? err.message : 'Single sign-on failed';
   const params = new URLSearchParams({ sso_error: code, message });
-  return `${config.frontendUrl}/${slug ? `${encodeURIComponent(slug)}/` : ''}login?${params}`;
+  return `${appOrigin}/${slug ? `${encodeURIComponent(slug)}/` : ''}login?${params}`;
 }
 
 const portalOf = (userType: string) => (userType.startsWith('PLATFORM_') ? 'PLATFORM' : 'TENANT');
@@ -78,6 +79,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, tenantSlug, password } = loginSchema.parse(request.body);
+    await assertSignInHost(request, tenantSlug);
 
     // Platform users sign in on a platform slug and live in the control plane;
     // tenant users through their tenant's slug, in its database
@@ -150,6 +152,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request) => {
     const { email, tenantSlug } = otpRequestSchema.parse(request.body);
+    await assertSignInHost(request, tenantSlug);
 
     if (isPlatformSlug(tenantSlug)) {
       throw new AppError('OTP authentication is not available for platform accounts', 400);
@@ -240,6 +243,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const { email, tenantSlug, code } = otpVerifySchema.parse(request.body);
+    await assertSignInHost(request, tenantSlug);
     if (isPlatformSlug(tenantSlug)) {
       throw new AppError('Invalid OTP', 401);
     }
@@ -296,17 +300,20 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { tenantSlug, providerId } = request.query as { tenantSlug: string; providerId: string };
     try {
-      return reply.redirect((await startSso(tenantSlug, providerId)).href);
+      await assertSignInHost(request, tenantSlug);
+      // Back to the address the browser started on (a custom domain has its own callback)
+      return reply.redirect((await startSso(tenantSlug, providerId, await ssoRedirectUriFor(request))).href);
     } catch (err) {
       request.log.warn({ err }, 'Single sign-on could not start');
-      return reply.redirect(ssoErrorRedirect(tenantSlug, err));
+      return reply.redirect(ssoErrorRedirect(await appOriginFor(request), tenantSlug, err));
     }
   });
 
   fastify.get('/sso/callback', {
     schema: { tags: ['bff-auth'], summary: 'Where identity providers return the browser' },
   }, async (request, reply) => {
-    const url = new URL(request.url, ssoRedirectUri());
+    const url = new URL(request.url, await ssoRedirectUriFor(request));
+    const appOrigin = await appOriginFor(request);
     let slug = tokenSlug(url.searchParams.get('state') ?? '') ?? '';
     try {
       const done = await finishSso(url);
@@ -334,10 +341,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       // Two-factor at sign-in is the identity provider's job here
       await startSession(fastify, request, reply, owner, user);
       await recordSignIn(request, owner, user.id, `logged in with ${done.provider.provider}${how === 'created' ? ' (new account)' : ''}`, 'sso');
-      return reply.redirect(`${config.frontendUrl}/${encodeURIComponent(done.tenant.slug)}/login`);
+      return reply.redirect(`${appOrigin}/${encodeURIComponent(done.tenant.slug)}/login`);
     } catch (err) {
       request.log.warn({ err }, 'Single sign-on failed');
-      return reply.redirect(ssoErrorRedirect(slug, err));
+      return reply.redirect(ssoErrorRedirect(appOrigin, slug, err));
     }
   });
 

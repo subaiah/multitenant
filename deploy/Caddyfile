@@ -3,15 +3,26 @@
 # SITE_ADDRESS is a domain name for real deployments (Caddy then gets and
 # renews an HTTPS certificate on its own: ports 80 and 443 must reach this
 # container), or ":80" to serve plain HTTP behind another proxy or locally.
+#
+# Organizations' own domains (custom domains, docs/DEPLOYMENT.md) are served
+# by the second site below: Caddy gets a certificate for one the first time
+# someone visits it, after asking the API whether it is a verified domain.
 {
 	# Caddy's own log as JSON lines. Access logs are off: the API logs every
 	# request it gets, without headers or cookies.
 	log {
 		format json
 	}
+
+	# Only names the API says are verified custom domains get certificates,
+	# so nobody can make this server request certificates for other names
+	on_demand_tls {
+		ask http://{$API_UPSTREAM:api:4000}/internal/tls-allowed
+	}
 }
 
-{$SITE_ADDRESS::80} {
+# The app and the API, the same at every address
+(app) {
 	encode zstd gzip
 
 	# The API. Stripping /api means the server's routes stay as they are;
@@ -51,4 +62,17 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		-Server
 	}
+}
+
+{$SITE_ADDRESS::80} {
+	import app
+}
+
+# Custom domains: any other name over HTTPS, with a certificate on demand
+# (only once port 443 reaches this container; unused otherwise).
+https:// {
+	tls {
+		on_demand
+	}
+	import app
 }

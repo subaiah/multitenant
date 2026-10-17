@@ -87,6 +87,21 @@ const envSchema = z.object({
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
 
+  // Self-service sign-up (routes/signup.ts): anyone can create an organization
+  // after confirming their email. "false" leaves creating tenants to platform staff.
+  SELF_SIGNUP: z.enum(['true', 'false']).default('true'),
+  // The plan an organization that signed itself up starts on (as a trial)
+  SIGNUP_PLAN: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('FREE'),
+
+  // Custom domains (lib/domains.ts): organizations can use their own web
+  // address. Tenants point it (CNAME) at CUSTOM_DOMAIN_TARGET, by default
+  // FRONTEND_URL's host, and prove it with a TXT record.
+  CUSTOM_DOMAINS: z.enum(['true', 'false']).default('true'),
+  CUSTOM_DOMAIN_TARGET: z.string().optional(),
+  // DNS servers for checking those records ("1.1.1.1,8.8.8.8"; port allowed).
+  // Default: the system's resolver.
+  DNS_SERVERS: z.string().optional(),
+
   // Support sessions (lib/support.ts): longest a session may last, and whether
   // someone with support:manage may approve their own (one-person teams)
   SUPPORT_MAX_HOURS: z.string().default('8').transform(Number),
@@ -247,6 +262,11 @@ export const config = {
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
   notificationPollMs: env.NOTIFICATION_POLL_MS,
   supportMaxHours: env.SUPPORT_MAX_HOURS,
+  selfSignup: env.SELF_SIGNUP === 'true',
+  signupPlan: env.SIGNUP_PLAN,
+  customDomains: env.CUSTOM_DOMAINS === 'true',
+  customDomainTarget: env.CUSTOM_DOMAIN_TARGET || new URL(env.FRONTEND_URL).hostname,
+  dnsServers: env.DNS_SERVERS ? env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean) : [],
   supportSelfApproval: env.SUPPORT_SELF_APPROVAL === 'true',
   notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,
 

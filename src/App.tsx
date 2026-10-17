@@ -37,6 +37,8 @@ const Users = lazy(() => import('./pages/Users'));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const SignUp = lazy(() => import('./pages/SignUp'));
+const SignupVerify = lazy(() => import('./pages/SignupVerify'));
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -88,6 +90,8 @@ export default function App() {
             {/* Links from emails (no session needed) */}
             <Route path="/accept-invite" element={<AcceptInvite />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/signup" element={<SignUp />} />
+            <Route path="/signup/verify" element={<SignupVerify />} />
             <Route path="/:tenantSlug/forgot-password" element={<ForgotPassword />} />
             
             {/* Platform Portal - Protected by PLATFORM_* user types */}

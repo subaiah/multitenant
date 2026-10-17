@@ -74,7 +74,11 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
       },
       users: { tenant: tenantUsers, platform: platformUsers },
       applications: { total: Object.values(apps).reduce((a, b) => a + b, 0), byStatus: apps },
-      activityByDay: [...perDay].sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count })),
+      // The last 14 days (a snapshot taken yesterday also covers a day before them)
+      activityByDay: Array.from({ length: 14 }, (_, i) => {
+        const date = new Date(Date.now() - (13 - i) * 86_400_000).toISOString().slice(0, 10);
+        return { date, count: perDay.get(date) ?? 0 };
+      }),
       recentActivity: recent.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 8),
       topTenants: tenants
         .map(({ usage, ...t }) => ({ ...t, users: usage?.users ?? 0, applications: usage?.applications ?? 0 }))

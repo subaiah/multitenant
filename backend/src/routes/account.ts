@@ -8,6 +8,7 @@ import { endAllPlatformSessions, endAllSessions } from '../lib/sessions.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
 import { sendMail } from '../lib/mailer.js';
+import { appOriginForTenant, assertSignInHost } from '../lib/domains.js';
 import { passwordResetEmail } from '../lib/email-templates.js';
 import { RESET_TTL_MINUTES, consumeUserToken, findValidUserToken, issueUserToken, type ValidUserToken } from '../lib/user-tokens.js';
 import { otpRequestRateLimit } from '../lib/rate-limits.js';
@@ -96,6 +97,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request) => {
     const { email, tenantSlug } = forgotSchema.parse(request.body);
+    await assertSignInHost(request, tenantSlug);
     const platform = isPlatformSlug(tenantSlug);
     const tenant = platform ? null : await controlDb.tenant.findUnique({ where: { slug: tenantSlug } });
     if (!platform && (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY')) return { message: GENERIC_FORGOT };
@@ -107,7 +109,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     const owner = tenant ? { tenantId: tenant.id, tenantSlug: tenant.slug } : ('platform' as const);
     const token = await issueUserToken(owner, user.id, 'PASSWORD_RESET', RESET_TTL_MINUTES * 60 * 1000);
-    const link = `${config.frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    const link = `${await appOriginForTenant(tenant?.id)}/reset-password?token=${encodeURIComponent(token)}`;
     await sendMail(passwordResetEmail(user.email, link, tenant?.name ?? 'Platform Administration', RESET_TTL_MINUTES));
     return { message: GENERIC_FORGOT };
   });

@@ -22,12 +22,12 @@ export const authButtonClass =
   'w-full h-11 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed';
 
 /** Password input with live policy checklist. Calls onValidChange when all rules pass. */
-export function NewPasswordField({ value, onChange, policy }: { value: string; onChange: (v: string) => void; policy: PasswordPolicy }) {
+export function NewPasswordField({ value, onChange, policy, label = 'New password' }: { value: string; onChange: (v: string) => void; policy: PasswordPolicy; label?: string }) {
   const [show, setShow] = useState(false);
   const rules = passwordRules(policy);
   return (
     <div>
-      <label htmlFor="new-password" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">New password</label>
+      <label htmlFor="new-password" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">{label}</label>
       <div className="relative">
         <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input id="new-password" type={show ? 'text' : 'password'} autoComplete="new-password" required value={value}
