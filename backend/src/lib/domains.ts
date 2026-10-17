@@ -8,6 +8,11 @@
  *    holding `tenant-verify=<token>`, which proves the domain is theirs.
  * 3. "Check now" looks the TXT record up; found, the domain is VERIFIED.
  *
+ * Every DOMAIN_RECHECK_HOURS it's checked again (lib/tenant-lifecycle.ts): a
+ * domain that neither points here nor has its TXT record any more, twice in a
+ * row, goes back to pending, so emails stop linking to an address someone
+ * else may now own.
+ *
  * Only then does anything work on it: the web server gets a certificate for
  * it (Caddy asks /internal/tls-allowed), the app opens straight to that
  * organization's sign-in page, emails link to it, and single sign-on can
@@ -94,16 +99,44 @@ export function apiPathPrefix(): string {
   return new URL(config.frontendUrl).host === api.host ? api.pathname.replace(/\/$/, '') : '';
 }
 
-async function lookupTxt(name: string): Promise<string[]> {
-  const resolver = new dns.Resolver({ timeout: 4000, tries: 2 });
-  if (config.dnsServers.length) resolver.setServers(config.dnsServers);
+function resolver() {
+  const r = new dns.Resolver({ timeout: 4000, tries: 2 });
+  if (config.dnsServers.length) r.setServers(config.dnsServers);
+  return r;
+}
+const NO_ANSWER = new Set(['ENOTFOUND', 'ENODATA']);
+
+export async function lookupTxt(name: string): Promise<string[]> {
   try {
-    return (await resolver.resolveTxt(name)).map((chunks) => chunks.join(''));
+    return (await resolver().resolveTxt(name)).map((chunks) => chunks.join(''));
   } catch (err) {
     const code = (err as { code?: string }).code;
-    if (code === 'ENOTFOUND' || code === 'ENODATA') return [];
+    if (code && NO_ANSWER.has(code)) return [];
     throw new Error(`The DNS lookup failed (${code ?? (err as Error).message}). Try again in a few minutes.`);
   }
+}
+
+/** Answers for one record type; empty when the name has none (throws when DNS can't be asked) */
+async function answers(kind: 'resolveCname' | 'resolve4' | 'resolve6', name: string): Promise<string[]> {
+  try {
+    return (await resolver()[kind](name)).map((v) => v.toLowerCase().replace(/\.$/, ''));
+  } catch (err) {
+    if (NO_ANSWER.has((err as { code?: string }).code ?? '')) return [];
+    throw err;
+  }
+}
+
+/**
+ * Whether a domain still sends visitors here: a CNAME to CUSTOM_DOMAIN_TARGET,
+ * or an address the target has (an apex domain can't have a CNAME). Throws when
+ * DNS can't be asked, so a resolver outage isn't mistaken for a moved domain.
+ */
+export async function pointsHere(domain: string): Promise<boolean> {
+  const target = config.customDomainTarget.toLowerCase();
+  if ((await answers('resolveCname', domain)).includes(target)) return true;
+  const ours = new Set([...(await answers('resolve4', target)), ...(await answers('resolve6', target))]);
+  const theirs = [...(await answers('resolve4', domain)), ...(await answers('resolve6', domain))];
+  return theirs.some((ip) => ours.has(ip));
 }
 
 /** Look for the TXT record now; records the outcome on the tenant. */
@@ -129,7 +162,7 @@ export async function checkDomain(tenantId: string) {
     where: { id: tenantId },
     data: error
       ? { customDomainCheckedAt: now, customDomainError: error }
-      : { customDomainStatus: 'VERIFIED', customDomainVerifiedAt: t.customDomainStatus === 'VERIFIED' ? undefined : now, customDomainCheckedAt: now, customDomainError: null },
+      : { customDomainStatus: 'VERIFIED', customDomainVerifiedAt: t.customDomainStatus === 'VERIFIED' ? undefined : now, customDomainCheckedAt: now, customDomainError: null, customDomainFailures: 0 },
   });
 }
 

@@ -14,8 +14,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 
-// ---- A DNS server that answers TXT questions from a map ---------------------
+// ---- A DNS server that answers TXT, A and CNAME questions from maps -------
 const txt = new Map<string, string[]>();
+const aRecords = new Map<string, string[]>();
+const cnames = new Map<string, string>();
+const encodeName = (name: string) => Buffer.concat([...name.split('.').map((l) => Buffer.concat([Buffer.from([l.length]), Buffer.from(l, 'ascii')])), Buffer.from([0])]);
 const dnsServer: Socket = createSocket('udp4');
 dnsServer.on('message', (msg, rinfo) => {
   // Question name: length-prefixed labels from byte 12
@@ -27,17 +30,23 @@ dnsServer.on('message', (msg, rinfo) => {
   }
   const qEnd = i + 5; // the 0 byte, then type and class
   const qtype = msg.readUInt16BE(i + 1);
-  const records = qtype === 16 ? (txt.get(labels.join('.').toLowerCase()) ?? []) : [];
+  const name = labels.join('.').toLowerCase();
+  const rdata: Buffer[] =
+    qtype === 16 ? (txt.get(name) ?? []).map((v) => Buffer.concat([Buffer.from([v.length]), Buffer.from(v, 'ascii')]))
+    : qtype === 1 ? (aRecords.get(name) ?? []).map((ip) => Buffer.from(ip.split('.').map(Number)))
+    : qtype === 5 && cnames.has(name) ? [encodeName(cnames.get(name)!)]
+    : [];
+  const exists = txt.has(name) || aRecords.has(name) || cnames.has(name);
   const header = Buffer.alloc(12);
   msg.copy(header, 0, 0, 2); // the same id
-  header.writeUInt16BE(records.length ? 0x8180 : 0x8183, 2); // a response; NXDOMAIN when there's nothing
+  // A response: NXDOMAIN for an unknown name, no answers for a known name without that type
+  header.writeUInt16BE(rdata.length || exists ? 0x8180 : 0x8183, 2);
   header.writeUInt16BE(1, 4);
-  header.writeUInt16BE(records.length, 6);
-  const answers = records.map((value) => {
-    const data = Buffer.concat([Buffer.from([value.length]), Buffer.from(value, 'ascii')]);
+  header.writeUInt16BE(rdata.length, 6);
+  const answers = rdata.map((data) => {
     const rr = Buffer.alloc(12);
     rr.writeUInt16BE(0xc00c, 0); // the name: a pointer to the question's
-    rr.writeUInt16BE(16, 2); // TXT
+    rr.writeUInt16BE(qtype, 2);
     rr.writeUInt16BE(1, 4); // IN
     rr.writeUInt32BE(60, 6);
     rr.writeUInt16BE(data.length, 10);
@@ -324,4 +333,59 @@ test('custom domain: pending until its TXT record is found, then the app, emails
   assert.deepEqual(removed.json, { enabled: true, domain: null });
   assert.equal((await api('GET', `/internal/tls-allowed?domain=${domain}`)).status, 404);
   assert.equal((await onHost(domain, 'POST', '/bff/auth/login', { tenantSlug: B.slug, email: B.adminEmail, password: PASSWORD })).status, 200);
+});
+
+test('verified domains are checked again: kept while they point here or keep their TXT record, dropped after two misses', async () => {
+  const { recheckDomains } = await import('../src/lib/tenant-lifecycle.js');
+  const domain = `kept-${run}.example.com`;
+  const admin = await loginSession(B.slug, B.adminEmail);
+  const added = await api('PUT', '/custom-domain', { cookie: admin.cookie, body: { domain } });
+  txt.set(`_tenant-verify.${domain}`, [added.json.records[1].value]);
+  assert.equal((await api('POST', '/custom-domain/check', { cookie: admin.cookie })).json.status, 'VERIFIED');
+  const state = () => controlDb.tenant.findUniqueOrThrow({ where: { id: B.tenantId }, select: { customDomainStatus: true, customDomainFailures: true } });
+  // As if the last check was a day ago
+  const due = async () => {
+    await controlDb.tenant.update({ where: { id: B.tenantId }, data: { customDomainCheckedAt: new Date(Date.now() - 25 * 3_600_000) } });
+    return recheckDomains();
+  };
+
+  // The TXT record is still there
+  assert.ok((await due()).checked >= 1);
+  assert.deepEqual(await state(), { customDomainStatus: 'VERIFIED', customDomainFailures: 0 });
+  // Gone, but a CNAME still points at the platform
+  txt.delete(`_tenant-verify.${domain}`);
+  cnames.set(domain, 'edge.app.test');
+  await due();
+  assert.equal((await state()).customDomainStatus, 'VERIFIED');
+  // An apex domain: an address the platform's target has
+  cnames.delete(domain);
+  aRecords.set('edge.app.test', ['203.0.113.7']);
+  aRecords.set(domain, ['203.0.113.7']);
+  await due();
+  assert.deepEqual(await state(), { customDomainStatus: 'VERIFIED', customDomainFailures: 0 });
+
+  // Pointed elsewhere: one miss is tolerated
+  aRecords.set(domain, ['198.51.100.9']);
+  await due();
+  assert.deepEqual(await state(), { customDomainStatus: 'VERIFIED', customDomainFailures: 1 });
+  // Not due again yet: nothing happens
+  await recheckDomains();
+  assert.equal((await state()).customDomainFailures, 1);
+  // The second miss takes it away
+  const r = await due();
+  assert.ok(r.unverified.includes(domain), JSON.stringify(r));
+  assert.equal((await state()).customDomainStatus, 'PENDING');
+  assert.equal((await api('GET', `/internal/tls-allowed?domain=${domain}`)).status, 404);
+  const told = inbox(B.adminEmail).at(-1);
+  assert.match(told!.subject, /no longer points/);
+  assert.ok(told!.text.includes('http://app.test/settings'), 'links to the platform address now');
+  const entry = (await api('GET', '/audit?event=custom_domain.unverified', { cookie: admin.cookie })).json.data[0];
+  assert.equal(entry?.actor?.type ?? entry?.actorType, 'SYSTEM');
+
+  // Pointing back and checking again restores it
+  aRecords.set(domain, ['203.0.113.7']);
+  txt.set(`_tenant-verify.${domain}`, [added.json.records[1].value]);
+  assert.equal((await api('POST', '/custom-domain/check', { cookie: admin.cookie })).json.status, 'VERIFIED');
+  assert.equal((await state()).customDomainFailures, 0);
+  await api('DELETE', '/custom-domain', { cookie: admin.cookie });
 });

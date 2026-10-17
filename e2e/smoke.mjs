@@ -4,8 +4,11 @@
 //   1. the first platform administrator accepts their invitation, sets up
 //      two-factor and signs in;
 //   2. they create a tenant in its own database and wait until it's ready;
-//   3. the tenant's first administrator accepts their invitation and signs in;
-//   4. pages with sample data are hidden, and nothing on the way breaks the
+//   3. the tenant's first administrator accepts their invitation, signs in,
+//      and exports the organization's data (a ZIP download);
+//   4. someone signs up a new organization themselves, confirms by email,
+//      signs in to its trial, and closes it; platform staff restore it;
+//   5. pages with sample data are hidden, and nothing on the way breaks the
 //      content policy or throws.
 //
 //   APP=http://localhost ADMIN_LINK=<from create-admin> MAIL_CMD="<prints sent emails>" node e2e/smoke.mjs
@@ -13,7 +16,7 @@
 // MAIL_CMD prints whatever the server sent (the API's log with
 // EMAIL_TRANSPORT=log, or the outbox file); links are found in it.
 import { execSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { chromium } from 'playwright';
@@ -30,6 +33,7 @@ const check = (name, ok, extra = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  $
 const stamp = Date.now().toString(36).slice(-5);
 const TENANT = { name: `Smoke Test ${stamp}`, slug: `smoke-test-${stamp}`, admin: `owner-${stamp}@smoke.test` };
 const PASSWORD = `Smoke-${stamp}-Passw0rd!`;
+const SIGNUP = { org: `Self Serve ${stamp}`, slug: `self-serve-${stamp}`, email: `founder-${stamp}@smoke.test` };
 
 // ---- TOTP, as the server computes it
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -59,6 +63,15 @@ async function newPage() {
   page.on('response', (r) => { if (r.url().startsWith(APP) && r.status() >= 500) problems.push(`${r.status()} ${r.url()}`); });
   page.on('dialog', (d) => d.accept());
   return page;
+}
+
+async function waitForLink(to, path) {
+  for (let i = 0; i < 60; i++) {
+    const link = latestLink(to, path);
+    if (link) return link;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return null;
 }
 
 function latestLink(to, path) {
@@ -146,6 +159,54 @@ try {
   await owner.goto(`${APP}/users`);
   await owner.locator('tr', { hasText: TENANT.admin }).waitFor();
   check('their Users page lists them', true);
+
+  // ---- ...and export the organization's data
+  await owner.goto(`${APP}/settings`);
+  await owner.getByRole('button', { name: 'Export all data' }).click();
+  const downloadButton = owner.locator('#data-export').getByRole('button', { name: 'Download' }).first();
+  await downloadButton.waitFor({ timeout: 60000 });
+  const [download] = await Promise.all([owner.waitForEvent('download'), downloadButton.click()]);
+  const zip = `${SHOTS}/export.zip`;
+  await download.saveAs(zip);
+  check('data export downloads as a ZIP', readFileSync(zip).subarray(0, 2).toString('latin1') === 'PK', download.suggestedFilename());
+
+  // ---- 4. self-service sign-up, on its own trial
+  const visitor = await newPage();
+  await visitor.goto(`${APP}/login`);
+  await visitor.getByRole('link', { name: 'Create an organization' }).click();
+  await visitor.getByLabel('Organization name').fill(SIGNUP.org);
+  await visitor.getByLabel('Your name').fill('Smoke Founder');
+  await visitor.getByLabel('Work email').fill(SIGNUP.email);
+  await visitor.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  check('sign-up suggests the address', (await visitor.getByLabel('Sign-in address').inputValue()) === SIGNUP.slug);
+  await visitor.getByRole('button', { name: 'Create organization' }).click();
+  await visitor.getByRole('heading', { name: 'Check your email' }).waitFor();
+  const confirm = await waitForLink(SIGNUP.email, 'signup/verify');
+  check('sign-up confirmation sent', !!confirm);
+  await visitor.goto(confirm);
+  await visitor.getByRole('heading', { name: `${SIGNUP.org} is ready` }).waitFor({ timeout: 90000 });
+  await visitor.getByRole('link', { name: 'Sign in' }).click();
+  await signIn(visitor);
+  await visitor.waitForURL('**/dashboard', { timeout: 15000 });
+  await visitor.getByRole('status').filter({ hasText: 'Trial:' }).waitFor();
+  check('signed-up administrator signs in to a trial', true);
+
+  // ---- ...closes it, and platform staff restore it
+  await visitor.goto(`${APP}/settings`);
+  await visitor.getByRole('button', { name: 'Close organization…' }).click();
+  const closing = visitor.getByRole('dialog', { name: `Close ${SIGNUP.org}` });
+  await closing.getByLabel('Organization address').fill(SIGNUP.slug);
+  await closing.getByLabel('Your password').fill(PASSWORD);
+  await closing.getByRole('button', { name: 'Close organization' }).click();
+  await visitor.waitForURL('**/login?notice=organization-closed', { timeout: 15000 });
+  check('organization closed', true);
+  await admin.goto(`${APP}/platform/tenants?search=${SIGNUP.slug}`);
+  const closedCard = admin.getByRole('button', { name: new RegExp(SIGNUP.org) });
+  await closedCard.getByText('Closing').waitFor();
+  await closedCard.click();
+  await admin.getByRole('dialog', { name: SIGNUP.org }).getByRole('button', { name: 'Restore' }).click();
+  await admin.getByRole('status').filter({ hasText: 'was restored' }).waitFor();
+  check('platform staff restore it', true);
 
   check('no script errors, server errors or blocked content', problems.length === 0, problems.slice(0, 5).join(' | '));
 } catch (err) {
