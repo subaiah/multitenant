@@ -83,6 +83,7 @@ Every setting is described in `backend/.env.example`. The ones a deployment must
 | `SECRETS_KEY_V<n>`, `AUDIT_KEY_V<n>` | Required in production. See *Keys* below. |
 | `EMAIL_TRANSPORT=smtp`, `SMTP_URL`, `MAIL_FROM` | Invitations, password resets, sign-in codes and notifications. The sending domain needs SPF, DKIM and DMARC records, or the mail lands in spam. |
 | `PLATFORM_MFA_REQUIRED` | Two-factor for platform staff. Keep it on. |
+| `SELF_SIGNUP`, `CUSTOM_DOMAINS` | On by default. Whether anyone can create an organization, and whether tenants can use their own domains. See *Self-service sign-up* and *Custom domains* below. |
 | `PREVIEW_FEATURES` | Off in production. It hides pages that show sample data: deployed applications and their resource use, the API gateway settings, the backup and encryption switches, and the platform's "coming soon" pages. |
 | `API_DOCS` | Off in production. The interactive API reference at `/api/docs`. |
 | `TENANT_POOL_MAX`, `TENANT_CLIENT_CACHE_MAX`, `POSTGRES_MAX_CONNECTIONS` | See *Database connections*. |
@@ -141,6 +142,42 @@ The `.env` must be the one the backup was made with. The keys especially: stored
 | `COOKIE_SECRET` | Signed cookies | Changing it signs everyone out. |
 
 To add a key version, add the variable to `.env` and to the `x-api-env` block in `docker-compose.yml`.
+
+## Self-service sign-up
+
+On by default (`SELF_SIGNUP=true`). The sign-in page links to `/signup`, where someone enters an organization name, its sign-in address, their name, email and a strong password. Nothing is created yet. The server emails a link that works for 24 hours (so `EMAIL_TRANSPORT=smtp` must work). Opening it:
+
+1. creates the tenant as a `TRIAL` on `SIGNUP_PLAN` (default `FREE`) with `DEFAULT_TENANT_STRATEGY`;
+2. provisions it as usual;
+3. makes the person its administrator with the password they chose, and emails them that it's ready.
+
+Each sign-up is in the platform audit log (`tenant.signed_up`), and platform staff with `tenants:manage` get an in-app notification. Attempts are limited to 10 an hour per IP address, across all API servers.
+
+To turn it off, so that only platform staff create tenants, set `SELF_SIGNUP=false`. The link disappears and `/bff/signup` answers 404.
+
+## Custom domains
+
+Tenants can serve the app at their own address (`CUSTOM_DOMAINS=true`, the default).
+
+1. A tenant admin enters the domain on the Settings page, for example `app.acme.com`.
+2. They add two DNS records:
+   - a CNAME from the domain to `CUSTOM_DOMAIN_TARGET` (default: the host of `PUBLIC_URL`);
+   - a TXT record `_tenant-verify.app.acme.com` with the value shown, which proves the domain is theirs.
+3. They choose **Check now**. Once the TXT record is found, the domain is verified.
+
+A verified domain stays verified if DNS later can't be reached. Removing it from Settings stops using it. `DNS_SERVERS` picks the resolvers the check uses; the default is the system's.
+
+**HTTPS.** The bundled Caddyfile has a catch-all `https://` site with on-demand TLS. The first visit to a new domain gets a certificate from Let's Encrypt. Before asking for one, Caddy asks the API (`/internal/tls-allowed`) whether the name is a verified domain, so nobody can make the server request certificates for other names. Ports 80 and 443 must reach Caddy. Behind your own proxy or a CDN instead, that proxy must terminate TLS for tenants' domains and pass the original `Host` header on.
+
+**What changes on a verified domain:**
+
+- The site opens straight to that organization's sign-in page.
+- Signing in there works for that organization only. Another tenant's slug, or the platform portal, is refused (`WRONG_DOMAIN`), so one tenant's domain can't collect another's passwords.
+- Sign-up isn't offered there.
+- Invitations, password resets and notifications link to the domain.
+- Single sign-on has a second redirect URI on the domain, and the tenant registers it with its identity provider.
+
+Set `CUSTOM_DOMAINS=false` to turn custom domains off. Every domain then stops working, but the stored ones are kept.
 
 ## Running more than one API server
 

@@ -23,6 +23,8 @@ import { bffRoutes } from './routes/bff.js';
 import { bffAuthRoutes } from './routes/bff-auth.js';
 import { twoFactorRoutes } from './routes/two-factor.js';
 import { accountRoutes } from './routes/account.js';
+import { signupRoutes, siteRoutes, tlsAskRoutes } from './routes/signup.js';
+import { customDomainRoutes } from './routes/custom-domain.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
@@ -191,6 +193,12 @@ async function registerRoutes() {
   // Account flows from emailed links (invitations, password reset); no session
   await fastify.register(accountRoutes, { prefix: '/bff/account' });
 
+  // Self-service sign-up, and what the public pages need about this address
+  await fastify.register(signupRoutes, { prefix: '/bff/signup' });
+  await fastify.register(siteRoutes, { prefix: '/bff' });
+  // For the web server only (Caddy's on-demand certificates for custom domains)
+  await fastify.register(tlsAskRoutes, { prefix: '/internal' });
+
   // Protected routes (require authentication)
   await fastify.register(async (protectedRoutes) => {
     // Add authentication hook
@@ -225,6 +233,9 @@ async function registerRoutes() {
 
     // Auth configuration
     await protectedRoutes.register(authConfigRoutes, { prefix: '/auth-config' });
+
+    // The organization's own web address (lib/domains.ts)
+    await protectedRoutes.register(customDomainRoutes, { prefix: '/custom-domain' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
     if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });

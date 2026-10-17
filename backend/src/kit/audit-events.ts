@@ -73,6 +73,9 @@ export const KIT_AUDIT_EVENTS = {
   'certification.completed': t('Access review completed', 'access'),
 
   // Organization structure
+  'custom_domain.added': t('Custom domain added', 'config'),
+  'custom_domain.verified': t('Custom domain verified', 'config'),
+  'custom_domain.removed': t('Custom domain removed', 'config'),
   'organization.created': t('Organization created', 'config'),
   'organization.updated': t('Organization changed', 'config'),
   'organization.deleted': t('Organization deleted', 'config'),
@@ -106,6 +109,7 @@ export const KIT_AUDIT_EVENTS = {
 
   // Platform: tenants
   'tenant.created': p('Tenant created', 'tenant'),
+  'tenant.signed_up': p('Organization signed up', 'tenant'),
   'tenant.updated': p('Tenant changed', 'tenant'),
   'tenant.deleted': p('Tenant deleted', 'tenant'),
   'tenant.provisioned': p('Tenant set up', 'tenant'),

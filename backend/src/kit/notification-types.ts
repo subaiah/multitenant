@@ -291,6 +291,15 @@ export const KIT_NOTIFICATION_TYPES: Record<string, NotificationType> = {
     audience: () => ({ permission: 'tenants:manage' }),
     render: (e) => ({ title: `Setting up ${e.resource.label} failed`, body: d(e, 'error'), link: '/platform/tenants' }),
   },
+  'tenant.signed_up': {
+    label: 'Organization signed up',
+    description: 'Someone created an organization themselves (self-service sign-up)',
+    category: 'tenants',
+    scope: 'platform',
+    defaults: { inApp: true, email: false },
+    audience: () => ({ permission: 'tenants:manage' }),
+    render: (e) => ({ title: `${d(e, 'organization') || e.resource.label} signed up`, body: `${e.actor.email ?? 'Someone'} created it; it's on a trial.`, link: '/platform/tenants' }),
+  },
   'tenant.provisioned': {
     label: 'Tenant ready',
     description: 'A new tenant finished setting up',

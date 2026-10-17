@@ -57,3 +57,11 @@ export const signedInCodeRateLimit = (route: string): SharedRateLimit => ({
   hook: 'preHandler',
   keyGenerator: (request: FastifyRequest) => `code:${route}:${request.user?.userId ?? request.ip}`,
 });
+
+/** Starting a sign-up (it sends an email): per address of the sender */
+export const signupRateLimit: SharedRateLimit = {
+  shared: true,
+  max: 10,
+  timeWindow: '1 hour',
+  keyGenerator: (request: FastifyRequest) => `signup:${request.ip}`,
+};

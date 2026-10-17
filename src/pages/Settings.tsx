@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { SupportAccessCard } from '../components/SupportAccessCard';
+import { CustomDomainCard } from '../components/CustomDomainCard';
 import { apiPatch } from '../lib/api-client';
 import { Badge, Card, DataView, PageHeader, formatDate, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -85,6 +86,8 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
           </div>
         </Card>
 
+        <CustomDomainCard />
+
         <Card title="Login page branding" description="Shown to people when they sign in to your organization">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {field('loginTitle', 'Title', { placeholder: `Welcome to ${tenant.name}`, maxLength: 100 })}
@@ -134,7 +137,6 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             <div className="flex justify-between"><dt className="text-slate-500">Users</dt><dd className="tabular-nums">{tenant._count.users}</dd></div>
             {previewFeatures && <div className="flex justify-between"><dt className="text-slate-500">Deployed apps</dt><dd className="tabular-nums">{tenant._count.applications}</dd></div>}
             <div className="flex justify-between"><dt className="text-slate-500">Member since</dt><dd>{formatDate(tenant.createdAt)}</dd></div>
-            {tenant.customDomain && <div className="flex justify-between"><dt className="text-slate-500">Custom domain</dt><dd className="font-mono">{tenant.customDomain}</dd></div>}
           </dl>
           <p className="text-xs text-slate-500 mt-4">Plan changes are handled by the platform team.</p>
         </Card>

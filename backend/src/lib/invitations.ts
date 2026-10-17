@@ -1,4 +1,4 @@
-import { config } from '../config/env.js';
+import { appOriginForTenant } from './domains.js';
 import { sendMail } from './mailer.js';
 import { inviteEmail } from './email-templates.js';
 import { INVITE_TTL_DAYS, issueUserToken } from './user-tokens.js';
@@ -21,6 +21,7 @@ export async function sendInvitation(
     (await controlDb.platformUser.findUnique({ where: { id: inviterId }, select }));
   const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
   const token = await issueUserToken(owner, user.id, 'INVITE', INVITE_TTL_DAYS * 24 * 60 * 60 * 1000, inviterId);
-  const link = `${config.frontendUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+  // The organization's own domain, once verified (lib/domains.ts)
+  const link = `${await appOriginForTenant(tenant.id)}/accept-invite?token=${encodeURIComponent(token)}`;
   await sendMail(inviteEmail(user.email, link, tenant.name, inviter?.name || inviter?.email || 'An administrator', INVITE_TTL_DAYS));
 }

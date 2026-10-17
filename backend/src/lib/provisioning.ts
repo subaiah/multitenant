@@ -29,6 +29,9 @@ import { createTenantDefaults, deleteTenantData } from './tenant-data.js';
 import { archiveChain, platformActor, recordAudit } from './audit.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { sendInvitation } from './invitations.js';
+import { sendMail } from './mailer.js';
+import { organizationReadyEmail } from './email-templates.js';
+import { appOriginForTenant } from './domains.js';
 import { logPlatformActivity } from './activity.js';
 import { refreshTenantUsage } from './tenant-usage.js';
 import { accessFor, lockDatabaseAcl, migrateTarget, userOf, withConnection } from './tenant-migrations.js';
@@ -204,9 +207,21 @@ async function runSteps(tenantId: string) {
       }));
   }
 
-  // 6. Invite the first administrator, once
-  if (admin && admin.status === 'PENDING' && !tenant.adminInvitedAt && tenant.createdById) {
-    await sendInvitation(tenant, admin, tenant.createdById);
+  // 6. Bring in the first administrator, once: invited by the platform user
+  // who created the tenant, or, for someone who signed up, given the password
+  // they chose then (routes/signup.ts) and told the organization is ready
+  if (admin && admin.status === 'PENDING' && !tenant.adminInvitedAt) {
+    if (tenant.createdById) {
+      await sendInvitation(tenant, admin, tenant.createdById);
+    } else {
+      const signup = await controlDb.signupRequest.findUnique({ where: { tenantId } });
+      if (signup?.passwordHash) {
+        await db.user.update({ where: { id: admin.id }, data: { passwordHash: signup.passwordHash, status: 'ACTIVE' } });
+        await controlDb.signupRequest.update({ where: { id: signup.id }, data: { passwordHash: null } });
+        const origin = await appOriginForTenant(tenantId);
+        await sendMail(organizationReadyEmail(admin.email, `${origin}/${tenant.slug}/login?email=${encodeURIComponent(admin.email)}`, tenant.name)).catch(() => {});
+      }
+    }
     await controlDb.tenant.update({ where: { id: tenantId }, data: { adminInvitedAt: new Date() } });
   }
 }
@@ -263,6 +278,7 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
 
     await controlDb.$transaction([
       controlDb.supportSession.deleteMany({ where: { tenantId } }),
+      controlDb.signupRequest.deleteMany({ where: { tenantId } }),
       controlDb.tenantApplication.deleteMany({ where: { tenantId } }),
       controlDb.tenantUsage.deleteMany({ where: { tenantId } }),
       controlDb.databaseConfig.deleteMany({ where: { tenantId } }),

@@ -4,7 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
-import { ssoRedirectUri } from '../lib/sso.js';
+import { ssoRedirectUrisForTenant } from '../lib/sso.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
@@ -60,8 +60,10 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Authentication configuration not found', 404);
     }
 
-    // The address to register with identity providers
-    return { ...config, ssoRedirectUri: ssoRedirectUri() };
+    // The addresses to register with identity providers: the platform's, and
+    // the organization's own domain once it's verified
+    const ssoRedirectUris = await ssoRedirectUrisForTenant(request.tenant.id);
+    return { ...config, ssoRedirectUri: ssoRedirectUris[0], ssoRedirectUris };
   });
 
   // Update auth config

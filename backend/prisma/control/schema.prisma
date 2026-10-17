@@ -23,7 +23,14 @@ model Tenant {
   // Branding (read before sign-in)
   logoUrl         String?      @map("logo_url")
   primaryColor    String?      @default("#3b82f6") @map("primary_color")
+  // The tenant's own web address (lib/domains.ts): proven by a DNS TXT
+  // record before anything is served on it
   customDomain    String?      @unique @map("custom_domain")
+  customDomainStatus     CustomDomainStatus? @map("custom_domain_status")
+  customDomainToken      String?   @map("custom_domain_token")
+  customDomainVerifiedAt DateTime? @map("custom_domain_verified_at")
+  customDomainCheckedAt  DateTime? @map("custom_domain_checked_at")
+  customDomainError      String?   @map("custom_domain_error")
   loginTitle      String?      @map("login_title")
   loginSubtitle   String?      @map("login_subtitle")
 
@@ -565,4 +572,31 @@ model RateLimitHit {
 
   @@index([expiresAt])
   @@map("rate_limit_hits")
+}
+
+enum CustomDomainStatus {
+  PENDING
+  VERIFIED
+}
+
+// Someone signing up for a new organization (routes/signup.ts): kept until
+// they confirm their email, then the tenant is created. The password is only
+// ever a hash, and is cleared once their account has it.
+model SignupRequest {
+  id           String    @id @default(uuid())
+  email        String
+  name         String
+  organization String
+  slug         String
+  passwordHash String?   @map("password_hash")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  verifiedAt   DateTime? @map("verified_at")
+  tenantId     String?   @unique @map("tenant_id")
+  ip           String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("signup_requests")
 }

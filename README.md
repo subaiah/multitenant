@@ -29,6 +29,13 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
 - **Audit log.**
   - Tamper-evident: each tenant's log and the platform's is a signed hash chain.
   - Entries are archived after a year. ([backend/docs/AUDIT_LOG.md](backend/docs/AUDIT_LOG.md))
+- **Self-service sign-up, on by default.** Anyone can create an organization from the sign-in page: they confirm their email address, the organization starts as a trial on the `SIGNUP_PLAN` plan, and they become its administrator. Nothing is created until the address is confirmed. Set `SELF_SIGNUP=false` to turn it off, so only platform staff create tenants.
+- **Custom domains.** A tenant can serve the app at its own address, such as `app.acme.com`. It adds the domain on its Settings page, adds a CNAME and a TXT record, and the platform checks the TXT record. Once the domain is verified:
+  - the bundled Caddy gets an HTTPS certificate for it on first visit;
+  - the address opens straight to that organization's sign-in page and signs in to that organization only;
+  - emails and single sign-on use it.
+
+  ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#custom-domains))
 - **Notifications.** In-app and email, with organization rules and personal preferences. Products can add their own types. ([backend/docs/NOTIFICATIONS.md](backend/docs/NOTIFICATIONS.md))
 
 ## Look and feel

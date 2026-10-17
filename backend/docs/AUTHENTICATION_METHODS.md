@@ -22,6 +22,10 @@ Platform users sign in with a password on the `platform` slug; single sign-on is
 
 Each tenant adds identity providers on the Authentication page. Register the
 **redirect URI** shown there (`BFF_URL` + `/bff/auth/sso/callback`) with the provider.
+A tenant with a verified custom domain sees a second one on its own domain
+(`https://<domain>/api/bff/auth/sso/callback` behind the bundled Caddy), and
+registers both: sign-in returns to whichever address it started on, and a
+callback that arrives at a different address than the one it started from is refused.
 
 | Provider | What to enter | How it signs in |
 | --- | --- | --- |
@@ -47,7 +51,7 @@ Who signed in is matched to a user like this:
 An invited (pending) user who signs in this way is activated. Inactive users are refused.
 Problems come back to the sign-in page as `?sso_error=<code>&message=...`
 (`SSO_EXPIRED`, `SSO_DENIED`, `SSO_UNVERIFIED`, `SSO_NO_ACCOUNT`, `SSO_MISCONFIGURED`,
-`SSO_UNAVAILABLE`, `SSO_FAILED`).
+`SSO_UNAVAILABLE`, `SSO_FAILED`, and `WRONG_DOMAIN` when it starts for another organization on a custom domain).
 
 Outside production, plain-http identity providers are allowed (local testing).
 

@@ -25,6 +25,8 @@ interface AuthConfig {
   providers: Provider[];
   /** Register this with each identity provider */
   ssoRedirectUri: string;
+  /** Every address to register: the platform's, and the organization's own domain once verified */
+  ssoRedirectUris?: string[];
 }
 interface ProviderInfo {
   id: string;
@@ -76,7 +78,9 @@ export default function Authentication() {
 
             <Card title="Identity providers" description="Single sign-on connections for this organization">
               <p className="mb-3 text-xs text-slate-500">
-                Register this redirect URI with each provider: <code className="font-mono select-all text-slate-700 dark:text-slate-300">{c.ssoRedirectUri}</code>
+                Register {(c.ssoRedirectUris?.length ?? 1) > 1 ? 'these redirect URIs' : 'this redirect URI'} with each provider: {(c.ssoRedirectUris ?? [c.ssoRedirectUri]).map((u, i) => (
+                  <span key={u}>{i > 0 && ' and '}<code className="font-mono select-all text-slate-700 dark:text-slate-300">{u}</code></span>
+                ))}
               </p>
               {c.providers.length === 0 ? (
                 <EmptyState icon={KeyRound} title="No identity providers" message="People sign in with a password or one-time code until you add one." />

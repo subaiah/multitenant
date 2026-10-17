@@ -136,6 +136,7 @@ export function DataView<T>({ data, error, loading, reload, children }: {
 const BADGE: Record<string, string> = {
   ACTIVE: 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400',
   RUNNING: 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400',
+  VERIFIED: 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400',
   TRIAL: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
   DEPLOYING: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400',
   PENDING: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',

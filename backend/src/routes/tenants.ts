@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { config } from '../config/env.js';
 import { deprovisionTenant, rotateTenantCredentials, startProvisioning } from '../lib/provisioning.js';
-import { RESERVED_ROLE_SLUGS, roleNameFor } from '../lib/tenant-targets.js';
+import { createTenantRecord, slugSchema } from '../lib/new-tenant.js';
 import { latestMigration, tenantsBehind } from '../lib/tenant-migrations.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -30,11 +30,7 @@ const updateTenantSchema = z.object({
 
 const createTenantSchema = z.object({
   name: z.string().trim().min(2).max(100),
-  slug: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/, 'Use 2-50 lowercase letters, digits and hyphens'),
+  slug: slugSchema,
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('FREE'),
   status: z.enum(['ACTIVE', 'TRIAL']).default('ACTIVE'),
   // Where its data lives; fixed once created
@@ -104,36 +100,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, async (request, reply) => {
     const data = createTenantSchema.parse(request.body);
-    if (isPlatformSlug(data.slug) || RESERVED_ROLE_SLUGS.includes(data.slug)) {
-      throw new AppError('That address is reserved', 409);
-    }
-    if (await controlDb.tenant.findUnique({ where: { slug: data.slug } })) {
-      throw new AppError(`The address "${data.slug}" is already taken`, 409);
-    }
-
-    // The tenant's database role (and its schema or database) is named from the slug
-    if (await controlDb.databaseConfig.findUnique({ where: { dbRoleName: roleNameFor(data.slug) } })) {
-      throw new AppError(`The address "${data.slug}" is already taken`, 409);
-    }
-
-    const tenant = await controlDb.tenant.create({
-      data: {
-        name: data.name,
-        slug: data.slug,
-        plan: data.plan,
-        status: data.status,
-        loginTitle: `Welcome to ${data.name}`,
-        loginSubtitle: 'Sign in to your account',
-        provisioningStatus: 'PENDING',
-        initialAdminEmail: data.adminEmail,
-        initialAdminName: data.adminName,
-        createdById: request.user.userId,
-        databaseConfig: {
-          create: { strategy: data.strategy, region: 'default', storageLimit: '5 GB', tenantColumn: 'tenant_id' },
-        },
-      },
-      include: tenantInclude,
-    });
+    const created = await createTenantRecord({ ...data, createdById: request.user.userId });
+    const tenant = await controlDb.tenant.findUniqueOrThrow({ where: { id: created.id }, include: tenantInclude });
     await logPlatformActivity({
       tenantId: tenant.id,
       userId: request.user.userId,
