@@ -84,6 +84,10 @@ export function startRollout(): Promise<RolloutReport> | null {
 
 export async function withConnection<T>(url: string, fn: (c: pg.Client) => Promise<T>): Promise<T> {
   const client = new pg.Client({ connectionString: url });
+  // A connection ended from the server side (its database dropped while a
+  // tenant is deleted) also fails the query in progress, which reports it;
+  // without a listener the event would crash the process
+  client.on('error', () => {});
   await client.connect();
   try {
     return await fn(client);
