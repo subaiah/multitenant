@@ -1,19 +1,12 @@
 import { FastifyPluginAsync } from 'fastify';
 import { controlDb } from '../lib/prisma.js';
-import { dbForTenant } from '../lib/tenant-db.js';
 import { withActivityUsers } from '../lib/activity-users.js';
 import { activityByDay, countBy } from '../lib/stats.js';
-import { AUTHENTICATED } from '../middleware/authorize.js';
-import { hasPermission } from '../middleware/authorize.js';
+import { config } from '../config/env.js';
 
 /**
- * BFF (Backend for Frontend) Routes
- * 
- * This demonstrates the BFF pattern where:
- * 1. Frontend never stores sensitive tokens
- * 2. BFF handles token refresh and management
- * 3. BFF aggregates multiple API calls
- * 4. BFF injects tenant context
+ * Aggregations for the frontend (Backend for Frontend): one call per screen
+ * instead of several. Sign-in and sessions are in bff-auth.ts.
  */
 export const bffRoutes: FastifyPluginAsync = async (fastify) => {
   // Dashboard aggregation endpoint
@@ -41,12 +34,9 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
           status: true,
         },
       }),
-      // Get application statistics
-      db.application.groupBy({
-        by: ['status'],
-        where: { tenantId },
-        _count: true,
-      }),
+      // Deployed applications are sample data until something reports real
+      // deployments (PREVIEW_FEATURES)
+      config.previewFeatures ? db.application.groupBy({ by: ['status'], where: { tenantId }, _count: true }) : null,
       // Get recent activities
       db.activity.findMany({
         where: { tenantId },
@@ -57,7 +47,7 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
       db.user.count({
         where: { tenantId },
       }),
-      db.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }),
+      config.previewFeatures ? db.application.groupBy({ by: ['environment'], where: { tenantId }, _count: true }) : null,
       db.group.count({ where: { tenantId } }),
       db.organization.count({ where: { tenantId } }),
       controlDb.tenantApplication.count({ where: { tenantId } }),
@@ -72,17 +62,14 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
         plan: tenant?.plan,
         status: tenant?.status,
       },
-      applications: {
+      applications: appStats && {
         total: appStats.reduce((sum, stat) => sum + stat._count, 0),
-        byStatus: appStats.reduce((acc, stat) => {
-          acc[stat.status] = stat._count;
-          return acc;
-        }, {} as Record<string, number>),
+        byStatus: countBy(appStats, 'status'),
       },
       users: {
         total: userCount,
       },
-      applicationsByEnvironment: countBy(appsByEnv, 'environment'),
+      applicationsByEnvironment: appsByEnv && countBy(appsByEnv, 'environment'),
       counts: { groups: groupCount, organizations: orgCount, entitledApplications: entitledApps },
       activityByDay: perDay,
       activityByType: countBy(activityTypes, 'type'),
@@ -94,202 +81,6 @@ export const bffRoutes: FastifyPluginAsync = async (fastify) => {
         user: activity.user?.name || activity.user?.email || 'System',
         timestamp: activity.createdAt,
       })),
-    };
-  });
-
-  // Token exchange endpoint
-  // Frontend sends BFF token, gets backend service token
-  fastify.post('/token/exchange', {
-    config: { permission: AUTHENTICATED },
-    schema: {
-      tags: ['bff'],
-      summary: 'Exchange BFF token for backend service token',
-      description: 'Securely exchange tokens without exposing credentials to frontend',
-      body: {
-        type: 'object',
-        required: ['service'],
-        properties: {
-          service: { type: 'string' },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { service } = request.body as { service: string };
-
-    // In a real implementation, this would:
-    // 1. Validate the BFF token (already done by JWT middleware)
-    // 2. Fetch a service-specific token from the identity provider
-    // 3. Return the service token to the frontend
-
-    // For demo purposes, we'll just return a mock token
-    const serviceToken = fastify.jwt.sign({
-      userId: request.user.userId,
-      tenantId: request.tenant.id,
-      service,
-      scope: `${service}:read ${service}:write`,
-    }, { expiresIn: '1h' });
-
-    return {
-      token: serviceToken,
-      expiresIn: 3600,
-      service,
-    };
-  });
-
-  // Multi-tenant data aggregation
-  // Example: Get data from multiple services for a specific tenant
-  fastify.get('/tenant/:tenantId/data', {
-    config: { permission: AUTHENTICATED },
-    schema: {
-      tags: ['bff'],
-      summary: 'Get aggregated data for a specific tenant',
-      description: 'Admin-only endpoint to aggregate data across services',
-      params: {
-        type: 'object',
-        required: ['tenantId'],
-        properties: {
-          tenantId: { type: 'string', format: 'uuid' },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { tenantId } = request.params as { tenantId: string };
-
-    // Platform users can view any tenant; tenant admins only their own
-    const { userType } = request.user;
-    const allowed =
-      (await hasPermission(request, 'tenants:read')) ||
-      (tenantId === request.tenant?.id && (await hasPermission(request, 'settings:manage')));
-    if (!allowed) {
-      return reply.status(403).send({ error: 'Admin access required' });
-    }
-
-    const tenantDb = await dbForTenant(tenantId);
-
-    // Aggregate data from multiple sources
-    const [tenant, applications, users, activities, dbConfig, authConfig, apiConfig] = await Promise.all([
-      controlDb.tenant.findUnique({
-        where: { id: tenantId },
-      }),
-      tenantDb.application.findMany({
-        where: { tenantId },
-      }),
-      tenantDb.user.findMany({
-        where: { tenantId },
-      }),
-      tenantDb.activity.findMany({
-        where: { tenantId },
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-      }),
-      controlDb.databaseConfig.findUnique({
-        where: { tenantId },
-        omit: { connectionString: true },
-      }),
-      tenantDb.authConfig.findUnique({
-        where: { tenantId },
-        include: { providers: { omit: { clientSecret: true } } },
-      }),
-      tenantDb.apiConfig.findUnique({
-        where: { tenantId },
-      }),
-    ]);
-
-    return {
-      tenant,
-      summary: {
-        applications: applications.length,
-        users: users.length,
-        activities: activities.length,
-      },
-      configurations: {
-        database: dbConfig,
-        authentication: authConfig,
-        api: apiConfig,
-      },
-      applications: applications.slice(0, 5), // Limit for response size
-      recentActivities: activities,
-    };
-  });
-
-  // Health check with tenant context
-  fastify.get('/health', {
-    config: { permission: AUTHENTICATED },
-    schema: {
-      tags: ['bff'],
-      summary: 'BFF health check with tenant context',
-    },
-  }, async (request, reply) => {
-    return {
-      status: 'ok',
-      tenant: {
-        id: request.tenant.id,
-        name: request.tenant.name,
-        plan: request.tenant.plan,
-      },
-      user: {
-        id: request.user.userId,
-        userType: request.user.userType,
-      },
-      timestamp: new Date().toISOString(),
-    };
-  });
-
-  // API aggregation example
-  // Combines multiple endpoints into one call
-  fastify.get('/apps/:appId/overview', {
-    config: { permission: 'applications:read' },
-    schema: {
-      tags: ['bff'],
-      summary: 'Get application overview with aggregated data',
-      params: {
-        type: 'object',
-        required: ['appId'],
-        properties: {
-          appId: { type: 'string', format: 'uuid' },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { appId } = request.params as { appId: string };
-    const tenantId = request.tenant.id;
-
-    // Get application details
-    const application = await request.db.application.findFirst({
-      where: {
-        id: appId,
-        tenantId,
-      },
-    });
-
-    if (!application) {
-      return reply.status(404).send({ error: 'Application not found' });
-    }
-
-    // Get related activities
-    const activities = await request.db.activity.findMany({
-      where: {
-        tenantId,
-        target: application.name,
-      },
-      take: 10,
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // Get deployment history (simulated)
-    const deployments = activities
-      .filter((a) => a.type === 'DEPLOY')
-      .slice(0, 5);
-
-    return {
-      application,
-      metrics: {
-        cpu: application.cpu,
-        memory: application.memory,
-        requests: application.requests,
-      },
-      deployments,
-      recentActivities: activities.slice(0, 5),
     };
   });
 };

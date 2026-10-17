@@ -5,8 +5,8 @@
  *   npm run audit:verify              check every log's chain, archives included
  *   npm run audit:verify -- <chain>   one log: "platform" or a tenant id
  */
-import { controlDb, disconnectDatabases } from '../src/lib/prisma.js';
-import { PLATFORM_CHAIN, archiveExpired, verifyChain } from '../src/lib/audit.js';
+import { controlDb, disconnectDatabases } from '../lib/prisma.js';
+import { PLATFORM_CHAIN, archiveExpired, verifyChain } from '../lib/audit.js';
 
 const [command, only] = process.argv.slice(2);
 let failed = false;
@@ -27,7 +27,7 @@ try {
       if (!r.ok) failed = true;
     }
   } else {
-    console.error('Usage: tsx prisma/audit.ts archive | verify [chain]');
+    console.error('Usage: audit archive | verify [chain]');
     failed = true;
   }
 } finally {

@@ -40,7 +40,9 @@ psql "postgresql://postgres@host/postgres" \
 Then:
 
 1. Set the three `TENANT_*_URL` settings (see `.env.example`).
-2. Run `npm run tenant:migrate`. It creates the shared tables and their row-level security.
+2. Run `npm run migrate` (the release step; `node dist/cli/migrate.js` in the production image). It migrates the control plane, then creates the shared tables and their row-level security. `npm run tenant:migrate` does the tenant part alone.
+
+With Docker Compose (`deploy/`), the database container does this setup on its first start; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 At startup the server checks the setup and logs what's wrong. A production server refuses to start if any of these fail:
 

@@ -1,9 +1,9 @@
 /**
- * Sidebar menus for both portals (seeded by seed-menu-items.ts).
+ * Sidebar menus for both portals (added to the database by lib/menus.ts).
  * Every `permission` must be in src/utils/permissions.ts and every `path`
  * must be a route in src/App.tsx; test/permissions.test.ts checks both.
  */
-import { product } from '../src/product/index.js';
+import { product } from '../product/index.js';
 
 export type Portal = 'PLATFORM' | 'TENANT';
 export interface MenuSeed {

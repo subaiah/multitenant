@@ -1,0 +1,12 @@
+{
+  "name": "multitenant-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser journeys against a running installation (see smoke.mjs)",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

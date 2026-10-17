@@ -9,10 +9,11 @@
  * Rotating a key: add SECRETS_KEY_V2 next to V1, deploy, run this script, then
  * remove V1 once `--check` reports nothing left on it.
  */
-import { controlDb, disconnectDatabases } from '../src/lib/prisma.js';
-import { listTargets } from '../src/lib/tenant-migrations.js';
-import { describeTarget, platformDb } from '../src/lib/tenant-targets.js';
-import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretContext, secretKeyVersion, type SecretField } from '../src/lib/secrets.js';
+import { pathToFileURL } from 'node:url';
+import { controlDb, disconnectDatabases } from '../lib/prisma.js';
+import { listTargets } from '../lib/tenant-migrations.js';
+import { describeTarget, platformDb } from '../lib/tenant-targets.js';
+import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretContext, secretKeyVersion, type SecretField } from '../lib/secrets.js';
 
 type Delegate = { name: string; findMany: Function; update: Function };
 
@@ -76,7 +77,7 @@ export async function encryptStoredSecrets({ check = false, only }: { check?: bo
   return { activeKey: `v${active}`, report, skipped };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const check = process.argv.includes('--check');
   encryptStoredSecrets({ check })
     .then(({ activeKey, report, skipped }) => {

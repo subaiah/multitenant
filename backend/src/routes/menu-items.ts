@@ -7,6 +7,7 @@ import { permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { PREVIEW_MENU_PATHS, previewEnabled } from '../lib/preview.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -77,15 +78,13 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const granted = new Set(permissions);
     
     // Filter menu items based on permissions
-    const filteredItems = menuItems.filter(item => {
-      if (!item.permission) return true; // No permission required
-      return permissionMatches(granted, item.permission);
-    }).map(item => ({
+    // ...and leave out pages that only show sample data (lib/preview.ts)
+    const visible = (item: { permission: string | null; path: string }) =>
+      (!item.permission || permissionMatches(granted, item.permission)) &&
+      (previewEnabled() || !PREVIEW_MENU_PATHS.includes(item.path));
+    const filteredItems = menuItems.filter(visible).map(item => ({
       ...item,
-      children: item.children.filter(child => {
-        if (!child.permission) return true;
-        return permissionMatches(granted, child.permission);
-      }),
+      children: item.children.filter(visible),
     }));
     
     return { menuItems: filteredItems };

@@ -1,0 +1,12 @@
+node_modules
+dist
+src/generated
+audit-archive
+coverage
+*.log
+.env
+.env.*
+!.env.example
+test
+docs
+*.md

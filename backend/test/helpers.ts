@@ -27,14 +27,7 @@ process.env.AUDIT_ARCHIVE_DIR ??= join(tmpdir(), 'multitenant-test-audit-archive
 export const PASSWORD = 'correct-horse-battery';
 // A port the OS says is free (a fixed range could hit a dev server already
 // running, and the health check would then talk to the wrong database)
-const PORT = await new Promise<number>((resolve, reject) => {
-  const probe = createServer();
-  probe.once('error', reject);
-  probe.listen(0, '127.0.0.1', () => {
-    const { port } = probe.address() as AddressInfo;
-    probe.close(() => resolve(port));
-  });
-});
+const PORT = await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
 const run = randomUUID().slice(0, 8);
 
@@ -149,24 +142,59 @@ export async function seedPlatformUsers(): Promise<PlatformSeed> {
   return seed;
 }
 
-export async function startServer() {
-  server = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
+async function freePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function spawnServer(port: number, env: Record<string, string>): Promise<ChildProcess> {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
+    env: { ...process.env, ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   let exited = false;
-  server.once('exit', () => (exited = true));
+  child.once('exit', () => (exited = true));
   for (let i = 0; i < 100; i++) {
     // Our server must be the one answering
     if (exited) throw new Error('server exited during startup');
     try {
-      if ((await fetch(`${BASE}/health`)).ok) return;
+      if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) return child;
     } catch {
       /* not up yet */
     }
     await sleep(200);
   }
+  child.kill();
   throw new Error('server did not start');
+}
+
+export async function startServer() {
+  server = await spawnServer(PORT, {});
+}
+
+/**
+ * Another server on the same databases with different settings (a second
+ * instance behind a load balancer, or production-like options). Stop it
+ * before the test file ends.
+ */
+export async function startExtraServer(env: Record<string, string>) {
+  const port = await freePort();
+  const child = await spawnServer(port, env);
+  const base = `http://127.0.0.1:${port}`;
+  return {
+    base,
+    api: (method: string, path: string, opts: ApiOptions = {}) => apiAt(base, method, path, opts),
+    stop: () => new Promise<void>((resolve) => {
+      child.once('exit', () => resolve());
+      child.kill();
+    }),
+  };
 }
 
 export async function stopServerAndCleanUp() {
@@ -201,15 +229,21 @@ export interface ApiOptions {
   cookie?: string;
   tenant?: string;
   body?: unknown;
+  /** Any other request headers */
+  headers?: Record<string, string>;
 }
 
 export async function api(method: string, path: string, opts: ApiOptions = {}) {
-  const headers: Record<string, string> = {};
+  return apiAt(BASE, method, path, opts);
+}
+
+async function apiAt(base: string, method: string, path: string, opts: ApiOptions = {}) {
+  const headers: Record<string, string> = { ...opts.headers };
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.tenant) headers['x-tenant-id'] = opts.tenant;
-  const res = await fetch(BASE + path, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
+  const res = await fetch(base + path, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
   const text = await res.text();
   let json: any = null;
   try {

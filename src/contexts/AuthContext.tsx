@@ -26,6 +26,11 @@ interface AuthContextType {
   hasPermission: (permission: string) => boolean;
   /** Why the server ended the session mid-use (see api-client), or false */
   sessionEnded: SessionEndReason | false;
+  /**
+   * Pages that show sample data rather than real measurements are on
+   * (PREVIEW_FEATURES on the server; backend/src/lib/preview.ts)
+   */
+  previewFeatures: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionEnded, setSessionEnded] = useState<SessionEndReason | false>(false);
+  const [previewFeatures, setPreviewFeatures] = useState(false);
 
   const clear = useCallback(() => {
     setUser(null);
@@ -51,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me.user);
       setTenant(me.tenant);
       setPermissions(permissions);
+      setPreviewFeatures(me.features?.preview ?? false);
       setSessionEnded(false);
       return me.user.portal;
     } catch {
@@ -111,8 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = useCallback((permission: string) => permissionMatches(granted, permission), [granted]);
 
   const value = useMemo(
-    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission, sessionEnded }),
-    [user, tenant, permissions, loading, login, reload, logout, hasPermission, sessionEnded],
+    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission, sessionEnded, previewFeatures }),
+    [user, tenant, permissions, loading, login, reload, logout, hasPermission, sessionEnded, previewFeatures],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

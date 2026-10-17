@@ -135,7 +135,7 @@ test('every write path encrypts: nested creates, upsert, updateMany with { set }
 });
 
 test('the encrypt script converts plain text, re-keys old values, and is safe to rerun', async () => {
-  const { encryptStoredSecrets } = await import('../prisma/encrypt-secrets.js');
+  const { encryptStoredSecrets } = await import('../src/cli/encrypt-secrets.js');
   const authConfig = await A.db.authConfig.findUniqueOrThrow({ where: { tenantId: A.tenantId } });
   const p = await A.db.authProvider.create({ data: { tenantId: A.tenantId, authConfigId: authConfig.id, provider: 'AUTH0', clientId: 'a0', scopes: [] } });
   // Plain text written before encryption existed (bypassing the extension)

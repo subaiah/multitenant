@@ -1,4 +1,6 @@
+import { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
+import { LoadingState } from '../components/ui';
 import DynamicMenu from '../components/DynamicMenu';
 import NotificationBell from '../components/NotificationBell';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,7 +56,9 @@ export default function TenantLayout() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
-        <Outlet />
+        <Suspense fallback={<LoadingState />}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );

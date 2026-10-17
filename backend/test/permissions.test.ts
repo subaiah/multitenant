@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PERMISSIONS, USER_TYPE_PERMISSIONS, permissionMatches } from '../src/utils/permissions.js';
-import { MENUS } from '../prisma/menu-definitions.js';
+import { MENUS } from '../src/kit/menu-definitions.js';
 
 const FRONTEND = join(import.meta.dirname, '..', '..', 'src');
 const catalog = new Set<string>(PERMISSIONS);
