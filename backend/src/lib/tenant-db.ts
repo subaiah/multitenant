@@ -55,3 +55,13 @@ export async function targetForTenant(tenantId: string): Promise<Target> {
 export function forgetTenant(tenantId: string) {
   configs.delete(tenantId);
 }
+
+/**
+ * The tenant's own connection string and schema, for work that needs a plain
+ * connection (data exports stream through a cursor). Same role as dbForTenant:
+ * row-level security applies.
+ */
+export async function tenantConnection(tenantId: string): Promise<{ url: string; schema: string }> {
+  const { url, target } = await load(tenantId);
+  return { url, schema: schemaOf(target) };
+}

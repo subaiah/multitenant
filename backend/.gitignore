@@ -45,3 +45,6 @@ lerna-debug.log*
 # Generated Prisma clients (npm run prisma:generate)
 src/generated/
 audit-archive/
+
+# Organizations' data exports (EXPORT_DIR) written while developing
+exports/

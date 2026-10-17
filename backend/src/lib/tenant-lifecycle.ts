@@ -10,6 +10,8 @@
  *   passes, unless platform staff restored them.
  * - Sign-up requests (routes/signup.ts): unconfirmed ones once their link has
  *   expired, and confirmed ones once the organization has been set up.
+ * - Data exports (lib/data-export.ts): ones a restart interrupted are built,
+ *   expired ones removed.
  */
 import pg from 'pg';
 import { config } from '../config/env.js';
@@ -20,6 +22,7 @@ import { trialEndedEmail, trialEndingEmail } from './email-templates.js';
 import { recordAudit } from './audit.js';
 import { deprovisionTenant } from './provisioning.js';
 import { appOriginForTenant } from './domains.js';
+import { maintainExports } from './data-export.js';
 
 /** Whether a tenant is a trial past its end (read-only) */
 export function trialEnded(t: { status: string; trialEndsAt: Date | null }, now = new Date()): boolean {
@@ -42,11 +45,12 @@ export interface LifecycleResult {
   deleted: string[];
   failed: string[];
   signupsRemoved: number;
+  exports: { resumed: number; removed: number };
 }
 
 /** One pass over every tenant. Safe to run on several servers at once (each step claims its rows). */
 export async function runTenantLifecycle(now = new Date()): Promise<LifecycleResult> {
-  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0 };
+  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0, exports: { resumed: 0, removed: 0 } };
   const ready = { status: 'TRIAL' as const, provisioningStatus: 'READY' as const };
   const select = { id: true, name: true, slug: true, trialEndsAt: true } as const;
 
@@ -93,6 +97,7 @@ export async function runTenantLifecycle(now = new Date()): Promise<LifecycleRes
     },
   });
   result.signupsRemoved = removed.count;
+  result.exports = await maintainExports(now);
   return result;
 }
 

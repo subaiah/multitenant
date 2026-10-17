@@ -51,7 +51,7 @@ export function CloseOrganizationCard({ name, slug }: { name: string; slug: stri
       {open && (
         <Dialog title={`Close ${name}`} onClose={() => setOpen(false)} onSubmit={close}>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Nobody, including you, can sign in once it's closed. It's deleted after {graceDays} days, and its data can't be recovered after that.
+            Nobody, including you, can sign in once it's closed. It's deleted after {graceDays} days, and its data can't be recovered after that. To keep a copy, use <strong>Export data</strong> above first.
           </p>
           <Field label={`Type its address, ${slug}, to confirm`}>
             <input className={`${inputClass} font-mono`} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" aria-label="Organization address" />

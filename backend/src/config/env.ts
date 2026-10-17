@@ -86,6 +86,11 @@ const envSchema = z.object({
   AUDIT_ARCHIVE_DIR: z.string().default('./audit-archive'),
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
+  // Organizations' data exports (lib/data-export.ts): where the files go
+  // (shared storage when running several API servers), and for how many days
+  // each can be downloaded
+  EXPORT_DIR: z.string().default('./exports'),
+  EXPORT_RETENTION_DAYS: z.string().default('7').transform(Number).pipe(z.number().int().min(1)),
 
   // Self-service sign-up (routes/signup.ts): anyone can create an organization
   // after confirming their email. "false" leaves creating tenants to platform staff.
@@ -281,6 +286,8 @@ export const config = {
   platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',
   auditRetentionDays: env.AUDIT_RETENTION_DAYS,
   auditArchiveDir: env.AUDIT_ARCHIVE_DIR,
+  exportDir: env.EXPORT_DIR,
+  exportRetentionDays: env.EXPORT_RETENTION_DAYS,
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
   notificationPollMs: env.NOTIFICATION_POLL_MS,
   supportMaxHours: env.SUPPORT_MAX_HOURS,

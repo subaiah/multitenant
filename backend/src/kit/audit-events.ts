@@ -103,6 +103,8 @@ export const KIT_AUDIT_EVENTS = {
 
   // The audit log itself
   'audit.exported': t('Audit log exported', 'audit'),
+  'data_export.requested': t('Data export requested', 'data'),
+  'data_export.downloaded': t('Data export downloaded', 'data'),
   'audit.archived': t('Old audit entries archived', 'audit'),
   'platform.audit.exported': p('Platform audit log exported', 'audit'),
   'platform.audit.archived': p('Old platform audit entries archived', 'audit'),
