@@ -125,6 +125,10 @@ const envSchema = z.object({
   // DNS servers for checking those records ("1.1.1.1,8.8.8.8"; port allowed).
   // Default: the system's resolver.
   DNS_SERVERS: z.string().optional(),
+  // How often a verified domain is checked again (hours; 0 = never). One that
+  // no longer points here, and no longer has its TXT record, twice in a row,
+  // goes back to pending, so emails stop linking to it.
+  DOMAIN_RECHECK_HOURS: z.string().default('24').transform(Number).pipe(z.number().min(0)),
 
   // Support sessions (lib/support.ts): longest a session may last, and whether
   // someone with support:manage may approve their own (one-person teams)
@@ -304,6 +308,7 @@ export const config = {
   tenantLifecycleIntervalMs: env.TENANT_LIFECYCLE_INTERVAL_MS,
   customDomains: env.CUSTOM_DOMAINS === 'true',
   customDomainTarget: env.CUSTOM_DOMAIN_TARGET || new URL(env.FRONTEND_URL).hostname,
+  domainRecheckHours: env.DOMAIN_RECHECK_HOURS,
   dnsServers: env.DNS_SERVERS ? env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean) : [],
   supportSelfApproval: env.SUPPORT_SELF_APPROVAL === 'true',
   notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,

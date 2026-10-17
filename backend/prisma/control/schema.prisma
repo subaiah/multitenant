@@ -31,6 +31,8 @@ model Tenant {
   customDomainVerifiedAt DateTime? @map("custom_domain_verified_at")
   customDomainCheckedAt  DateTime? @map("custom_domain_checked_at")
   customDomainError      String?   @map("custom_domain_error")
+  // Re-checks in a row that found the domain no longer pointing here (lib/domains.ts)
+  customDomainFailures   Int       @default(0) @map("custom_domain_failures")
   // Trials (lib/tenant-lifecycle.ts): read-only once trialEndsAt passes
   trialEndsAt            DateTime? @map("trial_ends_at")
   trialReminderSentAt    DateTime? @map("trial_reminder_sent_at")

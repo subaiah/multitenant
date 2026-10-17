@@ -209,7 +209,7 @@ Tenants can serve the app at their own address (`CUSTOM_DOMAINS=true`, the defau
    - a TXT record `_tenant-verify.app.acme.com` with the value shown, which proves the domain is theirs.
 3. They choose **Check now**. Once the TXT record is found, the domain is verified.
 
-A verified domain stays verified if DNS later can't be reached. Removing it from Settings stops using it. `DNS_SERVERS` picks the resolvers the check uses; the default is the system's.
+Verified domains are checked again every `DOMAIN_RECHECK_HOURS` (default 24). A domain stays verified while it still points here (the CNAME, or one of the target's addresses for an apex domain) or still has its TXT record, and a DNS outage changes nothing. A domain that has neither on two checks in a row goes back to pending, and its admins get an email. Without this, emails would keep linking to an address that may now belong to someone else. Removing the domain from Settings stops using it. `DNS_SERVERS` picks the resolvers the check uses; the default is the system's.
 
 **HTTPS.** The bundled Caddyfile has a catch-all `https://` site with on-demand TLS. The first visit to a new domain gets a certificate from Let's Encrypt. Before asking for one, Caddy asks the API (`/internal/tls-allowed`) whether the name is a verified domain, so nobody can make the server request certificates for other names. Ports 80 and 443 must reach Caddy. Behind your own proxy or a CDN instead, that proxy must terminate TLS for tenants' domains and pass the original `Host` header on.
 

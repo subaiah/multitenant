@@ -76,6 +76,7 @@ export const KIT_AUDIT_EVENTS = {
   'custom_domain.added': t('Custom domain added', 'config'),
   'custom_domain.verified': t('Custom domain verified', 'config'),
   'custom_domain.removed': t('Custom domain removed', 'config'),
+  'custom_domain.unverified': t('Custom domain no longer verified', 'config'),
   'organization.created': t('Organization created', 'config'),
   'organization.updated': t('Organization changed', 'config'),
   'organization.deleted': t('Organization deleted', 'config'),

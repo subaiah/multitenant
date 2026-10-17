@@ -142,3 +142,15 @@ ${button(link, 'Go to Settings')}
 <p style="color:#475569">For safety the file itself isn't attached: you sign in to download it.</p>`),
   };
 }
+
+/** To an organization's admins when its custom domain stopped pointing at the platform. */
+export function customDomainLostEmail(to: string, organization: string, domain: string, link: string): Mail {
+  return {
+    to,
+    subject: `${domain} no longer points to ${organization}`,
+    text: `${domain} no longer points to the platform, and its verification record is gone, so ${organization} has stopped using it: sign-in, emails and single sign-on use the platform's address again. If you still want to use it, restore its DNS records and choose Check now on the Settings page: ${link}`,
+    html: layout(`${domain} is no longer in use`, `<p><strong>${escape(domain)}</strong> no longer points to the platform, and its verification record is gone, so <strong>${escape(organization)}</strong> has stopped using it. Sign-in, emails and single sign-on use the platform's address again.</p>
+<p>If you still want to use it, restore its DNS records and choose <em>Check now</em> on the Settings page.</p>
+${button(link, 'Go to Settings')}`),
+  };
+}

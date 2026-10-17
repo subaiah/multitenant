@@ -100,6 +100,11 @@ export function CustomDomainCard() {
               </tbody>
             </table>
           </div>
+          {d.status === 'VERIFIED' && d.error && (
+            <p className="text-sm text-amber-700 dark:text-amber-400" role="status">
+              The last check found a problem: {d.error} If it's still the case at the next daily check, the domain stops being used. Keep the CNAME (or the TXT record) in place.
+            </p>
+          )}
           {d.status !== 'VERIFIED' && d.error && (
             <p className="text-sm text-amber-700 dark:text-amber-400" role="status">{d.error} Last checked {formatDateTime(d.checkedAt)}.</p>
           )}

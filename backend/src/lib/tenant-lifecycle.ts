@@ -10,6 +10,8 @@
  *   passes, unless platform staff restored them.
  * - Sign-up requests (routes/signup.ts): unconfirmed ones once their link has
  *   expired, and confirmed ones once the organization has been set up.
+ * - Custom domains (lib/domains.ts): verified ones are checked again every
+ *   DOMAIN_RECHECK_HOURS; see recheckDomains.
  * - Data exports (lib/data-export.ts): ones a restart interrupted are built,
  *   expired ones removed.
  */
@@ -18,10 +20,10 @@ import { config } from '../config/env.js';
 import { controlDb } from './prisma.js';
 import { dbForTenant } from './tenant-db.js';
 import { sendMail } from './mailer.js';
-import { trialEndedEmail, trialEndingEmail } from './email-templates.js';
+import { customDomainLostEmail, trialEndedEmail, trialEndingEmail } from './email-templates.js';
 import { recordAudit } from './audit.js';
 import { deprovisionTenant } from './provisioning.js';
-import { appOriginForTenant } from './domains.js';
+import { appOriginForTenant, lookupTxt, pointsHere, verifyRecordName, verifyRecordValue } from './domains.js';
 import { maintainExports } from './data-export.js';
 
 /** Whether a tenant is a trial past its end (read-only) */
@@ -46,11 +48,12 @@ export interface LifecycleResult {
   failed: string[];
   signupsRemoved: number;
   exports: { resumed: number; removed: number };
+  domains: { checked: number; unverified: string[] };
 }
 
 /** One pass over every tenant. Safe to run on several servers at once (each step claims its rows). */
 export async function runTenantLifecycle(now = new Date()): Promise<LifecycleResult> {
-  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0, exports: { resumed: 0, removed: 0 } };
+  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0, exports: { resumed: 0, removed: 0 }, domains: { checked: 0, unverified: [] } };
   const ready = { status: 'TRIAL' as const, provisioningStatus: 'READY' as const };
   const select = { id: true, name: true, slug: true, trialEndsAt: true } as const;
 
@@ -98,7 +101,60 @@ export async function runTenantLifecycle(now = new Date()): Promise<LifecycleRes
   });
   result.signupsRemoved = removed.count;
   result.exports = await maintainExports(now);
+  result.domains = await recheckDomains(now);
   return result;
+}
+
+/**
+ * Verified custom domains, checked again. One stays verified while it still
+ * points here (CNAME to the target, or one of its addresses) or still has its
+ * TXT record; a DNS outage changes nothing. One that has neither on two checks
+ * in a row goes back to pending: emails, sign-in and single sign-on stop using
+ * an address that may now belong to someone else, and its admins are told.
+ */
+export async function recheckDomains(now = new Date()): Promise<{ checked: number; unverified: string[] }> {
+  const out = { checked: 0, unverified: [] as string[] };
+  if (!config.customDomains || config.domainRecheckHours <= 0) return out;
+  const due = new Date(now.getTime() - config.domainRecheckHours * 3_600_000);
+  const tenants = await controlDb.tenant.findMany({
+    where: { customDomainStatus: 'VERIFIED', customDomain: { not: null }, OR: [{ customDomainCheckedAt: null }, { customDomainCheckedAt: { lte: due } }] },
+    select: { id: true, name: true, slug: true, customDomain: true, customDomainToken: true, customDomainFailures: true },
+  });
+  for (const t of tenants) {
+    const domain = t.customDomain!;
+    let ok: boolean;
+    try {
+      ok = (await lookupTxt(verifyRecordName(domain))).includes(verifyRecordValue(t.customDomainToken ?? '')) || (await pointsHere(domain));
+    } catch {
+      // DNS couldn't be asked: try again next time, without counting it
+      await controlDb.tenant.update({ where: { id: t.id }, data: { customDomainCheckedAt: now } });
+      continue;
+    }
+    out.checked++;
+    if (ok) {
+      await controlDb.tenant.update({ where: { id: t.id }, data: { customDomainCheckedAt: now, customDomainFailures: 0, customDomainError: null } });
+      continue;
+    }
+    const failures = t.customDomainFailures + 1;
+    const error = `${domain} no longer points to the platform, and its TXT record is gone.`;
+    if (failures < 2) {
+      await controlDb.tenant.update({ where: { id: t.id }, data: { customDomainCheckedAt: now, customDomainFailures: failures, customDomainError: error } });
+      continue;
+    }
+    // Only if nothing changed it meanwhile (an admin removing or re-adding it)
+    const moved = await controlDb.tenant.updateMany({
+      where: { id: t.id, customDomain: domain, customDomainStatus: 'VERIFIED' },
+      data: { customDomainStatus: 'PENDING', customDomainVerifiedAt: null, customDomainCheckedAt: now, customDomainFailures: failures, customDomainError: error },
+    });
+    if (!moved.count) continue;
+    out.unverified.push(domain);
+    await recordAudit({ actor: { type: 'SYSTEM' }, tenantId: t.id }, 'custom_domain.unverified', {
+      resource: { type: 'custom_domain', label: domain }, details: { reason: error },
+    }).catch(() => {});
+    const link = `${await appOriginForTenant(t.id)}/settings`;
+    await emailAdmins(t.id, (to) => customDomainLostEmail(to, t.name, domain, link)).catch(() => {});
+  }
+  return out;
 }
 
 /** runTenantLifecycle on one server at a time */
