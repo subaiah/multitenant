@@ -22,7 +22,7 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
   - Authenticator-app two-factor, idle and maximum session lengths, and sign out everywhere.
   - Sessions live in httpOnly cookies. ([backend/docs/AUTHENTICATION_METHODS.md](backend/docs/AUTHENTICATION_METHODS.md))
 - **Access control.**
-  - Roles with granular permissions, groups, and role assignments scoped to organizations.
+  - Roles with granular permissions, groups, and role assignments for the whole tenant or scoped to one organization or unit (enforced: a scoped role applies there only).
   - Delegation, access requests and access reviews.
   - Platform roles for staff. ([backend/docs/RBAC_SYSTEM.md](backend/docs/RBAC_SYSTEM.md))
 - **Support access.** Platform staff see tenant data only through a time-limited support session that someone else approves. Sessions are read-only unless approved otherwise, the tenant sees them, and the tenant can end one at any time. ([backend/docs/PLATFORM_ACCESS.md](backend/docs/PLATFORM_ACCESS.md))

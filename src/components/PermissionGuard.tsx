@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
+import { useAuth } from '../contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
 
 interface PermissionGuardProps {
@@ -15,6 +16,8 @@ interface PermissionGuardProps {
   fallback?: ReactNode;
   /** If true, redirect to this path instead of showing fallback */
   redirectTo?: string;
+  /** Pages that list only what the user may see: a role for one organization or unit is enough */
+  anywhere?: boolean;
 }
 
 /**
@@ -63,8 +66,11 @@ export function PermissionGuard({
   children,
   fallback,
   redirectTo,
+  anywhere = false,
 }: PermissionGuardProps) {
-  const { hasPermission, hasAnyPermission, hasAllPermissions, loading } = usePermissions();
+  const { hasPermission: tenantWide, hasAnyPermission, hasAllPermissions, loading } = usePermissions();
+  const { hasPermissionAnywhere } = useAuth();
+  const hasPermission = anywhere ? hasPermissionAnywhere : tenantWide;
 
   if (loading) {
     return (

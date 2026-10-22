@@ -229,7 +229,7 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/organizations" element={
-                <PermissionGuard permission="organizations:read" redirectTo="/unauthorized">
+                <PermissionGuard permission="organizations:read" anywhere redirectTo="/unauthorized">
                   <Organizations />
                 </PermissionGuard>
               } />

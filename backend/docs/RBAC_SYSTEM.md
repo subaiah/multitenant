@@ -69,6 +69,28 @@ The system supports wildcard permissions:
 - `*:action` - Action on all resources
 - `*:*` - All permissions
 
+## How several roles combine
+
+A tenant user's permissions are the union of:
+
+1. their user type's defaults (Tenant Admin, Manager, User…);
+2. roles assigned to them directly;
+3. roles assigned to groups they belong to;
+4. roles delegated to them.
+
+Only assignments, memberships and delegations that are active and inside their validity dates count. Nothing subtracts: to take a permission away, remove the role, membership or delegation that grants it. Tenant roles can never grant platform permissions, and nobody can give out a permission they don't hold themselves (`requireCanGrant`).
+
+### Scoped assignments
+
+A role can be assigned (to a user, a group, or by delegation) for the **whole tenant**, or for **one organization**, **one unit** (and every unit below it) or **one resource**. A scoped assignment grants its permissions there only (`src/lib/scopes.ts`):
+
+- Route checks and `hasPermission()` see tenant-wide permissions only. So "Org Admin for North", even with `users:read` in the role, can't list the tenant's users.
+- Routes that act on organization data declare `config: { permission, scoped: true }` and check each item with `requireInScope(request, permission, { organizationId | orgUnitId | resourceId })`. They filter lists with `scopeOf(request, permission)`. The Organizations and units API does this:
+  - someone with a role for one organization sees and manages that organization;
+  - someone with a role for a unit sees that unit and the units below it, and can add units under it, but can't create a unit at the top of the organization or move one outside their unit.
+- `GET /auth/permissions` returns the tenant-wide `permissions` and the `scoped` grants. Pages for scope-aware resources (organizations, plus the product's `scopedResources`) show when a permission applies anywhere. Everything else needs it tenant-wide.
+- The access review lists scoped permissions as "in part", next to the tenant-wide ones.
+
 ## Default Roles
 
 When a new tenant is created, the following default roles are automatically created:
@@ -338,7 +360,9 @@ await prisma.userRole.createMany({
   ],
 });
 
-// Permissions are cumulative across all roles
+// Permissions are cumulative across all roles,
+// except that a role assigned for one organization or unit applies there only
+// (see "Scoped assignments" above)
 ```
 
 ### Checking Permissions in Routes

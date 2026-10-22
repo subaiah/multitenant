@@ -154,6 +154,23 @@ Product routes are registered inside the authenticated scope. Every request ther
 
 Every route must declare `config: { permission }`. The route-permission test fails on any route that doesn't.
 
+**Rows that belong to an organization.** If your table has an `organization_id` (or `org_unit_id`), a role can be given for one organization or unit. To make that work, list the resource in `scopedResources`, mark the routes `scoped: true`, and check each row with the helpers in `src/lib/scopes.ts`:
+
+```ts
+fastify.patch('/:id', { config: { permission: 'invoices:update', scoped: true } }, async (request) => {
+  const { id } = request.params as { id: string };
+  const invoice = await request.db.invoice.findFirstOrThrow({ where: { id, tenantId: request.tenant.id } });
+  await requireInScope(request, 'invoices:update', { organizationId: invoice.organizationId });
+  // ...
+});
+
+// Lists: everything, or only the organizations and units the role covers
+const scope = await scopeOf(request, 'invoices:read');
+const where = scope.all ? {} : { organizationId: { in: scope.organizationIds } };
+```
+
+Without `scoped: true`, a route only accepts the permission tenant-wide.
+
 ### 4. Menu and screens
 
 The `tenantMenu` entries go right after Dashboard in the tenant sidebar; the release step (`npm run migrate`) adds them, as does `npm run prisma:seed-menus`. Users only see the entries their permissions allow. A group of entries can sit under a heading: give the heading a path starting with `#` (`{ label: 'Billing', path: '#billing', icon: 'Package', children: [...] }`); it shows only when someone may open at least one of its entries.
@@ -168,3 +185,5 @@ Add the page under `src/product/` in the frontend, and its route in `src/App.tsx
 | `routes` | at startup, inside the authenticated, tenant-bound scope |
 | `tenantMenu` | at the release step, and when menus are seeded |
 | `onTenantCreated` | when a platform admin creates a tenant, after the kit's defaults (sign-in settings, built-in roles) |
+| `scopedResources` | when deciding which pages a role for one organization or unit shows (`src/lib/scopes.ts`) |
+| `exportExclusions` | when an organization's data is exported (`src/lib/data-export.ts`) |

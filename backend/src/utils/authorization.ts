@@ -131,8 +131,19 @@ export async function createDefaultTenantRoles(tenantId: string, db: TenantDb): 
 /**
  * Enhanced permission data structure
  */
+/** A permission that applies inside one organization, unit (and the units below it) or resource only */
+export interface ScopedGrant {
+  permission: string;
+  scopeType: 'ORGANIZATION' | 'ORG_UNIT' | 'RESOURCE';
+  scopeId: string;
+  source: string;
+}
+
 export interface EnhancedPermissionData {
+  /** Permissions that apply across the whole tenant (route checks and hasPermission use these) */
   permissions: string[];
+  /** Permissions from assignments scoped to an organization, unit or resource (lib/scopes.ts) */
+  scoped: ScopedGrant[];
   sources: {
     userType: string;
     directRoles: string[];
@@ -161,8 +172,16 @@ export async function getEnhancedUserPermissions(
   // Helper to add permission with source tracking.
   // Tenant users can't gain platform-level permissions through tenant roles.
   const platformUser = isPlatformUser(userType as UserType);
-  const addPermission = (permission: string, source: string) => {
+  const scoped: ScopedGrant[] = [];
+  const addPermission = (permission: string, source: string, scope?: { scopeType: string; scopeId: string }) => {
     if (source !== 'userType' && !platformUser && !isTenantGrantable(permission)) {
+      return;
+    }
+    // An assignment for one organization, unit or resource doesn't grant it tenant-wide
+    if (scope && scope.scopeType !== 'TENANT') {
+      if (['ORGANIZATION', 'ORG_UNIT', 'RESOURCE'].includes(scope.scopeType)) {
+        scoped.push({ permission, scopeType: scope.scopeType as ScopedGrant['scopeType'], scopeId: scope.scopeId, source });
+      }
       return;
     }
     if (!permissionSources.has(permission)) {
@@ -191,6 +210,7 @@ export async function getEnhancedUserPermissions(
   if (!tenantId || platformUser) {
     return {
       permissions: Array.from(permissionSources.keys()),
+      scoped: [],
       sources: { userType, directRoles: [...directRoleNames], groupRoles: [], delegations: [] },
       effectivePermissions: Array.from(permissionSources.entries()).map(([permission, sources]) => ({
         permission,
@@ -227,7 +247,7 @@ export async function getEnhancedUserPermissions(
     directRoleNames.add(assignment.role.name);
     for (const rp of assignment.role.permissions) {
       const permString = rp.permission;
-      addPermission(permString, `role:${assignment.role.name}`);
+      addPermission(permString, `role:${assignment.role.name}`, assignment);
     }
   }
 
@@ -277,7 +297,7 @@ export async function getEnhancedUserPermissions(
       groupRoleNames.add(assignment.role.name);
       for (const rp of assignment.role.permissions) {
         const permString = rp.permission;
-        addPermission(permString, `group:${assignment.group?.name || 'unknown'}:role:${assignment.role.name}`);
+        addPermission(permString, `group:${assignment.group?.name || 'unknown'}:role:${assignment.role.name}`, assignment);
       }
     }
   }
@@ -314,7 +334,7 @@ export async function getEnhancedUserPermissions(
     delegationNames.add(delegation.roleAssignment.role.name);
     for (const rp of delegation.roleAssignment.role.permissions) {
       const permString = rp.permission;
-      addPermission(permString, `delegation:${delegation.roleAssignment.role.name}`);
+      addPermission(permString, `delegation:${delegation.roleAssignment.role.name}`, delegation.roleAssignment);
     }
   }
 
@@ -331,6 +351,7 @@ export async function getEnhancedUserPermissions(
 
   return {
     permissions,
+    scoped,
     sources: {
       userType,
       directRoles: Array.from(directRoleNames),

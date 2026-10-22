@@ -241,3 +241,11 @@ export function permissionMatches(granted: Iterable<string>, required: string): 
     }
   }
 }
+
+/** Resources whose routes check permissions per organization or unit (lib/scopes.ts) */
+export const SCOPED_RESOURCES = new Set(['organizations', ...(product.scopedResources ?? [])]);
+
+/** Whether a role given for one organization or unit can make this permission's pages available */
+export function isScopeAware(permission: string): boolean {
+  return SCOPED_RESOURCES.has(permission.split(':')[0]);
+}

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '../utils/authorization.js';
-import { permissionMatches } from '../utils/permissions.js';
+import { isScopeAware, permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
@@ -74,8 +74,10 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     // Get user permissions
     // Same effective permissions the frontend guards use (user type + roles)
-    const { permissions } = await getEnhancedUserPermissions(userId, tenantId, userType);
-    const granted = new Set(permissions);
+    // A page shows if the permission applies anywhere: someone with a role for
+    // one organization still sees the Organizations page (it lists only theirs)
+    const { permissions, scoped } = await getEnhancedUserPermissions(userId, tenantId, userType);
+    const granted = new Set([...permissions, ...scoped.filter((g) => isScopeAware(g.permission)).map((g) => g.permission)]);
     
     // Filter menu items based on permissions
     // ...and leave out pages that only show sample data (lib/preview.ts)

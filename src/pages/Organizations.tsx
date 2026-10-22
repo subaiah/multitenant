@@ -13,6 +13,10 @@ interface Organization {
     units: number;
     memberships: number;
   };
+  /** ORGANIZATION: a role for all of it (or the tenant); UNITS: only for some of its units */
+  access?: 'ORGANIZATION' | 'UNITS';
+  /** What the signed-in user may do with it (roles can be given for one organization) */
+  can?: { update: boolean; delete: boolean };
 }
 
 interface OrgUnit {
@@ -206,26 +210,30 @@ export default function Organizations() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <PermissionButton
-                        permission="organizations:update"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditModal(org);
-                        }}
-                        className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
-                      >
-                        <Edit2 size={16} />
-                      </PermissionButton>
-                      <PermissionButton
-                        permission="organizations:delete"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteOrg(org.id);
-                        }}
-                        className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={16} />
-                      </PermissionButton>
+                      {org.can?.update && (
+                        <button
+                          aria-label={`Edit ${org.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditModal(org);
+                          }}
+                          className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                      {org.can?.delete && (
+                        <button
+                          aria-label={`Delete ${org.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteOrg(org.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -249,16 +257,20 @@ export default function Organizations() {
                     {selectedOrg.name} - Organizational Units
                   </h2>
                   <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    Manage departments, teams, and locations
+                    {selectedOrg.access === 'UNITS'
+                      ? 'Your roles cover some of its units: those are the ones shown'
+                      : 'Manage departments, teams, and locations'}
                   </p>
                 </div>
-                <button
-                  onClick={() => setShowUnitModal(true)}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
-                >
-                  <Plus size={20} />
-                  Add Unit
-                </button>
+                {selectedOrg.can?.update && (
+                  <button
+                    onClick={() => setShowUnitModal(true)}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2"
+                  >
+                    <Plus size={20} />
+                    Add Unit
+                  </button>
+                )}
               </div>
               <div className="p-4">
                 {orgUnits.length > 0 ? (
@@ -296,13 +308,16 @@ export default function Organizations() {
                               </span>
                             </div>
                           </div>
-                          <PermissionButton
-                            permission="organizations:delete"
-                            onClick={() => handleDeleteUnit(unit.id)}
-                            className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                          </PermissionButton>
+                          {/* Removing a unit changes the organization (the server checks the unit's own scope too) */}
+                          {selectedOrg.can?.update && (
+                            <button
+                              aria-label={`Delete ${unit.name}`}
+                              onClick={() => handleDeleteUnit(unit.id)}
+                              className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
