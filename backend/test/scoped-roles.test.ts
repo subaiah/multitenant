@@ -84,9 +84,19 @@ test('a role for one organization applies to it, and nowhere else', async () => 
     const perms = (await api('GET', '/auth/permissions', as(viewer))).json;
     assert.ok(!perms.permissions.includes('organizations:update'));
     assert.ok(perms.scoped.some((g: any) => g.permission === 'organizations:update' && g.scopeType === 'ORGANIZATION' && g.scopeId === org.North));
-    const menu = JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(viewer))).json);
-    assert.ok(menu.includes('/organizations'), 'the Organizations page shows');
-    assert.ok(!menu.includes('"/users"'), 'the Users page does not');
+    // Menus are shared rows another test file may be re-syncing: compare with
+    // the admin's menu read at the same moment
+    let menus = { admin: '', viewer: '' };
+    for (let i = 0; i < 10; i++) {
+      menus = {
+        admin: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(admin))).json),
+        viewer: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(viewer))).json),
+      };
+      if (menus.admin.includes('/organizations') && menus.admin.includes('"/users"')) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    assert.ok(menus.viewer.includes('/organizations'), 'the Organizations page shows');
+    assert.ok(!menus.viewer.includes('"/users"'), 'the Users page does not');
   } finally {
     await unassign(id);
   }
