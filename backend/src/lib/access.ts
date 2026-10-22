@@ -69,8 +69,10 @@ export interface AccessSource {
 export interface AccessReview {
   user: { id: string; email: string; name: string | null; userType: string; status: string };
   sources: AccessSource[];
-  /** Permission -> ids of the active sources that grant it */
+  /** Permission -> ids of the active sources that grant it across the tenant */
   effective: { permission: string; sources: string[] }[];
+  /** Permission -> ids of the active sources that grant it in one organization, unit or resource only */
+  scoped: { permission: string; sources: string[] }[];
 }
 
 const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
@@ -185,12 +187,16 @@ export async function explainAccess(db: TenantDb, userId: string, tenantId: stri
     });
   }
 
+  // An assignment scoped to an organization, unit or resource grants there only (lib/scopes.ts)
   const grantedBy = new Map<string, string[]>();
+  const scopedBy = new Map<string, string[]>();
   for (const s of sources) {
     if (!s.active) continue;
-    for (const p of s.permissions) grantedBy.set(p, [...(grantedBy.get(p) ?? []), s.id]);
+    const into = s.scopeType && s.scopeType !== 'TENANT' ? scopedBy : grantedBy;
+    for (const p of s.permissions) into.set(p, [...(into.get(p) ?? []), s.id]);
   }
   const effective = PERMISSIONS.filter((p) => grantedBy.has(p)).map((p) => ({ permission: p, sources: grantedBy.get(p)! }));
+  const scoped = PERMISSIONS.filter((p) => scopedBy.has(p)).map((p) => ({ permission: p, sources: scopedBy.get(p)! }));
 
-  return { user, sources, effective };
+  return { user, sources, effective, scoped };
 }

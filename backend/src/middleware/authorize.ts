@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { getEnhancedUserPermissions } from '../utils/authorization.js';
+import { getEnhancedUserPermissions, type ScopedGrant } from '../utils/authorization.js';
 import { PLATFORM_RESOURCES, permissionMatches } from '../utils/permissions.js';
 import { sessionPermissions } from '../lib/support.js';
 import { AppError } from './error-handler.js';
@@ -30,12 +30,19 @@ export type RoutePermission = string | string[];
 declare module 'fastify' {
   interface FastifyContextConfig {
     permission?: RoutePermission;
+    /**
+     * The handler checks the permission per organization or unit (lib/scopes.ts),
+     * so the route check also lets through someone who holds it in some scope
+     */
+    scoped?: boolean;
     /** Allowed in an organization whose trial has ended (read-only otherwise; lib/tenant-lifecycle.ts) */
     allowWhenTrialEnded?: boolean;
   }
   interface FastifyRequest {
     /** Cached for the lifetime of the request; use loadPermissions(). */
     effectivePermissions?: Set<string>;
+    /** Permissions from scoped assignments (lib/scopes.ts); loaded with effectivePermissions */
+    scopedGrants?: ScopedGrant[];
   }
 }
 
@@ -48,9 +55,11 @@ export async function loadPermissions(request: FastifyRequest): Promise<Set<stri
       const { permissions } = await getEnhancedUserPermissions(userId, undefined, userType);
       const platformOnly = permissions.flatMap((p) => (p === '*' || p === '*:*' ? [...PLATFORM_RESOURCES].map((r) => `${r}:*`) : PLATFORM_RESOURCES.has(p.split(':')[0]) ? [p] : []));
       request.effectivePermissions = new Set([...platformOnly, ...sessionPermissions(request.supportSession)]);
+      request.scopedGrants = [];
     } else {
-      const { permissions } = await getEnhancedUserPermissions(userId, request.tenant?.id, userType);
+      const { permissions, scoped } = await getEnhancedUserPermissions(userId, request.tenant?.id, userType);
       request.effectivePermissions = new Set(permissions);
+      request.scopedGrants = scoped;
     }
   }
   return request.effectivePermissions;
@@ -79,9 +88,13 @@ export async function authorize(request: FastifyRequest, reply: FastifyReply) {
   if (required === AUTHENTICATED) return;
 
   const anyOf = Array.isArray(required) ? required : [required];
-  if (!(await hasPermission(request, ...anyOf))) {
-    return reply.status(403).send({ error: 'Forbidden', message: `Missing permission: ${anyOf.join(' or ')}` });
+  if (await hasPermission(request, ...anyOf)) return;
+  // Scoped routes decide per item; let through someone with the permission somewhere
+  if (request.routeOptions.config.scoped) {
+    await loadPermissions(request);
+    if ((request.scopedGrants ?? []).some((g) => anyOf.some((p) => permissionMatches([g.permission], p)))) return;
   }
+  return reply.status(403).send({ error: 'Forbidden', message: `Missing permission: ${anyOf.join(' or ')}` });
 }
 
 /**

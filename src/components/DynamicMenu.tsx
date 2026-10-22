@@ -10,7 +10,7 @@ import {
   Network, Package, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound, type LucideIcon,
 } from 'lucide-react';
 import { useMenuItems, type MenuItem } from '../hooks/useMenuItems';
-import { usePermissions } from '../hooks/usePermissions';
+import { useAuth } from '../contexts/AuthContext';
 
 const ICONS: Record<string, LucideIcon> = {
   Activity, Boxes, Building2, ClipboardCheck, Code, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
@@ -21,7 +21,8 @@ const isSection = (item: MenuItem) => item.path.startsWith('#');
 
 export default function DynamicMenu({ portal, onNavigate }: { portal: 'PLATFORM' | 'TENANT'; onNavigate?: () => void }) {
   const { menuItems, loading, error } = useMenuItems(portal);
-  const { hasPermission, loading: permLoading } = usePermissions();
+  // The server already filtered the menu; a page shows if its permission applies anywhere
+  const { hasPermissionAnywhere: hasPermission, loading: permLoading } = useAuth();
   const { pathname } = useLocation();
 
   const items = useMemo(() => {

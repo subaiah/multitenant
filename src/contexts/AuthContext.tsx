@@ -24,6 +24,8 @@ interface AuthContextType {
   reload: () => Promise<Portal | null>;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
+  /** The permission across the tenant, or in at least one organization or unit */
+  hasPermissionAnywhere: (permission: string) => boolean;
   /** Why the server ended the session mid-use (see api-client), or false */
   sessionEnded: SessionEndReason | false;
   /**
@@ -39,6 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
+  // From roles given for one organization, unit or resource only
+  const [scopedPermissions, setScopedPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionEnded, setSessionEnded] = useState<SessionEndReason | false>(false);
   const [previewFeatures, setPreviewFeatures] = useState(false);
@@ -47,16 +51,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setTenant(null);
     setPermissions([]);
+    setScopedPermissions([]);
   }, []);
 
   const reload = useCallback(async (): Promise<Portal | null> => {
     setLoading(true);
     try {
       const me = await getCurrentUser();
-      const { permissions } = await apiGet<{ permissions: string[] }>('/auth/permissions');
+      const { permissions, scoped = [] } = await apiGet<{ permissions: string[]; scoped?: { permission: string; scopeAware?: boolean }[] }>('/auth/permissions');
       setUser(me.user);
       setTenant(me.tenant);
       setPermissions(permissions);
+      // Only where pages check scope: elsewhere a role for one organization grants nothing
+      setScopedPermissions([...new Set(scoped.filter((g) => g.scopeAware).map((g) => g.permission))]);
       setPreviewFeatures(me.features?.preview ?? false);
       setSessionEnded(false);
       return me.user.portal;
@@ -116,10 +123,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const granted = useMemo(() => new Set(permissions), [permissions]);
   const hasPermission = useCallback((permission: string) => permissionMatches(granted, permission), [granted]);
+  // Somewhere: across the tenant, or in at least one organization or unit (for showing a page that lists only those)
+  const anywhere = useMemo(() => new Set([...permissions, ...scopedPermissions]), [permissions, scopedPermissions]);
+  const hasPermissionAnywhere = useCallback((permission: string) => permissionMatches(anywhere, permission), [anywhere]);
 
   const value = useMemo(
-    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission, sessionEnded, previewFeatures }),
-    [user, tenant, permissions, loading, login, reload, logout, hasPermission, sessionEnded, previewFeatures],
+    () => ({ user, tenant, permissions, loading, isAuthenticated: !!user, login, reload, logout, hasPermission, hasPermissionAnywhere, sessionEnded, previewFeatures }),
+    [user, tenant, permissions, loading, login, reload, logout, hasPermission, hasPermissionAnywhere, sessionEnded, previewFeatures],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
