@@ -12,7 +12,7 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS | `src/` |
 | API | Fastify 5, TypeScript, Node 24 | `backend/` |
 | Data | PostgreSQL with Prisma 7 | `backend/prisma/` |
-| Deployment | Docker images, Docker Compose, Caddy | `deploy/` |
+| Deployment | Docker images, Docker Compose, Caddy, GitHub Actions | `deploy/`, `.github/workflows/` |
 
 ## What's in it
 
@@ -70,4 +70,4 @@ Production hides them unless `PREVIEW_FEATURES=true`.
   npm run dev          # http://localhost:5173, talks to the API at VITE_API_URL (default http://localhost:4000)
   ```
 
-- **Deploy:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers a first installation with Docker Compose, upgrades, backups, keys, scaling out and monitoring.
+- **Deploy:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers a first installation with Docker Compose, continuous deployment from GitHub Actions, upgrades, backups, keys, scaling out and monitoring.

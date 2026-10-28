@@ -60,6 +60,8 @@ Never run the demo seed (`npm run prisma:seed`) on a real installation. Its acco
 
 ## Upgrading
 
+With continuous deployment set up (below), merging to `main` is the upgrade. By hand:
+
 ```sh
 git pull
 docker compose up -d --build
@@ -71,6 +73,54 @@ docker compose up -d --build
 - **The server checks the schema.** In production it won't start on a control plane that is missing migrations.
 - **Tenants that failed to migrate** are listed on the Tenants page. The rest keep working.
 - **Several API servers:** run the release step once (`docker compose run --rm migrate`), then roll the servers. The release step takes locks, so two copies running at once is safe too.
+
+## Continuous deployment
+
+`.github/workflows/deploy.yml` deploys every commit on `main` that passes CI:
+
+1. GitHub Actions builds the API and web images and pushes them to GitHub's container registry (`ghcr.io/<owner>/<repo>-api:<commit>` and `-web:<commit>`). The server no longer builds anything.
+2. Over SSH, it moves the server's checkout to that commit and runs `deploy/deploy.sh`, which:
+   - pulls the images;
+   - runs the release step (migrations);
+   - restarts what changed.
+
+   If a migration fails, the running version keeps serving and the deploy stops.
+3. It checks that `PUBLIC_URL/api/health` answers.
+
+It stays off until you set it up.
+
+**1. A deploy key for the server.** Run this on your own machine, not the server:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C github-deploy -f deploy_key
+ssh-keyscan -p 22 your.server.ip > known_hosts        # the server's host key
+```
+
+Add `deploy_key.pub` to `~/.ssh/authorized_keys` of the user that runs Docker on the server, the one in the `docker` group that owns `/srv/multitenant`. The server's checkout must be a clone of the repository (`git clone`, as in *First installation*), with its `deploy/.env` filled in.
+
+**2. GitHub settings** (Settings → Environments → New environment `production`):
+
+- **Secrets:**
+  - `DEPLOY_HOST`: the server's address;
+  - `DEPLOY_USER`: the user from step 1;
+  - `DEPLOY_SSH_KEY`: the contents of `deploy_key`;
+  - `DEPLOY_KNOWN_HOSTS`: the contents of `known_hosts`;
+  - optionally `DEPLOY_PORT`.
+- **Required reviewers** (optional): each deployment then waits for someone to approve it.
+
+Under Settings → Secrets and variables → Actions → Variables, set:
+
+- `DEPLOY_ENABLED` = `true`;
+- `PUBLIC_URL`, for example `https://app.example.com`, for the health check;
+- optionally `APP_NAME` (the product name built into the app) and `DEPLOY_PATH` (default `/srv/multitenant`).
+
+Delete `deploy_key` from your machine once it's stored in GitHub.
+
+**Deploying by hand, and rolling back.** Actions → Deploy → Run workflow. Give it a commit, branch or tag; an earlier commit rolls back. Images are kept per commit in the registry, so a rollback doesn't rebuild. Migrations only add, so the older version runs on the newer schema. Rollback works to commits from after continuous deployment was added, because older ones don't have `deploy/deploy.sh`.
+
+**How the server pulls.** Each deploy logs the server in to the registry with the workflow's own token, which expires when the job ends, and logs out afterwards. No long-lived registry credential is stored on the server.
+
+The images are recorded in `deploy/.env` (`API_IMAGE`, `WEB_IMAGE`), so a plain `docker compose up -d` on the server keeps using them. To build on the server again instead, remove those two lines and run `docker compose up -d --build`.
 
 ## Settings that matter in production
 

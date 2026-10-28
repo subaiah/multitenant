@@ -1,0 +1,130 @@
+# Continuous deployment: every commit on main that passes CI is built into
+# images, pushed to GitHub's container registry, and rolled out to the server
+# over SSH (deploy/deploy.sh). Also runs by hand (Actions > Deploy > Run
+# workflow), e.g. to roll back to an earlier commit.
+#
+# Off until the repository variable DEPLOY_ENABLED is "true". Setup:
+# docs/DEPLOYMENT.md, "Continuous deployment".
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or tag to deploy (default main). An earlier commit rolls back.
+        required: false
+        default: main
+
+# One deployment at a time, in order; a newer one waits rather than cancelling
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  images:
+    # After a successful CI run on a push to main, or by hand
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha: ${{ steps.ref.outputs.sha }}
+      api: ${{ steps.ref.outputs.api }}
+      web: ${{ steps.ref.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commit CI tested, not whatever main is by now
+          ref: ${{ github.event.workflow_run.head_sha || inputs.ref || 'main' }}
+      - name: Image names
+        id: ref
+        run: |
+          sha=$(git rev-parse HEAD)
+          repo=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "api=$repo-api:$sha" >> "$GITHUB_OUTPUT"
+          echo "web=$repo-web:$sha" >> "$GITHUB_OUTPUT"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ steps.ref.outputs.api }},${{ steps.ref.outputs.repo }}-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/web.Dockerfile
+          build-args: APP_NAME=${{ vars.APP_NAME || 'Multitenant' }}
+          push: true
+          tags: ${{ steps.ref.outputs.web }},${{ steps.ref.outputs.repo }}-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  deploy:
+    needs: images
+    runs-on: ubuntu-latest
+    # Settings > Environments > production: add required reviewers there to
+    # approve each deployment, and keep the SSH secrets in it
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_URL }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/srv/multitenant' }}
+    steps:
+      - name: SSH access
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          [ -n "$KEY" ] && [ -n "$KNOWN_HOSTS" ] || { echo "::error::Set the DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS secrets (docs/DEPLOYMENT.md)"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          # The server's host key, pinned: no trust-on-first-use from the runner
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Roll out
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          SHA: ${{ needs.images.outputs.sha }}
+          API: ${{ needs.images.outputs.api }}
+          WEB: ${{ needs.images.outputs.web }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          ssh() { command ssh -i ~/.ssh/deploy -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$TARGET" "$@"; }
+          # Pull access for this run only: the token expires when the job ends
+          printf '%s' "$TOKEN" | ssh "docker login ghcr.io -u '$ACTOR' --password-stdin" >/dev/null
+          # The compose file and scripts at the same commit as the images
+          ssh "set -e; cd '$DEPLOY_PATH' && git fetch --quiet origin && git checkout --quiet --detach '$SHA'"
+          ssh "cd '$DEPLOY_PATH' && sh deploy/deploy.sh '$API' '$WEB'"
+          ssh "docker logout ghcr.io >/dev/null"
+      - name: Check it answers
+        if: vars.PUBLIC_URL != ''
+        run: |
+          for i in $(seq 30); do
+            if curl -fsS "${{ vars.PUBLIC_URL }}/api/health" >/dev/null; then echo "Healthy"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::${{ vars.PUBLIC_URL }}/api/health did not answer after the deploy"
+          exit 1
