@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
 import { sendInvitation, type InvitationResult } from '../lib/invitations.js';
+import { emailTaken, newEmailSchema, requestEmailChange } from './my-account.js';
 
 /** What the inviter is told: sent, or the link to share because the email failed */
 const inviteOutcome = (r: InvitationResult) =>
@@ -287,6 +288,39 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     const invite = await sendInvitation(request.tenant, user, request.user.userId);
     await audit(request, 'user.invitation_resent', { resource: { type: 'user', id: user.id, label: user.email }, details: { emailed: invite.sent } });
     return inviteOutcome(invite);
+  });
+
+  // Correct someone's email address. Not yet accepted: the invitation moves to
+  // the new address. Otherwise the new address confirms it (as when people
+  // change their own; routes/my-account.ts), and the old one is told.
+  fastify.post('/:id/email', {
+    config: { permission: 'users:update' },
+    schema: {
+      tags: ['users'],
+      summary: "Change a user's email address (confirmed from the new address)",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const { email: newEmail } = z.object({ email: newEmailSchema }).parse(request.body);
+    if (id === request.user.userId) throw new AppError('Change your own email on your Profile page', 400);
+    const user = await request.db.user.findFirst({ where: { id, tenantId: request.tenant.id }, select: { id: true, email: true, userType: true, status: true } });
+    if (!user) throw new AppError('User not found', 404);
+    requireCanManageUserType(request.user.userType, user.userType);
+    if (newEmail === user.email.toLowerCase()) throw new AppError('That is already their email address', 400);
+    const owner = { tenantId: request.tenant.id, tenantSlug: request.tenant.slug };
+    if (await emailTaken(owner, newEmail, user.id)) throw new AppError('Another account already uses that email address', 409, true, 'EMAIL_TAKEN');
+
+    if (user.status === 'PENDING') {
+      // Nobody has used the account yet: invite the right address instead
+      await request.db.user.update({ where: { id: user.id }, data: { email: newEmail } });
+      const invite = await sendInvitation(request.tenant, { id: user.id, email: newEmail }, request.user.userId);
+      await audit(request, 'user.updated', { resource: { type: 'user', id: user.id, label: newEmail }, changes: { email: [user.email, newEmail] } });
+      return { email: newEmail, pendingEmail: null, ...inviteOutcome(invite) };
+    }
+    await requestEmailChange(owner, user, newEmail, request.user.userId);
+    await audit(request, 'user.email_change_requested', { resource: { type: 'user', id: user.id, label: user.email }, details: { to: newEmail } });
+    return { email: user.email, pendingEmail: { newEmail } };
   });
 
   // Clear a user's two-factor (lost device): they set it up again at their next sign-in

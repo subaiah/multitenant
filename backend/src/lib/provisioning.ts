@@ -228,6 +228,12 @@ async function runSteps(tenantId: string) {
       }
     }
     await controlDb.tenant.update({ where: { id: tenantId }, data: { adminInvitedAt: new Date(), adminInviteError: inviteError } });
+    // Platform staff hear about it in the app (an email about broken email wouldn't arrive)
+    if (inviteError) {
+      await recordAudit({ actor: { type: 'SYSTEM' } }, 'tenant.invitation_not_sent', {
+        tenantId, resource: { type: 'tenant', id: tenantId, label: tenant.slug }, details: { name: tenant.name, to: admin.email, error: inviteError },
+      }).catch(() => {});
+    }
   }
 }
 
