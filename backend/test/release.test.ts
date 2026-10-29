@@ -220,8 +220,8 @@ test('the release step adds new menu entries and keeps changes to existing ones'
   await controlDb.menuItem.update({ where: { id: users.id }, data: { label: 'Staff' } });
   await controlDb.menuItem.deleteMany({ where: { portal: 'PLATFORM', path: '/platform/support' } });
 
-  // (At least: other test files add and remove menu rows of their own meanwhile)
-  assert.ok((await syncMenus()) >= 1);
+  // Other test files sync menus too (and add and remove rows of their own), so
+  // check the outcome rather than how many rows this call added
   await syncMenus();
   assert.equal((await controlDb.menuItem.findUniqueOrThrow({ where: { id: users.id } })).label, 'Staff');
   assert.equal(await controlDb.menuItem.count({ where: { portal: 'PLATFORM', path: '/platform/support' } }), 1);
