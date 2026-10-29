@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { canInScope, requireInScope, scopeOf } from '../lib/scopes.js';
 
 const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -18,7 +19,7 @@ const updateOrganizationSchema = z.object({
 export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
   // List organizations for current tenant
   fastify.get('/', {
-    config: { permission: 'organizations:read' },
+    config: { permission: 'organizations:read', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'List organizations for current tenant',
@@ -39,8 +40,22 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
     
+    // Someone with a scoped role sees the organizations it covers: their own,
+    // and those holding units they were given
+    const scope = await scopeOf(request, 'organizations:read');
+    let visible: string[] | null = null;
+    let unitOnly = new Set<string>();
+    if (!scope.all) {
+      const viaUnits = scope.orgUnitIds.length
+        ? (await request.db.orgUnit.findMany({ where: { tenantId, id: { in: scope.orgUnitIds } }, select: { organizationId: true } })).map((u) => u.organizationId)
+        : [];
+      unitOnly = new Set(viaUnits.filter((o) => !scope.organizationIds.includes(o)));
+      visible = [...new Set([...scope.organizationIds, ...viaUnits])];
+    }
+
     const where = {
       tenantId,
+      ...(visible && { id: { in: visible } }),
       AND: [
         status ? { status } : {},
         search ? {
@@ -67,8 +82,18 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.organization.count({ where }),
     ]);
     
+    // What the caller may do with each, so the page shows the right actions
+    const withAccess = await Promise.all(organizations.map(async (o) => ({
+      ...o,
+      access: unitOnly.has(o.id) ? 'UNITS' : 'ORGANIZATION',
+      can: {
+        update: await canInScope(request, 'organizations:update', { organizationId: o.id }),
+        delete: await canInScope(request, 'organizations:delete', { organizationId: o.id }),
+      },
+    })));
+
     return {
-      organizations,
+      organizations: withAccess,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -80,7 +105,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get organization by ID
   fastify.get('/:id', {
-    config: { permission: 'organizations:read' },
+    config: { permission: 'organizations:read', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'Get organization by ID',
@@ -95,6 +120,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
+    await requireInScope(request, 'organizations:read', { organizationId: id });
     
     const organization = await request.db.organization.findFirst({
       where: { id, tenantId },
@@ -186,7 +212,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update organization
   fastify.patch('/:id', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'Update organization',
@@ -214,6 +240,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     const data = updateOrganizationSchema.parse(request.body);
+    await requireInScope(request, 'organizations:update', { organizationId: id });
     
     const organization = await request.db.organization.update({
       where: { id, tenantId },
@@ -235,7 +262,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete organization
   fastify.delete('/:id', {
-    config: { permission: 'organizations:delete' },
+    config: { permission: 'organizations:delete', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'Delete organization',
@@ -291,7 +318,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add member to organization
   fastify.post('/:id/members', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'Add member to organization',
@@ -314,6 +341,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     const { id: orgId } = request.params as { id: string };
+    await requireInScope(request, 'organizations:update', { organizationId: orgId });
     const tenantId = request.tenant.id;
     const { userId: memberUserId } = request.body as any;
     
@@ -368,7 +396,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove member from organization
   fastify.delete('/:id/members/:userId', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['organizations'],
       summary: 'Remove member from organization',
@@ -385,6 +413,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     const { id: orgId, userId: memberUserId } = request.params as { id: string; userId: string };
+    await requireInScope(request, 'organizations:update', { organizationId: orgId });
     const tenantId = request.tenant.id;
     
     

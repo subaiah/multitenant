@@ -1,9 +1,10 @@
-import { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { canInScope, requireInScope, scopeOf, unitsWithin } from '../lib/scopes.js';
 
 const createOrgUnitSchema = z.object({
   name: z.string().min(2).max(100),
@@ -19,10 +20,35 @@ const updateOrgUnitSchema = z.object({
   parentUnitId: z.string().uuid().nullable().optional(),
 });
 
+/**
+ * The units of an organization the caller may read: all of them with read on
+ * the organization (or tenant-wide), else those under units they were given.
+ * Throws 403 when there are none.
+ */
+async function readableUnits(request: FastifyRequest, orgId: string): Promise<Set<string> | null> {
+  if (await canInScope(request, 'organizations:read', { organizationId: orgId })) return null;
+  const scope = await scopeOf(request, 'organizations:read');
+  const all = await request.db.orgUnit.findMany({ where: { organizationId: orgId, tenantId: request.tenant.id }, select: { id: true, parentUnitId: true } });
+  const reached = scope.all ? new Set(all.map((u) => u.id)) : unitsWithin(all, scope.orgUnitIds);
+  if (!reached.size) throw new AppError('Missing permission: organizations:read here', 403);
+  return reached;
+}
+
+/** Whether `unitId` is `ancestorId` or below it */
+async function isWithin(request: FastifyRequest, unitId: string, ancestorId: string): Promise<boolean> {
+  let next: string | null = unitId;
+  for (let depth = 0; next && depth < 50; depth++) {
+    if (next === ancestorId) return true;
+    const u: { parentUnitId: string | null } | null = await request.db.orgUnit.findFirst({ where: { id: next, tenantId: request.tenant.id }, select: { parentUnitId: true } });
+    next = u?.parentUnitId ?? null;
+  }
+  return false;
+}
+
 export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
   // List org units for an organization
   fastify.get('/organization/:orgId', {
-    config: { permission: 'organizations:read' },
+    config: { permission: 'organizations:read', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'List org units for an organization',
@@ -55,9 +81,11 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Organization not found', 404);
     }
     
+    const readable = await readableUnits(request, orgId);
     const where = {
       organizationId: orgId,
       tenantId,
+      ...(readable && { id: { in: [...readable] } }),
       AND: [
         unitType ? { unitType } : {},
         search ? {
@@ -87,7 +115,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get org unit by ID (with hierarchy)
   fastify.get('/:id', {
-    config: { permission: 'organizations:read' },
+    config: { permission: 'organizations:read', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Get org unit by ID',
@@ -102,6 +130,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
+    await requireInScope(request, 'organizations:read', { orgUnitId: id });
     
     const unit = await request.db.orgUnit.findFirst({
       where: { id, tenantId },
@@ -145,7 +174,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Create org unit
   fastify.post('/organization/:orgId', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Create org unit',
@@ -175,6 +204,8 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     const data = createOrgUnitSchema.parse(request.body);
+    // Under a unit: changing that unit; at the top: changing the organization
+    await requireInScope(request, 'organizations:update', data.parentUnitId ? { orgUnitId: data.parentUnitId } : { organizationId: orgId });
     
     // Verify organization exists
     const organization = await request.db.organization.findFirst({
@@ -228,7 +259,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Update org unit
   fastify.patch('/:id', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Update org unit',
@@ -245,7 +276,8 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
           name: { type: 'string', minLength: 2, maxLength: 100 },
           description: { type: 'string' },
           unitType: { type: 'string', enum: ['DIVISION', 'DEPARTMENT', 'TEAM', 'LOCATION'] },
-          parentUnitId: { type: 'string', format: 'uuid' },
+          // null: move it to the top of the organization
+          parentUnitId: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
         },
       },
     },
@@ -257,6 +289,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     const data = updateOrgUnitSchema.parse(request.body);
+    await requireInScope(request, 'organizations:update', { orgUnitId: id });
     
     // Get current unit
     const currentUnit = await request.db.orgUnit.findFirst({
@@ -277,10 +310,14 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         throw new AppError('Parent unit not found in this organization', 404);
       }
       
-      // Prevent circular reference
-      if (data.parentUnitId === id) {
-        throw new AppError('Unit cannot be its own parent', 400);
+      // Prevent circular reference: not itself, nor anything below it
+      if (data.parentUnitId === id || (await isWithin(request, data.parentUnitId, id))) {
+        throw new AppError('A unit cannot move below itself', 400);
       }
+    }
+    // Moving it: allowed where it goes, too
+    if (data.parentUnitId !== undefined && data.parentUnitId !== currentUnit.parentUnitId) {
+      await requireInScope(request, 'organizations:update', data.parentUnitId ? { orgUnitId: data.parentUnitId } : { organizationId: currentUnit.organizationId });
     }
     
     const unit = await request.db.orgUnit.update({
@@ -303,7 +340,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete org unit
   fastify.delete('/:id', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Delete org unit',
@@ -320,6 +357,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const { id } = request.params as { id: string };
     const tenantId = request.tenant.id;
+    await requireInScope(request, 'organizations:update', { orgUnitId: id });
     
     
     // Check if unit has children
@@ -359,7 +397,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get org unit hierarchy (tree structure)
   fastify.get('/organization/:orgId/hierarchy', {
-    config: { permission: 'organizations:read' },
+    config: { permission: 'organizations:read', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Get org unit hierarchy',
@@ -385,8 +423,9 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     // Get all units for this organization
+    const readable = await readableUnits(request, orgId);
     const allUnits = await request.db.orgUnit.findMany({
-      where: { organizationId: orgId, tenantId },
+      where: { organizationId: orgId, tenantId, ...(readable && { id: { in: [...readable] } }) },
       include: {
         _count: {
           select: { memberships: true },
@@ -418,7 +457,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Add member to org unit
   fastify.post('/:id/members', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Add member to org unit',
@@ -441,6 +480,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     const { id: unitId } = request.params as { id: string };
+    await requireInScope(request, 'organizations:update', { orgUnitId: unitId });
     const tenantId = request.tenant.id;
     const { userId: memberUserId } = request.body as any;
     
@@ -497,7 +537,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Remove member from org unit
   fastify.delete('/:id/members/:userId', {
-    config: { permission: 'organizations:update' },
+    config: { permission: 'organizations:update', scoped: true },
     schema: {
       tags: ['org-units'],
       summary: 'Remove member from org unit',
@@ -514,6 +554,7 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const userType = (request.user as any).userType;
     const { id: unitId, userId: memberUserId } = request.params as { id: string; userId: string };
+    await requireInScope(request, 'organizations:update', { orgUnitId: unitId });
     const tenantId = request.tenant.id;
     
     

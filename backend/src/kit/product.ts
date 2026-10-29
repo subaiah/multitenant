@@ -74,6 +74,14 @@ export interface ProductModule {
    */
   exportExclusions?: { tables?: string[]; columns?: Record<string, string[]> };
 
+  /**
+   * The product's resources whose routes check permissions per organization or
+   * unit (lib/scopes.ts: requireInScope, scopeOf), e.g. ['invoices']. A role
+   * given for one organization then shows their pages; for other resources it
+   * grants nothing outside the routes that check scope.
+   */
+  scopedResources?: string[];
+
   /** Runs when a tenant is created, after the kit's defaults (seed product data here). */
   onTenantCreated?: (tenantId: string, db: TenantDb) => Promise<void>;
 }

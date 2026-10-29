@@ -219,6 +219,21 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
               type: 'array',
               items: { type: 'string' },
             },
+            // From roles given for one organization, unit or resource only (lib/scopes.ts)
+            scoped: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  permission: { type: 'string' },
+                  scopeType: { type: 'string' },
+                  scopeId: { type: 'string' },
+                  source: { type: 'string' },
+                  // Its pages check scope, so they're worth showing
+                  scopeAware: { type: 'boolean' },
+                },
+              },
+            },
             sources: {
               type: 'object',
               properties: {
@@ -246,6 +261,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     // Current type and tenant from the database, not the token
     const user = await verifySession(request);
     const { getEnhancedUserPermissions } = await import('../utils/authorization.js');
-    return getEnhancedUserPermissions(user.id, user.tenantId ?? undefined, user.userType);
+    const { isScopeAware } = await import('../utils/permissions.js');
+    const data = await getEnhancedUserPermissions(user.id, user.tenantId ?? undefined, user.userType);
+    return { ...data, scoped: data.scoped.map((g) => ({ ...g, scopeAware: isScopeAware(g.permission) })) };
   });
 };

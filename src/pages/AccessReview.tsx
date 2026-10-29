@@ -30,6 +30,7 @@ interface Review {
   user: { id: string; email: string; name: string | null; userType: string; status: string };
   sources: Source[];
   effective: { permission: string; sources: string[] }[];
+  scoped?: { permission: string; sources: string[] }[];
 }
 interface Catalog {
   resources: { resource: string; label: string; description: string; permissions: { name: string; action: string; description: string }[] }[];
@@ -128,13 +129,14 @@ function ReviewFor({ id }: { id: string }) {
 
 function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
   const { user: me, hasPermission } = useAuth();
-  const { user, sources, effective } = review;
+  const { user, sources, effective, scoped: scopedGrants = [] } = review;
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [showMissing, setShowMissing] = useState(false);
 
   const byId = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
   const granted = useMemo(() => new Map(effective.map((e) => [e.permission, e.sources])), [effective]);
+  const grantedIn = useMemo(() => new Map(scopedGrants.map((e) => [e.permission, e.sources])), [scopedGrants]);
   const active = sources.filter((s) => s.active);
   const inactive = sources.filter((s) => !s.active);
   const scoped = active.some((s) => s.scopeType && s.scopeType !== 'TENANT');
@@ -147,7 +149,7 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
     .map((r) => ({
       ...r,
       rows: r.permissions.filter((p) =>
-        (showMissing || granted.has(p.name) || (sel && sel.permissions.includes(p.name)))
+        (showMissing || granted.has(p.name) || grantedIn.has(p.name) || (sel && sel.permissions.includes(p.name)))
         && (!term || [r.label, p.name, p.description].some((x) => x.toLowerCase().includes(term)))),
     }))
     .filter((r) => r.rows.length > 0);
@@ -206,7 +208,7 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
           {scoped && (
             <p className="flex gap-2 text-xs text-slate-500">
               <Info size={14} className="shrink-0 mt-0.5" />
-              Some roles are assigned to an organization or unit. Today those permissions apply across the whole tenant; the scope is recorded but not yet enforced.
+              Some roles are assigned to an organization or unit. Their permissions apply there only, and are marked "in part" below.
             </p>
           )}
         </section>
@@ -241,18 +243,21 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
                   <p className="text-xs font-medium text-slate-400 mb-1">{a.label}</p>
                   <ul>
                     {a.rows.map((p) => {
-                      const from = granted.get(p.name) ?? [];
-                      const has = from.length > 0;
+                      const across = granted.get(p.name) ?? [];
+                      const inPart = across.length ? [] : (grantedIn.get(p.name) ?? []);
+                      const from = [...across, ...inPart];
+                      const has = across.length > 0;
                       const fromSel = sel?.permissions.includes(p.name);
                       const dim = sel && !fromSel;
                       return (
                         <li key={p.name} className={`flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 ${dim ? 'opacity-35' : ''}`}>
-                          <span className={`flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${has ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700'}`}
-                            aria-label={has ? 'Granted' : 'Not granted'}>
-                            {has ? <Check size={12} /> : <Minus size={12} />}
+                          <span className={`flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${has ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400' : inPart.length ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700'}`}
+                            aria-label={has ? 'Granted' : inPart.length ? 'Granted in some organizations or units' : 'Not granted'}>
+                            {has || inPart.length ? <Check size={12} /> : <Minus size={12} />}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className={`text-sm ${has ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400'}`}>{p.description}</span>
+                            <span className={`text-sm ${has || inPart.length ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400'}`}>{p.description}</span>
+                            {inPart.length > 0 && <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">in part</span>}
                             <code className="ml-2 text-xs text-slate-400">{p.name}</code>
                           </span>
                           <span className="flex flex-wrap gap-1">
@@ -263,7 +268,7 @@ function ReviewView({ review, catalog }: { review: Review; catalog: Catalog }) {
                                   className={`px-2 py-0.5 rounded-md text-xs ${selected === sid
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300'}`}>
-                                  {sourceChip(s, user.userType)}
+                                  {sourceChip(s, user.userType)}{s.scopeType && s.scopeType !== 'TENANT' ? ` · ${s.scopeName}` : ''}
                                 </button>
                               );
                             })}
