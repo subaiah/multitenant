@@ -5,6 +5,7 @@ import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
 import { Dialog, Field } from '../components/Dialog';
+import { InviteLinkNotice, type InviteOutcome } from '../components/InviteLinkNotice';
 import {
   Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatRelative, humanize, inputClass, selectClass, primaryButtonClass, secondaryButtonClass,
 } from '../components/ui';
@@ -18,6 +19,8 @@ interface Tenant {
   primaryColor: string | null;
   customDomain: string | null;
   trialEndsAt: string | null;
+  firstAdminEmail: string | null;
+  adminInviteError: string | null;
   closedAt: string | null;
   closedBy: string | null;
   deleteAfter: string | null;
@@ -165,6 +168,9 @@ export default function Tenants() {
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300"><Database size={12} />{ISOLATION[t.isolation].label}</span>
                       )}
                       <ProvisioningBadge tenant={t} />
+                      {t.adminInviteError && t.provisioningStatus === 'READY' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><AlertTriangle size={12} />Invitation not sent</span>
+                      )}
                       {t.migration?.behind && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><ArrowUpCircle size={12} />Older schema</span>
                       )}
@@ -220,9 +226,24 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
   const [trialEnds, setTrialEnds] = useState(dateInput(tenant.trialEndsAt));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [working, setWorking] = useState<'retry' | 'delete' | 'rotate' | 'restore' | null>(null);
+  const [working, setWorking] = useState<'retry' | 'delete' | 'rotate' | 'restore' | 'invite' | null>(null);
+  const [invite, setInvite] = useState<InviteOutcome | null>(null);
   const trialChanged = status === 'TRIAL' && trialEnds !== dateInput(tenant.trialEndsAt);
   const dirty = plan !== tenant.plan || status !== tenant.status || trialChanged;
+
+  const resendInvite = async () => {
+    setWorking('invite');
+    setError(null);
+    try {
+      const r = await apiPost<InviteOutcome & { to: string }>(`/tenants/${tenant.id}/resend-invite`);
+      setInvite(r);
+      if (r.invitationSent) await onChanged(`Invitation sent to ${r.to}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resend the invitation');
+    } finally {
+      setWorking(null);
+    }
+  };
 
   const restore = async () => {
     setWorking('restore');
@@ -344,6 +365,24 @@ function TenantPanel({ tenant, onClose, onSaved, onChanged, onDeleted }: {
             </button>
           )}
         </section>
+
+        {tenant.provisioningStatus === 'READY' && (tenant.adminInviteError || invite) && !invite?.invitationSent && (
+          <section aria-label="First administrator's invitation" className="space-y-2">
+            {invite && tenant.firstAdminEmail ? (
+              <InviteLinkNotice email={tenant.firstAdminEmail} outcome={invite} />
+            ) : (
+              <div className="p-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-sm">
+                <p className="font-medium text-amber-900 dark:text-amber-200">The invitation email to {tenant.firstAdminEmail ?? 'the first administrator'} wasn't sent</p>
+                <p className="text-amber-800/90 dark:text-amber-300/90">{tenant.adminInviteError}</p>
+              </div>
+            )}
+            {canManage && (
+              <button onClick={resendInvite} disabled={working !== null} className={secondaryButtonClass}>
+                {working === 'invite' ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}Resend invitation
+              </button>
+            )}
+          </section>
+        )}
 
         {tenant.closedAt && (
           <section aria-label="Closed" className="p-3 rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 text-sm space-y-2">

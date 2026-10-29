@@ -38,3 +38,31 @@ export function emailDeliveryWarning(): string | null {
   }
   return null;
 }
+
+/** An email failure in a sentence an administrator can act on */
+export function describeMailError(err: unknown): string {
+  const e = err as { code?: string; responseCode?: number; message?: string; response?: string };
+  const host = smtpSettings()?.host ?? 'the mail server';
+  if (e.code === 'EDNS' || /ENOTFOUND|EAI_AGAIN/.test(e.message ?? '')) return `The mail server ${host} could not be found. Check SMTP_URL.`;
+  if (e.code === 'ECONNECTION' || e.code === 'ETIMEDOUT' || /ECONNREFUSED|ETIMEDOUT/.test(e.message ?? '')) {
+    return `Could not connect to ${host}. Check SMTP_URL's host and port, and that this server may connect out on that port.`;
+  }
+  if (e.code === 'EAUTH' || e.responseCode === 535) return `${host} refused the username or password in SMTP_URL.`;
+  return (e.response ?? e.message ?? String(err)).slice(0, 300);
+}
+
+/** Where email goes, without the password (for the settings page) */
+export function smtpSettings(): { host: string; port: number; secure: boolean; user: string | null } | null {
+  if (config.email.transport !== 'smtp' || !config.email.smtpUrl) return null;
+  try {
+    const u = new URL(config.email.smtpUrl);
+    const secure = u.protocol === 'smtps:';
+    return { host: u.hostname, port: Number(u.port) || (secure ? 465 : 587), secure, user: u.username ? decodeURIComponent(u.username) : null };
+  } catch {
+    return null;
+  }
+}
+
+export function emailSetup() {
+  return { transport: config.email.transport, from: config.email.from, smtp: smtpSettings() };
+}

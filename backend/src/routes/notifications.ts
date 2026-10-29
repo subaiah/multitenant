@@ -10,6 +10,8 @@ import type { SessionOwner } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { audit, diff } from '../lib/audit.js';
+import { describeMailError, sendMail } from '../lib/mailer.js';
+import { testEmail } from '../lib/email-templates.js';
 import {
   listInbox, markRead, notificationCatalog, preferencesFor, processChain, savePreferences, unreadCount,
 } from '../lib/notifications.js';
@@ -125,6 +127,21 @@ export const notificationSettingRoutes: FastifyPluginAsync = async (fastify) => 
       }
     }
     return { saved: Object.keys(settings).length };
+  });
+
+  // A test message to yourself, to check that this organization's emails go out
+  fastify.post('/test-email', {
+    config: { permission: 'notifications:manage', rateLimit: { max: 5, timeWindow: '15 minutes' } },
+    schema: { tags: ['notifications'], summary: 'Send a test email to yourself' },
+  }, async (request) => {
+    const me = await request.db.user.findFirstOrThrow({ where: { id: request.user.userId, tenantId: request.tenant.id }, select: { email: true } });
+    try {
+      await sendMail(testEmail(me.email, request.tenant.name));
+    } catch (err) {
+      return { sent: false, to: me.email, error: describeMailError(err) };
+    }
+    await audit(request, 'notifications.test_email_sent', { details: { to: me.email } });
+    return { sent: true, to: me.email };
   });
 
   fastify.get('/failed-emails', {

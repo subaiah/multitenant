@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, X, ChevronLeft, ChevronRight, Users as UsersIcon, MailCheck } from 'lucide-react';
+import { InviteLinkNotice, type InviteOutcome } from '../components/InviteLinkNotice';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
@@ -38,6 +39,8 @@ export default function Users() {
   const page = Number(params.get('page') ?? '1');
   const [inviting, setInviting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // An invitation whose email didn't go out: its link, to pass on
+  const [unsent, setUnsent] = useState<{ email: string; outcome: InviteOutcome } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const query = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
@@ -64,6 +67,7 @@ export default function Users() {
   const act = async (fn: () => Promise<unknown>, success?: string) => {
     setError(null);
     setNotice(null);
+    setUnsent(null);
     try {
       await fn();
       if (success) setNotice(success);
@@ -82,6 +86,7 @@ export default function Users() {
       />
 
       {notice && <p role="status" className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400"><MailCheck size={16} />{notice}</p>}
+      {unsent && <InviteLinkNotice email={unsent.email} outcome={unsent.outcome} onDismiss={() => setUnsent(null)} />}
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
       <div className="flex flex-wrap items-center gap-3">
@@ -161,7 +166,11 @@ export default function Users() {
                                 label={`More actions for ${u.email}`}
                                 actions={[
                                   ...(u.status === 'PENDING' && canCreate && manageable
-                                    ? [{ label: 'Resend invitation', onSelect: () => act(() => apiPost(`/users/${u.id}/resend-invite`, {}), `Invitation resent to ${u.email}`) }]
+                                    ? [{ label: 'Resend invitation', onSelect: () => act(async () => {
+                                        const r = await apiPost<InviteOutcome>(`/users/${u.id}/resend-invite`, {});
+                                        if (r.invitationSent) setNotice(`Invitation resent to ${u.email}`);
+                                        else setUnsent({ email: u.email, outcome: r });
+                                      }) }]
                                     : []),
                                   ...(u.status !== 'PENDING' && canUpdate && manageable
                                     ? [{
@@ -213,9 +222,11 @@ export default function Users() {
         <InviteDialog
           types={assignableTypes}
           onClose={() => setInviting(false)}
-          onInvited={async (email) => {
+          onInvited={async (email, outcome) => {
             setInviting(false);
-            setNotice(`Invitation sent to ${email}`);
+            setUnsent(null);
+            if (outcome.invitationSent) setNotice(`Invitation sent to ${email}`);
+            else { setNotice(null); setUnsent({ email, outcome }); }
             await list.reload();
           }}
         />
@@ -224,7 +235,7 @@ export default function Users() {
   );
 }
 
-function InviteDialog({ types, onClose, onInvited }: { types: readonly string[]; onClose: () => void; onInvited: (email: string) => Promise<void> }) {
+function InviteDialog({ types, onClose, onInvited }: { types: readonly string[]; onClose: () => void; onInvited: (email: string, outcome: InviteOutcome) => Promise<void> }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [userType, setUserType] = useState(types.includes('TENANT_USER') ? 'TENANT_USER' : types[types.length - 1] ?? 'TENANT_VIEWER');
@@ -236,8 +247,8 @@ function InviteDialog({ types, onClose, onInvited }: { types: readonly string[];
     setSaving(true);
     setError(null);
     try {
-      await apiPost('/users', { email: email.trim(), name: name.trim(), userType });
-      await onInvited(email.trim());
+      const created = await apiPost<InviteOutcome>('/users', { email: email.trim(), name: name.trim(), userType });
+      await onInvited(email.trim(), created);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the invitation');
       setSaving(false);

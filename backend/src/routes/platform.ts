@@ -9,6 +9,8 @@ import { latestMigration, startRollout, tenantsBehind } from '../lib/tenant-migr
 import { logPlatformActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
+import { describeMailError, emailSetup, sendMail } from '../lib/mailer.js';
+import { testEmail } from '../lib/email-templates.js';
 
 /** Platform-portal data: cross-tenant statistics and platform users. */
 export const platformRoutes: FastifyPluginAsync = async (fastify) => {
@@ -16,6 +18,26 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
     if (!isPlatformUser(request.user.userType)) {
       throw new AppError('Platform access required', 403);
     }
+  });
+
+  // Where the platform's email goes (no password), and a test message to yourself
+  fastify.get('/email', {
+    config: { permission: 'platform-settings:manage' },
+    schema: { tags: ['platform'], summary: 'How email is sent (SMTP host, sender; never the password)' },
+  }, async () => emailSetup());
+
+  fastify.post('/email/test', {
+    config: { permission: 'platform-settings:manage', rateLimit: { max: 5, timeWindow: '15 minutes' } },
+    schema: { tags: ['platform'], summary: 'Send a test email to yourself' },
+  }, async (request) => {
+    const me = await controlDb.platformUser.findUniqueOrThrow({ where: { id: request.user.userId }, select: { email: true } });
+    try {
+      await sendMail(testEmail(me.email, emailSetup().from));
+    } catch (err) {
+      return { sent: false, to: me.email, error: describeMailError(err) };
+    }
+    await audit(request, 'platform.test_email_sent', { details: { to: me.email } });
+    return { sent: true, to: me.email };
   });
 
   fastify.get('/stats', {
