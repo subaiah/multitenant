@@ -84,17 +84,15 @@ test('a role for one organization applies to it, and nowhere else', async () => 
     const perms = (await api('GET', '/auth/permissions', as(viewer))).json;
     assert.ok(!perms.permissions.includes('organizations:update'));
     assert.ok(perms.scoped.some((g: any) => g.permission === 'organizations:update' && g.scopeType === 'ORGANIZATION' && g.scopeId === org.North));
-    // Menus are shared rows another test file may be re-syncing: compare with
-    // the admin's menu read at the same moment
-    let menus = { admin: '', viewer: '' };
-    for (let i = 0; i < 10; i++) {
-      menus = {
-        admin: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(admin))).json),
-        viewer: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(viewer))).json),
-      };
-      if (menus.admin.includes('/organizations') && menus.admin.includes('"/users"')) break;
-      await new Promise((r) => setTimeout(r, 300));
-    }
+    // The menu rows: a fresh CI database has them only once something synced
+    // them (the release step; here, release.test.ts if it ran first), so sync now
+    const { syncMenus } = await import('../src/lib/menus.js');
+    await syncMenus();
+    const menus = {
+      admin: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(admin))).json),
+      viewer: JSON.stringify((await api('GET', '/menu-items/portal/TENANT', as(viewer))).json),
+    };
+    assert.ok(menus.admin.includes('/organizations') && menus.admin.includes('"/users"'), 'menus are there');
     assert.ok(menus.viewer.includes('/organizations'), 'the Organizations page shows');
     assert.ok(!menus.viewer.includes('"/users"'), 'the Users page does not');
   } finally {
