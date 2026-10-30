@@ -33,6 +33,7 @@ A product forks the kit and adds its own tables, API and screens behind a few ex
 - **Data export.** A tenant's administrators can download all their organization's data from Settings: a ZIP with one CSV file per table, including the product's own tables. It's read as the tenant's own database role, so only its rows are included, and passwords and other secrets are left out. ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#data-exports))
 - **API keys and webhooks.** Organizations connect their other systems: API keys (limited to chosen permissions, hashed, revocable, recorded in the audit log as themselves) to call the API, and signed webhooks ([Standard Webhooks](https://www.standardwebhooks.com/) format, retried for two days, public addresses only) for any of their audit events. ([docs/API_ACCESS.md](docs/API_ACCESS.md))
 - **API v1.** A versioned contract for integrations (`/api/v1`): people, groups, organizations, role assignments and the audit log, published as OpenAPI 3.1, with a generated TypeScript client. It only grows within v1: CI refuses breaking changes, and a test checks every route's real answers against it. ([docs/API_V1.md](docs/API_V1.md))
+- **"Sign in with" for your applications.** The platform is an OpenID Connect provider for the applications in its catalogue. Platform staff turn sign-in on for an application and register where it returns to; organizations turn on the applications they use; their people open them from the Applications page and sign in with their account here. Code flow with PKCE, refresh tokens, and claims for the person's organization, roles and the application's permissions. Turning an application off for an organization, or deactivating someone, stops their sign-in and token refresh at once. ([docs/SIGN_IN_WITH.md](docs/SIGN_IN_WITH.md))
 - **Plans and billing.** Plans set limits (users, organizations, groups) and features (single sign-on, custom domain), enforced when something is added. Organizations pay per user by subscription: Razorpay for INR (UPI, cards, netbanking), Stripe for other currencies. Seats follow the number of users; failed payments get a grace period, then the organization is read-only until paid. ([docs/BILLING.md](docs/BILLING.md))
 - **Trials and closing.** Trials last `TRIAL_DAYS` (default 14). Admins are reminded before the end, and afterwards the organization is read-only until it subscribes or platform staff continue it. Tenant admins can close their own organization; it's deleted after a grace period, during which platform staff can restore it. ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#trials-and-closing-an-organization))
 - **Custom domains.** A tenant can serve the app at its own address, such as `app.acme.com`. It adds the domain on its Settings page, adds a CNAME and a TXT record, and the platform checks the TXT record. Once the domain is verified:
@@ -57,7 +58,7 @@ A product re-skins it in one place:
 
 Some pages show data the demo seed fills in, because nothing real reports it yet:
 
-- deployed applications and their CPU, memory and request figures (the tenant's Applications and Infrastructure pages);
+- deployed applications and their CPU, memory and request figures (the tenant's Deployments and Infrastructure pages);
 - the API gateway settings;
 - the backup and encryption switches;
 - the platform's Global Policies and Settings pages.

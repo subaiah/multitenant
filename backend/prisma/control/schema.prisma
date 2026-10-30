@@ -288,9 +288,72 @@ model ApplicationRegistry {
 
   tenantApplications TenantApplication[]
   permissions        Permission[]
+  signIn             ApplicationSignIn?
 
   @@index([status])
   @@map("application_registries")
+}
+
+// "Sign in with" for an application in the catalogue: the platform is its
+// OpenID Connect provider (lib/oidc/). People sign in to it with their
+// organization account, if their organization has the application turned on.
+model ApplicationSignIn {
+  id                     String               @id @default(uuid())
+  applicationId          String               @unique @map("application_id")
+  enabled                Boolean              @default(false)
+  /// The OAuth client_id; public, shown to the application's developers
+  clientId               String               @unique @map("client_id")
+  clientType             OidcClientType       @default(CONFIDENTIAL) @map("client_type")
+  /// The client secret, encrypted (lib/secrets.ts); null for public clients
+  oidcClientSecret       String?              @map("client_secret")
+  secretCreatedAt        DateTime?            @map("secret_created_at")
+  redirectUris           String[]             @default([]) @map("redirect_uris")
+  postLogoutRedirectUris String[]             @default([]) @map("post_logout_redirect_uris")
+  /// Where the catalogue sends people to open the application (initiate_login_uri)
+  initiateLoginUri       String?              @map("initiate_login_uri")
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+
+  application            ApplicationRegistry  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("application_sign_ins")
+}
+
+enum OidcClientType {
+  CONFIDENTIAL // a server that can keep a secret
+  PUBLIC       // a browser or mobile app: PKCE only, no secret
+}
+
+// What the OpenID Connect provider keeps between requests (lib/oidc/adapter.ts):
+// sessions, interactions, authorization codes, tokens and grants, by model
+model OidcPayload {
+  model      String
+  id         String
+  payload    Json
+  grantId    String?   @map("grant_id")
+  userCode   String?   @map("user_code")
+  uid        String?
+  expiresAt  DateTime? @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+
+  @@id([model, id])
+  @@index([grantId])
+  @@index([uid])
+  @@index([userCode])
+  @@index([expiresAt])
+  @@map("oidc_payloads")
+}
+
+// Keys the provider signs ID tokens with (lib/oidc/keys.ts). Made on first use;
+// the private key is encrypted (lib/secrets.ts). Retired keys stay published
+// for a while so tokens signed with them still verify.
+model OidcSigningKey {
+  id         String    @id // the JWK's kid
+  privateJwk String    @map("private_jwk")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  retiredAt  DateTime? @map("retired_at")
+
+  @@map("oidc_signing_keys")
 }
 
 // Permissions an application in the registry declares (shown on the Applications

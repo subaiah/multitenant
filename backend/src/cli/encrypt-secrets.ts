@@ -17,16 +17,21 @@ import { SECRET_FIELDS, activeKeyVersion, decryptSecret, isEncrypted, secretCont
 
 type Delegate = { name: string; findMany: Function; update: Function };
 
-// Prisma delegates holding each secret field: connection strings and platform
-// users' two-factor secrets in the control plane; SSO secrets and tenant users'
-// two-factor secrets in every ready tenant target (as the platform role, which
+// Prisma delegates holding each secret field: connection strings, platform
+// users' two-factor secrets and "Sign in with" secrets and keys in the control
+// plane; the rest in every ready tenant target (as the platform role, which
 // sees every tenant's rows)
+const CONTROL_FIELDS = new Set<SecretField>(['connectionString', 'platformTotpSecret', 'oidcClientSecret', 'privateJwk']);
+
 async function delegatesFor(field: SecretField): Promise<Delegate[]> {
   if (field === 'connectionString') return [{ name: 'control plane', ...bind(controlDb.databaseConfig) }];
   if (field === 'platformTotpSecret') return [{ name: 'control plane', ...bind(controlDb.platformUser) }];
+  if (field === 'oidcClientSecret') return [{ name: 'control plane', ...bind(controlDb.applicationSignIn) }];
+  if (field === 'privateJwk') return [{ name: 'control plane', ...bind(controlDb.oidcSigningKey) }];
   return (await listTargets(['READY'])).map(({ target }) => {
     const db = platformDb(target);
-    return { name: describeTarget(target), ...bind(field === 'totpSecret' ? db.user : db.authProvider) };
+    const delegate = field === 'totpSecret' ? db.user : field === 'signingSecret' ? db.webhookEndpoint : db.authProvider;
+    return { name: describeTarget(target), ...bind(delegate) };
   });
 }
 
@@ -47,11 +52,12 @@ export async function encryptStoredSecrets({ check = false, only }: { check?: bo
       let rows: { id: string; [k: string]: string | null }[];
       try {
         rows = await delegate.findMany({
-          where: { [field]: { not: null }, ...(only && { id: { in: only[field] ?? [] } }) },
+          // Not '' rather than not null: some secret columns can't be null
+          where: { [field]: { not: '' }, ...(only && { id: { in: only[field] ?? [] } }) },
           select: { id: true, [field]: true },
         });
       } catch (err) {
-        if (field === 'connectionString' || field === 'platformTotpSecret') throw err;
+        if (CONTROL_FIELDS.has(field)) throw err;
         skipped.push(`${delegate.name}: ${(err as Error).message.split('\n').at(-1)}`);
         continue;
       }

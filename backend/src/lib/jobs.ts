@@ -17,6 +17,7 @@ import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
 import { controlDb } from './prisma.js';
 import { runExport } from './data-export.js';
 import { reportError } from './error-reporting.js';
+import { purgeExpiredOidcPayloads } from './oidc/adapter.js';
 
 export interface JobLogger {
   info: (msg: string) => void;
@@ -49,6 +50,19 @@ function startExportPolling(log: JobLogger) {
   exportTimer.unref();
 }
 
+// --- "Sign in with": expired sessions, codes and tokens ---------------------
+// Expired rows are never read (lib/oidc/adapter.ts); this only keeps the table small.
+
+let oidcTimer: NodeJS.Timeout | undefined;
+
+function startOidcCleanup(warn: (msg: string) => void) {
+  if (oidcTimer) return;
+  oidcTimer = setInterval(() => {
+    purgeExpiredOidcPayloads().catch((err) => warn(`Removing expired sign-in records failed: ${(err as Error)?.message ?? err}`));
+  }, 60 * 60 * 1000);
+  oidcTimer.unref();
+}
+
 // --- All of them -----------------------------------------------------------
 
 export async function startJobs(log: JobLogger) {
@@ -65,6 +79,7 @@ export async function startJobs(log: JobLogger) {
   startTenantLifecycle(failed);
   startExportPolling(log);
   startWebhooks(failed);
+  startOidcCleanup((msg) => log.warn(msg));
   log.info('Background jobs started');
 }
 
@@ -75,6 +90,8 @@ export async function stopJobs() {
   stopRateLimitCleanup();
   stopTenantLifecycle();
   stopWebhooks();
+  if (oidcTimer) clearInterval(oidcTimer);
+  oidcTimer = undefined;
   if (exportTimer) clearInterval(exportTimer);
   exportTimer = undefined;
   // Let work in progress finish (a few seconds at most; an export that's cut

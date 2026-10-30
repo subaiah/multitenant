@@ -58,7 +58,7 @@ export default function Infrastructure() {
               </div>
 
               <Card title="Applications by resource use" description="Latest values reported by each application"
-                actions={<Link to="/applications" className="text-xs font-medium text-blue-600 hover:text-blue-700">All applications</Link>}>
+                actions={<Link to="/deployments" className="text-xs font-medium text-blue-600 hover:text-blue-700">All deployments</Link>}>
                 {deployments.length === 0 ? (
                   <EmptyState icon={Server} title="No deployed applications" />
                 ) : (

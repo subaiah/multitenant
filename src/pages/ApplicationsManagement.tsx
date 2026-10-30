@@ -2,6 +2,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { Package, Plus, Edit2, Trash2, Key, CheckCircle, XCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import ApplicationSignIn from '../components/ApplicationSignIn';
 
 interface Application {
   id: string;
@@ -266,8 +267,9 @@ export default function ApplicationsManagement() {
         </div>
 
         {/* Permissions List */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6 min-w-0">
           {selectedApp ? (
+            <>
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
               <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <div>
@@ -331,6 +333,8 @@ export default function ApplicationsManagement() {
                 )}
               </div>
             </div>
+            {canManage && <ApplicationSignIn applicationId={selectedApp.id} applicationName={selectedApp.name} />}
+            </>
           ) : (
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12 text-center">
               <Package className="mx-auto text-slate-400 mb-4" size={48} />

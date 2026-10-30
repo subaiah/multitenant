@@ -14,6 +14,7 @@ const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
 const PlatformUsers = lazy(() => import('./pages/PlatformUsers'));
 const Tenants = lazy(() => import('./pages/Tenants'));
 const Applications = lazy(() => import('./pages/Applications'));
+const Deployments = lazy(() => import('./pages/Deployments'));
 const ActivityLog = lazy(() => import('./pages/ActivityLog'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -170,9 +171,14 @@ export default function App() {
               {/* Everyone has an inbox and preferences */}
               <Route path="/notifications" element={<Notifications scope="tenant" />} />
               <Route path="/applications" element={
+                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                  <Applications />
+                </PermissionGuard>
+              } />
+              <Route path="/deployments" element={
                 <Preview home="/dashboard">
                   <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
-                    <Applications />
+                    <Deployments />
                   </PermissionGuard>
                 </Preview>
               } />

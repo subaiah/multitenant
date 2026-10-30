@@ -67,10 +67,13 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       ],
     },
     {
-      // Sample data until real deployments report in (lib/preview.ts)
+      // Deployments, infrastructure and the API gateway show sample data until
+      // real ones report in (lib/preview.ts)
       label: 'Workspace', path: '#workspace', icon: 'Package',
       children: [
+        // The organization's applications, to open them (lib/oidc/)
         { label: 'Applications', path: '/applications', icon: 'Package', permission: 'applications:read' },
+        { label: 'Deployments', path: '/deployments', icon: 'Rocket', permission: 'applications:read' },
         { label: 'Infrastructure', path: '/infrastructure', icon: 'Server', permission: 'infrastructure:read' },
         { label: 'API gateway', path: '/api', icon: 'Network', permission: 'api:manage' },
       ],

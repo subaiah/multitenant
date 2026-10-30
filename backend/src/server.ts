@@ -14,6 +14,7 @@ import { latestMigration, tenantsBehind } from './lib/tenant-migrations.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
+import { applicationSignInRoutes } from './routes/application-sign-in.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { activityRoutes } from './routes/activities.js';
@@ -56,6 +57,7 @@ import { billingRoutes } from './routes/billing.js';
 import { apiKeyRoutes } from './routes/api-keys.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { billingWebhookRoutes } from './routes/billing-webhooks.js';
+import { oidcRoutes } from './routes/oidc.js';
 import { platformBillingRoutes } from './routes/platform-billing.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -240,6 +242,8 @@ async function registerRoutes() {
   await fastify.register(clientErrorRoutes, { prefix: '/bff' });
   // Payment providers' webhooks (signed; lib/billing/)
   await fastify.register(billingWebhookRoutes, { prefix: '/bff/billing/webhooks' });
+  // "Sign in with": the OpenID Connect provider for the catalogue's applications (lib/oidc/)
+  await fastify.register(oidcRoutes, { prefix: '/oidc' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
 
@@ -263,6 +267,7 @@ async function registerRoutes() {
 
     // Application management
     await protectedRoutes.register(platformScoped(applicationRoutes), { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationSignInRoutes), { prefix: '/applications' });
 
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });
