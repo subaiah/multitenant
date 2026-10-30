@@ -14,7 +14,7 @@
 import { config } from '../config/env.js';
 
 /** Menu entries for preview pages (both portals) */
-export const PREVIEW_MENU_PATHS = ['/applications', '/infrastructure', '/api', '/platform/policies', '/platform/settings'];
+export const PREVIEW_MENU_PATHS = ['/deployments', '/infrastructure', '/api', '/platform/policies', '/platform/settings'];
 
 /** Database settings that are switches only */
 export const PREVIEW_DATABASE_FIELDS = ['backupEnabled', 'encryptionAtRest'];

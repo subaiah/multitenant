@@ -108,7 +108,7 @@ export default function Dashboard() {
                     </ul>
                   )}
                   {hasPermission('applications:read') && (
-                    <Link to="/applications" className="inline-block mt-4 text-xs font-medium text-blue-600 hover:text-blue-700">View applications</Link>
+                    <Link to="/deployments" className="inline-block mt-4 text-xs font-medium text-blue-600 hover:text-blue-700">View deployments</Link>
                   )}
                 </Card>}
 

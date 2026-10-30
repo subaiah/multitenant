@@ -5,7 +5,8 @@
  */
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Check, Copy, KeyRound, Webhook } from 'lucide-react';
+import { KeyRound, Webhook } from 'lucide-react';
+import { CopyBox } from '../components/CopyBox';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api-client';
@@ -13,18 +14,6 @@ import { Dialog, Field } from '../components/Dialog';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatDateTime, formatRelative, inputClass, primaryButtonClass, secondaryButtonClass, selectClass } from '../components/ui';
 
 const apiBase = () => `${new URL(API_URL, window.location.origin).toString().replace(/\/$/, '')}/v1`;
-
-function CopyBox({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="flex items-stretch gap-2">
-      <code aria-label={label} className="flex-1 min-w-0 break-all rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-xs font-mono text-slate-800 dark:text-slate-100">{value}</code>
-      <button type="button" className={secondaryButtonClass} onClick={() => navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {})}>
-        {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />} {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
-  );
-}
 
 export default function DevelopersPage() {
   const [params, setParams] = useSearchParams();

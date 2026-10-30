@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { API_URL, apiGet, apiPost, isMfaStep, type MfaStep } from '../lib/api-client';
 import { TwoFactorSignIn } from '../components/TwoFactor';
 import { useAuth } from '../contexts/AuthContext';
-import { portalHome } from '../lib/permissions';
+import { continuing, goAfterSignIn, rememberContinue } from '../lib/continue-after-sign-in';
 import { AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { APP_NAME } from '../lib/brand';
 
@@ -79,6 +79,10 @@ export default function Login() {
   // Arriving from an accepted invitation or a password reset
   const [searchParams] = useSearchParams();
   const notice = searchParams.get('notice');
+  // Signing in to an application with this account: back to it afterwards
+  const search = searchParams.toString();
+  useEffect(() => rememberContinue(`?${search}`), [search]);
+  const forApplication = continuing(`?${search}`);
   
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +101,7 @@ export default function Login() {
   // Already signed in: go straight to the right portal
   useEffect(() => {
     if (!authLoading && user) {
-      navigate(portalHome(user.portal), { replace: true });
+      goAfterSignIn(navigate, user.portal);
     }
   }, [authLoading, user, navigate]);
 
@@ -135,7 +139,8 @@ export default function Login() {
 
   const finishSignIn = async () => {
     const portal = await reload();
-    navigate(portal ? portalHome(portal) : '/login', { replace: true });
+    if (portal) goAfterSignIn(navigate, portal);
+    else navigate('/login', { replace: true });
   };
 
   const restart = () => {
@@ -161,7 +166,7 @@ export default function Login() {
         setSubmitting(false);
         return;
       }
-      navigate(portalHome(result), { replace: true });
+      goAfterSignIn(navigate, result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
       setSubmitting(false);
@@ -288,6 +293,12 @@ export default function Login() {
             </p>
           </div>
         </div>
+
+        {forApplication && (
+          <p role="status" className="text-sm p-3 rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/10 text-blue-800 dark:text-blue-300">
+            Sign in to continue to the application that sent you here.
+          </p>
+        )}
 
         {timeoutText && (
           <div role="status" className="flex items-start gap-2 p-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300">

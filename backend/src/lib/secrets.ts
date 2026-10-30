@@ -84,6 +84,8 @@ export const SECRET_FIELDS = {
   totpSecret: { model: 'User', table: 'users', column: 'totp_secret' },
   platformTotpSecret: { model: 'PlatformUser', table: 'platform_users', column: 'totp_secret' },
   signingSecret: { model: 'WebhookEndpoint', table: 'webhook_endpoints', column: 'signing_secret' },
+  oidcClientSecret: { model: 'ApplicationSignIn', table: 'application_sign_ins', column: 'client_secret' },
+  privateJwk: { model: 'OidcSigningKey', table: 'oidc_signing_keys', column: 'private_jwk' },
 } as const;
 
 export type SecretField = keyof typeof SECRET_FIELDS;

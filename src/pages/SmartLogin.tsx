@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { APP_NAME } from '../lib/brand';
 import { apiGet } from '../lib/api-client';
 import { useAuth } from '../contexts/AuthContext';
-import { portalHome } from '../lib/permissions';
+import { continuing, goAfterSignIn, rememberContinue } from '../lib/continue-after-sign-in';
 import type { SiteInfo } from './SignUp';
 
 export default function SmartLogin() {
@@ -15,6 +15,10 @@ export default function SmartLogin() {
   const { search } = useLocation();
   const { user, loading: authLoading } = useAuth();
   const [signupOpen, setSignupOpen] = useState(false);
+
+  // Signing in to an application: come back to it afterwards
+  useEffect(() => rememberContinue(search), [search]);
+  const forApplication = continuing(search);
 
   // On an organization's own domain, go straight to its sign-in page
   useEffect(() => {
@@ -29,7 +33,7 @@ export default function SmartLogin() {
   // Already signed in: skip the org picker
   useEffect(() => {
     if (!authLoading && user) {
-      navigate(portalHome(user.portal), { replace: true });
+      goAfterSignIn(navigate, user.portal);
     }
   }, [authLoading, user, navigate]);
 
@@ -71,7 +75,9 @@ export default function SmartLogin() {
       <div className="max-w-sm mx-auto flex flex-col gap-7">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-800 dark:text-white">Sign in to {APP_NAME}</h1>
-          <p className="text-slate-600 dark:text-slate-400">Enter your organization's sign-in address to continue.</p>
+          <p className="text-slate-600 dark:text-slate-400">
+            {forApplication ? 'Enter your organization’s sign-in address to continue to the application that sent you here.' : 'Enter your organization’s sign-in address to continue.'}
+          </p>
         </div>
 
         {new URLSearchParams(search).get('notice') === 'organization-closed' && (

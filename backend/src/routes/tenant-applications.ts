@@ -6,6 +6,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
+import { issuer } from '../lib/oidc/provider.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -21,6 +22,42 @@ const updateTenantApplicationSchema = z.object({
 });
 
 export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
+  // The organization's applications, for everyone in it: those turned on now,
+  // and how to open each (its sign-in start address, with this issuer)
+  fastify.get('/launchpad', {
+    config: { permission: 'applications:read' },
+    schema: { tags: ['tenant-applications'], summary: "Applications your organization has turned on, and how to open them" },
+  }, async (request) => {
+    const now = new Date();
+    const rows = await controlDb.tenantApplication.findMany({
+      where: {
+        tenantId: request.tenant.id,
+        state: { in: ['ENABLED', 'TRIAL'] },
+        validFrom: { lte: now },
+        OR: [{ validTo: null }, { validTo: { gt: now } }],
+        application: { status: 'ACTIVE' },
+      },
+      include: {
+        application: {
+          select: { id: true, key: true, name: true, description: true, signIn: { select: { enabled: true, initiateLoginUri: true } } },
+        },
+      },
+      orderBy: { application: { name: 'asc' } },
+    });
+    return {
+      applications: rows.map(({ application: a, state, validTo }) => {
+        const signIn = a.signIn?.enabled ? a.signIn : null;
+        let openUrl: string | null = null;
+        if (signIn?.initiateLoginUri) {
+          const u = new URL(signIn.initiateLoginUri);
+          u.searchParams.set('iss', issuer());
+          openUrl = u.href;
+        }
+        return { id: a.id, key: a.key, name: a.name, description: a.description, state, validTo, signIn: !!signIn, openUrl };
+      }),
+    };
+  });
+
   // List tenant applications (entitlements)
   fastify.get('/', {
     config: { permission: 'applications:read' },
