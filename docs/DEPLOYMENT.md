@@ -303,7 +303,8 @@ The server is safe to run several times behind a load balancer:
 
 ## Monitoring
 
-- **Health:** `GET /api/health`, liveness with no database access. `GET /api/health/detailed` also checks the control plane and the shared tenant database.
+- **Health:** `GET /api/health`, liveness with no database access (container health checks). `GET /api/health/ready` answers 200 when the control plane and the shared tenant database are reachable and 503 when not, and says nothing more: point an uptime monitor at it. `GET /api/health/detailed` adds latencies, memory and uptime, for signed-in platform staff only.
+- **Request IDs:** Caddy gives every API request an ID (`X-Request-ID`). The API keeps it in its log lines and audit entries and sends it back in the response, so one request can be followed from Caddy's log into the API's, and a user reporting a problem can quote it.
 - **Logs:** JSON on standard output, through `docker compose logs`, or ship them with your log collector. Request lines leave out headers and cookies, and the invitation and reset tokens and sign-in codes that some URLs carry.
 - **Worth alerting on:**
   - the API container restarting;

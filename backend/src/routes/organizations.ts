@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { canInScope, requireInScope, scopeOf } from '../lib/scopes.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -37,8 +38,9 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', search, status } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     // Someone with a scoped role sees the organizations it covers: their own,
     // and those holding units they were given
@@ -71,7 +73,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.organization.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
@@ -95,10 +97,10 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       organizations: withAccess,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

@@ -7,6 +7,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -49,8 +50,9 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const userType = (request.user as any).userType;
     const { page = '1', limit = '20', search, status } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     const where = {
       AND: [
@@ -69,7 +71,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       controlDb.applicationRegistry.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
@@ -83,10 +85,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       applications,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

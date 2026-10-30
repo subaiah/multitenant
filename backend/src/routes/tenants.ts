@@ -15,6 +15,7 @@ import { logActivity, logPlatformActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { sendInvitation } from '../lib/invitations.js';
+import { limitSchema, pageSchema } from '../lib/pagination.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -44,8 +45,8 @@ const createTenantSchema = z.object({
 });
 
 const querySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).default(10),
+  page: pageSchema.default(1),
+  limit: limitSchema(10),
   status: z.enum(['ACTIVE', 'SUSPENDED', 'TRIAL']).optional(),
   plan: z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE']).optional(),
   search: z.string().optional(),

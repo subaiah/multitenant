@@ -6,6 +6,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createAccessRequestSchema = z.object({
   roleId: z.string().uuid(),
@@ -42,8 +43,9 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', status, requesterId } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     // Users can see their own requests, admins can see all
     const where = {
@@ -60,7 +62,7 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.accessRequest.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           requester: {
@@ -80,10 +82,10 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       requests,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

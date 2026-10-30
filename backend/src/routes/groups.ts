@@ -5,6 +5,7 @@ import { requireCanGrant } from '../middleware/authorize.js';
 import { assignmentState, groupPermissionNames } from '../lib/access.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createGroupSchema = z.object({
   name: z.string().min(2).max(100),
@@ -39,8 +40,9 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     const userId = (request.user as any).userId;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', search, status } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     const where = {
       tenantId,
@@ -59,7 +61,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.group.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
@@ -77,10 +79,10 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         roles: [...new Set(roleAssignments.map((a) => a.role.name))],
       })),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

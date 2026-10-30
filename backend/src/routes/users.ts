@@ -14,6 +14,7 @@ import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
+import { limitSchema, pageSchema } from '../lib/pagination.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
@@ -31,8 +32,8 @@ const updateUserSchema = z.object({
 });
 
 const querySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).default(10),
+  page: pageSchema.default(1),
+  limit: limitSchema(10),
   userType: z.enum(['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER']).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   search: z.string().optional(),

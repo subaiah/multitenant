@@ -84,11 +84,12 @@ export const errorHandler = async (
     const prismaError = error as any;
     
     // Unique constraint violation
+    // (Which constraint it was goes to the log only: it names tables and columns)
     if (prismaError.code === 'P2002') {
+      request.log.info({ prismaCode: prismaError.code, meta: prismaError.meta, route: request.routeOptions?.url }, 'Unique constraint violated');
       return reply.status(409).send({
         error: 'Conflict',
-        message: 'Resource already exists',
-        details: prismaError.meta,
+        message: 'Something with these details already exists',
       });
     }
 

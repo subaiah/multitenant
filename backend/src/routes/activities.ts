@@ -1,10 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { withActivityUsers } from '../lib/activity-users.js';
+import { limitSchema, pageSchema } from '../lib/pagination.js';
 
 const querySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).default(20),
+  page: pageSchema.default(1),
+  limit: limitSchema(20),
   type: z.enum(['DEPLOY', 'CONFIG', 'USER', 'BILLING', 'ALERT', 'AUTH', 'API']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),

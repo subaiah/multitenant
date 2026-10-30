@@ -6,6 +6,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createCertificationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -45,8 +46,9 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', status, reviewerId } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     // Users can see their own certifications, admins can see all
     const where = {
@@ -63,7 +65,7 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.accessCertification.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { dueDate: 'asc' },
         include: {
           reviewer: {
@@ -80,10 +82,10 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       certifications,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });
