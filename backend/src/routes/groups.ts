@@ -6,6 +6,7 @@ import { assignmentState, groupPermissionNames } from '../lib/access.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
+import { assertWithinLimitFor } from '../lib/billing/plans.js';
 
 const createGroupSchema = z.object({
   name: z.string().min(2).max(100),
@@ -187,6 +188,7 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     // Only admins can create groups
     
     const data = createGroupSchema.parse(request.body);
+    await assertWithinLimitFor(request, 'groups');
     
     // Check if group name already exists
     const existing = await request.db.group.findFirst({

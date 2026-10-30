@@ -133,6 +133,20 @@ export const KIT_AUDIT_EVENTS = {
   'tenant.invitation_resent': p("Tenant's first administrator invited again", 'tenant'),
   'tenant.invitation_not_sent': p("Tenant's first administrator's invitation email failed", 'tenant'),
   'platform.test_email_sent': p('Test email sent', 'config'),
+
+  // Billing (lib/billing/): the organization's own log, and plans in the platform's
+  'billing.checkout_started': t('Checkout started', 'config'),
+  'billing.subscribed': t('Subscription started', 'config'),
+  'billing.plan_changed': t('Plan changed', 'config'),
+  'billing.canceled': t('Subscription cancelled', 'config'),
+  'billing.resumed': t('Cancellation withdrawn', 'config'),
+  'billing.ended': t('Subscription ended', 'config'),
+  'billing.payment_failed': t('Payment failed', 'config'),
+  'billing.payment_required': t('Read-only: payment overdue', 'config'),
+  'billing.payment_recovered': t('Payments working again', 'config'),
+  'billing.seats_changed': t('Seats changed', 'config'),
+  'billing.plan_updated': p("Plan's limits changed", 'platform'),
+  'billing.price_set': p("Plan's price set", 'platform'),
   'tenant.migrations_run': p('Tenant migrations run', 'tenant'),
 
   // Platform: catalogue, menus, people, support

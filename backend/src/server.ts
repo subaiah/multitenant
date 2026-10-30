@@ -51,6 +51,9 @@ import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
 import { startJobs, stopJobs } from './lib/jobs.js';
 import { flushErrorReports } from './lib/error-reporting.js';
 import { clientErrorRoutes } from './routes/client-errors.js';
+import { billingRoutes } from './routes/billing.js';
+import { billingWebhookRoutes } from './routes/billing-webhooks.js';
+import { platformBillingRoutes } from './routes/platform-billing.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
@@ -218,6 +221,8 @@ async function registerRoutes() {
   await fastify.register(siteRoutes, { prefix: '/bff' });
   // Errors in people's browsers, for error tracking
   await fastify.register(clientErrorRoutes, { prefix: '/bff' });
+  // Payment providers' webhooks (signed; lib/billing/)
+  await fastify.register(billingWebhookRoutes, { prefix: '/bff/billing/webhooks' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
 
@@ -263,6 +268,8 @@ async function registerRoutes() {
     await protectedRoutes.register(customDomainRoutes, { prefix: '/custom-domain' });
     await protectedRoutes.register(closureRoutes, { prefix: '/organization' });
     await protectedRoutes.register(dataExportRoutes, { prefix: '/data-exports' });
+    // The organization's plan, subscription and invoices
+    await protectedRoutes.register(billingRoutes, { prefix: '/billing' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
     if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
@@ -299,6 +306,7 @@ async function registerRoutes() {
 
     // Platform portal data (platform users only)
     await protectedRoutes.register(platformScoped(platformRoutes), { prefix: '/platform' });
+    await protectedRoutes.register(platformScoped(platformBillingRoutes), { prefix: '/platform/billing' });
     await protectedRoutes.register(platformScoped(platformRoleRoutes), { prefix: '/platform-roles' });
 
     // Current tenant's deployed applications: sample data until deployments

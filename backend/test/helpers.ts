@@ -84,8 +84,8 @@ export async function dataOf(tenantId: string): Promise<TenantDb> {
   return platformDb(await targetForTenant(tenantId));
 }
 
-/** A provisioned tenant (its own role, schema or database, row-level security) with three users and an SSO provider. */
-export async function seedTenant(label: string, strategy: Strategy = nextStrategy()): Promise<TenantSeed> {
+/** A provisioned tenant (its own role, schema or database, row-level security) with three users and an SSO provider, on a plan without limits unless one is given. */
+export async function seedTenant(label: string, strategy: Strategy = nextStrategy(), plan: 'FREE' | 'STARTER' | 'PROFESSIONAL' | 'ENTERPRISE' = 'ENTERPRISE'): Promise<TenantSeed> {
   const { controlDb } = await db();
   const { provisionTenant } = await import('../src/lib/provisioning.js');
   const { dbForTenant } = await import('../src/lib/tenant-db.js');
@@ -94,7 +94,8 @@ export async function seedTenant(label: string, strategy: Strategy = nextStrateg
   const slug = `t-${label}-${run}`;
   const tenant = await controlDb.tenant.create({
     data: {
-      name: `Test ${label}`, slug, plan: 'FREE', status: 'ACTIVE',
+      // Enterprise: no plan limits (billing.test.ts tries the others)
+      name: `Test ${label}`, slug, plan, status: 'ACTIVE',
       databaseConfig: { create: { strategy, region: 'test', storageLimit: '1 GB' } },
     },
   });

@@ -25,6 +25,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { slugToken, tenantForSignIn, tokenSlug } from './auth-planes.js';
 import type { TenantDb } from './tenant-db.js';
+import { assertWithinLimit } from './billing/plans.js';
 
 export const SSO_CALLBACK_PATH = '/bff/auth/sso/callback';
 export const ssoRedirectUri = () => `${config.bffUrl.replace(/\/$/, '')}${SSO_CALLBACK_PATH}`;
@@ -266,6 +267,12 @@ export async function userForIdentity(
   if (!user) {
     if (!provider.autoProvision) {
       throw new SsoError('There is no account for this email in this organization. Ask an administrator to invite you.', 'SSO_NO_ACCOUNT');
+    }
+    // A new person is a seat: the plan's limit applies
+    try {
+      await assertWithinLimit(tenantId, 'users');
+    } catch (err) {
+      throw new SsoError(`${(err as Error).message.replace(' Upgrade on the Billing page to go further.', '')} Ask an administrator for a seat.`, 'SSO_PLAN_LIMIT');
     }
     user = await db.user.create({
       data: { tenantId, email: identity.email, name: identity.name, userType: 'TENANT_USER', status: 'ACTIVE' },

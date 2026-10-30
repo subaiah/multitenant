@@ -8,6 +8,9 @@ import { isPlatformUser, USER_TYPE_HIERARCHY } from '../utils/authorization.js';
 import { verifySession } from '../lib/sessions.js';
 import { activeSupportSession, type ActiveSupportSession } from '../lib/support.js';
 import { trialEnded } from '../lib/tenant-lifecycle.js';
+import { enabledProviders } from '../lib/billing/providers.js';
+
+const billingAvailable = () => enabledProviders().length > 0;
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -81,7 +84,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     const tenant = await controlDb.tenant.findUnique({
       where: { id: tenantId },
       select: {
-        id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true, trialEndsAt: true, closedAt: true,
+        id: true, name: true, slug: true, plan: true, status: true, provisioningStatus: true, trialEndsAt: true, closedAt: true, paymentRequiredSince: true,
         databaseConfig: { select: { updatedAt: true } },
       },
     });
@@ -93,18 +96,29 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       return reply.status(403).send({ error: 'Forbidden', message: tenant.closedAt ? 'This organization was closed' : 'Tenant is suspended' });
     }
     // An ended trial is read-only for the organization's own people
-    if (!platformUser && trialEnded(tenant) && !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !request.routeOptions.config?.allowWhenTrialEnded) {
+    const writing = !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !request.routeOptions.config?.allowWhenTrialEnded;
+    if (!platformUser && writing && trialEnded(tenant)) {
       return reply.status(403).send({
         error: 'Forbidden',
         code: 'TRIAL_ENDED',
-        message: `${tenant.name}'s trial has ended, so it's read-only. Contact the platform team to continue.`,
+        message: billingAvailable()
+          ? `${tenant.name}'s trial has ended, so it's read-only. An administrator can subscribe on the Billing page to continue.`
+          : `${tenant.name}'s trial has ended, so it's read-only. Contact the platform team to continue.`,
+      });
+    }
+    // Payments failing past the grace period: read-only until paid (lib/billing/)
+    if (!platformUser && writing && tenant.paymentRequiredSince) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        code: 'PAYMENT_REQUIRED',
+        message: `Payments for ${tenant.name} are overdue, so it's read-only. An administrator can update the payment method on the Billing page.`,
       });
     }
     // Nobody works inside a tenant until its data is set up
     if (tenant.provisioningStatus !== 'READY') {
       return reply.status(409).send({ error: 'Conflict', message: 'This tenant is not ready yet' });
     }
-    const { provisioningStatus: _, databaseConfig, trialEndsAt: _t, closedAt: _c, ...tenantInfo } = tenant;
+    const { provisioningStatus: _, databaseConfig, trialEndsAt: _t, closedAt: _c, paymentRequiredSince: _p, ...tenantInfo } = tenant;
     // Platform staff work inside a tenant only through an approved, active
     // support session; a read-only one gets a connection that can't write
     let readOnly = false;

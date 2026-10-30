@@ -10,6 +10,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config/env.js';
 import { controlDb } from '../lib/prisma.js';
+import { assertFeature } from '../lib/billing/plans.js';
 import { AppError } from '../middleware/error-handler.js';
 import { audit } from '../lib/audit.js';
 import { logActivity } from '../lib/activity.js';
@@ -36,6 +37,7 @@ export const customDomainRoutes: FastifyPluginAsync = async (fastify) => {
     schema: { tags: ['custom-domain'], summary: 'Use a custom domain (pending until its DNS record is found)' },
   }, async (request) => {
     assertEnabled();
+    await assertFeature(request.tenant.id, 'allowCustomDomain');
     const domain = normalizeDomain(z.object({ domain: z.string().max(300) }).parse(request.body).domain);
     const before = await controlDb.tenant.findUniqueOrThrow({ where: { id: request.tenant.id }, select });
     if (before.customDomain === domain) return domainView(before);
