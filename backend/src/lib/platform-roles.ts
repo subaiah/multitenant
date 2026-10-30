@@ -38,6 +38,11 @@ export const SYSTEM_PLATFORM_ROLES: { name: string; description: string; permiss
     permissions: ['platform:read', 'applications:read', 'applications:manage', 'app-registry:manage', 'menus:manage'],
   },
   {
+    name: 'Billing Manager',
+    description: "Set plans' limits and prices; see organizations' subscriptions",
+    permissions: ['platform:read', 'tenants:read', 'plans:read', 'plans:manage'],
+  },
+  {
     name: 'Platform User Manager',
     description: 'Give platform roles to platform users and define custom roles',
     permissions: ['platform:read', 'platform-users:read', 'platform-users:manage'],

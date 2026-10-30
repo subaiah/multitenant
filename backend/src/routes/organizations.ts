@@ -5,6 +5,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { canInScope, requireInScope, scopeOf } from '../lib/scopes.js';
 import { pageOf } from '../lib/pagination.js';
+import { assertWithinLimitFor } from '../lib/billing/plans.js';
 
 const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
@@ -182,6 +183,7 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     // Only admins can create organizations
     
     const data = createOrganizationSchema.parse(request.body);
+    await assertWithinLimitFor(request, 'organizations');
     
     // Check if organization name already exists
     const existing = await request.db.organization.findFirst({

@@ -20,6 +20,8 @@ const Notifications = lazy(() => import('./pages/Notifications'));
 const Support = lazy(() => import('./pages/Support'));
 const SupportWorkspace = lazy(() => import('./pages/SupportWorkspace'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
+const Billing = lazy(() => import('./pages/Billing'));
+const PlatformBilling = lazy(() => import('./pages/PlatformBilling'));
 const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const DataIsolation = lazy(() => import('./pages/DataIsolation'));
 const Authentication = lazy(() => import('./pages/Authentication'));
@@ -127,6 +129,11 @@ export default function App() {
               <Route path="/platform/support/:id" element={
                 <PermissionGuard permission="support:request" redirectTo="/unauthorized">
                   <SupportWorkspace />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/billing" element={
+                <PermissionGuard permission="plans:read" redirectTo="/unauthorized">
+                  <PlatformBilling />
                 </PermissionGuard>
               } />
               <Route path="/platform/audit" element={
@@ -243,6 +250,11 @@ export default function App() {
               <Route path="/settings" element={
                 <PermissionGuard permission="settings:read" redirectTo="/unauthorized">
                   <SettingsPage />
+                </PermissionGuard>
+              } />
+              <Route path="/billing" element={
+                <PermissionGuard permission="billing:read" redirectTo="/unauthorized">
+                  <Billing />
                 </PermissionGuard>
               } />
             </Route>

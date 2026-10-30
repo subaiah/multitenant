@@ -49,11 +49,12 @@ export interface LifecycleResult {
   signupsRemoved: number;
   exports: { resumed: number; removed: number };
   domains: { checked: number; unverified: string[] };
+  billing: { checked: number; readOnly: number; seats: { changed: number; failed: number }; errors: string[] };
 }
 
 /** One pass over every tenant. Safe to run on several servers at once (each step claims its rows). */
 export async function runTenantLifecycle(now = new Date()): Promise<LifecycleResult> {
-  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0, exports: { resumed: 0, removed: 0 }, domains: { checked: 0, unverified: [] } };
+  const result: LifecycleResult = { reminded: [], trialsEnded: [], deleted: [], failed: [], signupsRemoved: 0, exports: { resumed: 0, removed: 0 }, domains: { checked: 0, unverified: [] }, billing: { checked: 0, readOnly: 0, seats: { changed: 0, failed: 0 }, errors: [] } };
   const ready = { status: 'TRIAL' as const, provisioningStatus: 'READY' as const };
   const select = { id: true, name: true, slug: true, trialEndsAt: true } as const;
 
@@ -102,6 +103,9 @@ export async function runTenantLifecycle(now = new Date()): Promise<LifecycleRes
   result.signupsRemoved = removed.count;
   result.exports = await maintainExports(now);
   result.domains = await recheckDomains(now);
+  // Subscriptions: grace periods, seats, anything a missed webhook would have told us
+  const { runBillingMaintenance } = await import('./billing/subscriptions.js');
+  result.billing = await runBillingMaintenance(now).catch((err) => ({ checked: 0, readOnly: 0, seats: { changed: 0, failed: 0 }, errors: [(err as Error).message] }));
   return result;
 }
 

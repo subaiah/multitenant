@@ -146,7 +146,9 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
             {previewFeatures && <div className="flex justify-between"><dt className="text-slate-500">Deployed apps</dt><dd className="tabular-nums">{tenant._count.applications}</dd></div>}
             <div className="flex justify-between"><dt className="text-slate-500">Member since</dt><dd>{formatDate(tenant.createdAt)}</dd></div>
           </dl>
-          <p className="text-xs text-slate-500 mt-4">Plan changes are handled by the platform team.</p>
+          {hasPermission('billing:read')
+            ? <Link className="inline-block text-sm text-blue-600 hover:underline mt-4" to="/billing">Plan, payments and invoices</Link>
+            : <p className="text-xs text-slate-500 mt-4">Plan changes are made by the people who manage billing.</p>}
         </Card>
         <SupportAccessCard />
         <Card title="Related settings">

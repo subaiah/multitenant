@@ -372,6 +372,13 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
 
     const before = await controlDb.tenant.findUnique({ where: { id } });
     if (!before) throw new AppError('Tenant not found', 404);
+    // A paid subscription decides the plan (lib/billing/): changing it here would be undone
+    if (data.plan !== undefined && data.plan !== before.plan) {
+      const sub = await controlDb.subscription.findUnique({ where: { tenantId: id }, select: { status: true } });
+      if (sub && ['ACTIVE', 'PAST_DUE', 'UNPAID'].includes(sub.status)) {
+        throw new AppError("This organization pays for its plan through a subscription: it changes its plan on its Billing page", 409, true, 'SUBSCRIBED');
+      }
+    }
     const extra: Record<string, unknown> = {};
     // Becoming a trial without an end date gets the usual length
     if (data.status === 'TRIAL' && before.status !== 'TRIAL' && data.trialEndsAt === undefined && !before.trialEndsAt) extra.trialEndsAt = trialEnd();

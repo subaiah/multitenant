@@ -42,6 +42,9 @@ model Tenant {
   closedBy               String?   @map("closed_by")
   deleteAfter            DateTime? @map("delete_after")
   statusBeforeClose      TenantStatus? @map("status_before_close")
+  // Billing (lib/billing/): set when a subscription's payments have failed for
+  // longer than BILLING_GRACE_DAYS. The organization is read-only until it pays.
+  paymentRequiredSince   DateTime? @map("payment_required_since")
   loginTitle      String?      @map("login_title")
   loginSubtitle   String?      @map("login_subtitle")
 
@@ -647,4 +650,137 @@ model DataExport {
   @@index([tenantId, createdAt])
   @@index([status])
   @@map("data_exports")
+}
+
+// --- Billing (lib/billing/, docs/BILLING.md) --------------------------------
+
+// What each plan allows. One row per TenantPlan; platform staff edit them
+// (Platform → Plans). A null limit means no limit.
+model BillingPlan {
+  code             TenantPlan @id
+  name             String
+  description      String?
+  /// Offered on organizations' Billing page (Enterprise is usually arranged by hand)
+  public           Boolean    @default(true)
+  sortOrder        Int        @default(0) @map("sort_order")
+  maxUsers         Int?       @map("max_users")
+  maxOrganizations Int?       @map("max_organizations")
+  maxGroups        Int?       @map("max_groups")
+  allowSso         Boolean    @default(false) @map("allow_sso")
+  allowCustomDomain Boolean   @default(false) @map("allow_custom_domain")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  prices           BillingPrice[]
+
+  @@map("billing_plans")
+}
+
+enum BillingProvider {
+  RAZORPAY
+  STRIPE
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+// A price per user (seat) for a plan, in one currency and billing interval,
+// with the matching object at the payment provider (a Razorpay plan, a Stripe
+// price). Prices can't change at the providers: a new price is a new row,
+// and the old one is kept (inactive) for the subscriptions still on it.
+model BillingPrice {
+  id               String          @id @default(uuid())
+  planCode         TenantPlan      @map("plan_code")
+  provider         BillingProvider
+  currency         String
+  interval         BillingInterval
+  /// Per seat, in the currency's smallest unit (paise, cents)
+  unitAmount       Int             @map("unit_amount")
+  providerPriceId  String          @unique @map("provider_price_id")
+  active           Boolean         @default(true)
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  plan             BillingPlan     @relation(fields: [planCode], references: [code], onDelete: Cascade)
+
+  @@index([planCode, active])
+  @@map("billing_prices")
+}
+
+enum SubscriptionStatus {
+  /// Created at the provider; the customer hasn't paid or authorised yet
+  INCOMPLETE
+  ACTIVE
+  /// A payment failed; the provider is retrying
+  PAST_DUE
+  /// Retries ran out (Stripe unpaid, Razorpay halted)
+  UNPAID
+  CANCELED
+}
+
+// An organization's subscription: one at a time (a new one replaces an ended one)
+model Subscription {
+  id                     String             @id @default(uuid())
+  tenantId               String             @unique @map("tenant_id")
+  provider               BillingProvider
+  providerSubscriptionId String             @unique @map("provider_subscription_id")
+  providerCustomerId     String?            @map("provider_customer_id")
+  planCode               TenantPlan         @map("plan_code")
+  priceId                String             @map("price_id")
+  currency               String
+  interval               BillingInterval
+  seats                  Int
+  status                 SubscriptionStatus
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  /// When payments started failing (the grace period counts from here)
+  pastDueSince           DateTime?          @map("past_due_since")
+  /// Where the customer pays or authorises (Razorpay's subscription link)
+  checkoutUrl            String?            @map("checkout_url")
+  /// Why the seat count couldn't be changed at the provider, if it couldn't
+  seatSyncError          String?            @map("seat_sync_error")
+  seatsSyncedAt          DateTime?          @map("seats_synced_at")
+  createdById            String?            @map("created_by_id")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// Invoices from the providers, kept so organizations can see and download them
+model Invoice {
+  id                String          @id @default(uuid())
+  tenantId          String          @map("tenant_id")
+  provider          BillingProvider
+  providerInvoiceId String          @unique @map("provider_invoice_id")
+  number            String?
+  /// In the currency's smallest unit
+  amount            Int
+  currency          String
+  status            String
+  url               String?
+  periodStart       DateTime?       @map("period_start")
+  periodEnd         DateTime?       @map("period_end")
+  paidAt            DateTime?       @map("paid_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@map("invoices")
+}
+
+// Webhook deliveries from the providers, by their event id: each is handled once
+model BillingEvent {
+  id          String          @id @default(uuid())
+  provider    BillingProvider
+  eventId     String          @map("event_id")
+  type        String
+  tenantId    String?         @map("tenant_id")
+  receivedAt  DateTime        @default(now()) @map("received_at")
+  processedAt DateTime?       @map("processed_at")
+  error       String?
+
+  @@unique([provider, eventId])
+  @@index([receivedAt])
+  @@map("billing_events")
 }

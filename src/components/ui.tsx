@@ -148,6 +148,11 @@ const BADGE: Record<string, string> = {
   TRIAL_ENDED: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
   ERROR: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
   INACTIVE: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+  PAST_DUE: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
+  INCOMPLETE: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
+  UNPAID: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400',
+  CANCELED: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+  PAID: 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400',
   STOPPED: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
 };
 

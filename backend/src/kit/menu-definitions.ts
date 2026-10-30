@@ -25,6 +25,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       children: [
         { label: 'Tenants', path: '/platform/tenants', icon: 'Building2', permission: 'tenants:read' },
         { label: 'Applications', path: '/platform/applications', icon: 'Package', permission: 'applications:read' },
+        { label: 'Plans and billing', path: '/platform/billing', icon: 'CreditCard', permission: 'plans:read' },
       ],
     },
     {
@@ -79,6 +80,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       children: [
         { label: 'Entitlements', path: '/tenant-entitlements', icon: 'Boxes', permission: 'applications:manage' },
         { label: 'Data isolation', path: '/data-isolation', icon: 'Database', permission: 'database:manage' },
+        { label: 'Billing', path: '/billing', icon: 'CreditCard', permission: 'billing:read' },
         { label: 'Settings', path: '/settings', icon: 'Settings', permission: 'settings:read' },
       ],
     },

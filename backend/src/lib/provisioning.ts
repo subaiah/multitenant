@@ -287,6 +287,8 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
       });
     }
 
+    // Its subscription (cancelled at the provider) and billing records
+    await (await import('./billing/subscriptions.js')).endBillingFor(tenantId, 'now');
     // Its data exports, files and records
     await removeTenantExports(tenantId);
     await controlDb.$transaction([

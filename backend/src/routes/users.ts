@@ -16,6 +16,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
+import { assertWithinLimitFor } from '../lib/billing/plans.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
@@ -232,6 +233,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     if (existingUser) {
       throw new AppError('User with this email already exists', 409);
     }
+    // Each person is a seat: the plan's limit applies
+    await assertWithinLimitFor(request, 'users');
 
     // New users are invited: they set their own password from the emailed link
     const user = await request.db.user.create({
@@ -395,6 +398,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         requireCanManageUserType(actorType, data.userType);
       }
     }
+    // Reactivating someone takes a seat again
+    if (data.status === 'ACTIVE' && target.status === 'INACTIVE') await assertWithinLimitFor(request, 'users');
 
     const update = request.db.user.update({
       where: {

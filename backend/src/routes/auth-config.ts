@@ -5,6 +5,7 @@ import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { ssoRedirectUrisForTenant } from '../lib/sso.js';
+import { assertFeature } from '../lib/billing/plans.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
@@ -151,6 +152,8 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
 
     const data = createAuthProviderSchema.parse(request.body);
+    // Single sign-on is a plan feature
+    await assertFeature(request.tenant.id, 'allowSso');
 
     const config = await request.db.authConfig.findUnique({
       where: { tenantId: request.tenant.id },

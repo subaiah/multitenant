@@ -31,6 +31,8 @@ export const KIT_PERMISSIONS = [
   'support:manage', // approve, list and end support sessions
   'platform-audit:read', // the platform's audit log
   'platform-audit:manage', // verify, export and archive audit logs
+  'plans:read', // plans, prices and organizations' subscriptions
+  'plans:manage', // change plans' limits and prices
 
   // Shared: application registry (read) and tenant entitlements / deployed apps
   'applications:read',
@@ -68,6 +70,8 @@ export const KIT_PERMISSIONS = [
   'organizations:delete',
   'settings:read',
   'settings:manage',
+  'billing:read',
+  'billing:manage',
   'policies:manage',
   'access-requests:read',
   'access-requests:approve',
@@ -99,6 +103,7 @@ const KIT_RESOURCE_INFO: Record<string, { label: string; description: string }> 
   roles: { label: 'Roles', description: 'Roles and who holds them' },
   organizations: { label: 'Organizations', description: 'Organizations and units' },
   settings: { label: 'Settings', description: 'Tenant-wide settings' },
+  billing: { label: 'Billing', description: 'Plan, subscription, seats and invoices' },
   policies: { label: 'Policies', description: 'Access policies' },
   'access-requests': { label: 'Access requests', description: 'Requests for roles' },
   certifications: { label: 'Access reviews', description: 'Periodic reviews of who has access' },
@@ -140,6 +145,8 @@ const KIT_PERMISSION_INFO: Partial<Record<KitPermission, string>> = {
   'organizations:delete': 'Delete organizations and units',
   'settings:read': 'See settings',
   'settings:manage': 'Change settings',
+  'billing:read': 'See the plan, subscription and invoices',
+  'billing:manage': 'Subscribe, change plan and cancel',
   'policies:read': 'See access policies',
   'policies:manage': 'Create and change access policies',
   'access-requests:read': 'See access requests',
@@ -157,7 +164,7 @@ const KIT_USER_TYPE_PERMISSIONS: Record<UserType, string[]> = {
   TENANT_ADMIN: [
     'dashboard:view', 'tenant:*', 'applications:*', 'activity:read', 'audit:*', 'notifications:*', 'infrastructure:read',
     'database:*', 'auth:*', 'api:*', 'users:*', 'groups:*', 'roles:*', 'organizations:*', 'settings:*',
-    'policies:*', 'access-requests:*', 'certifications:*', 'delegations:*',
+    'policies:*', 'access-requests:*', 'certifications:*', 'delegations:*', 'billing:*',
   ],
   TENANT_MANAGER: [
     'dashboard:view', 'tenant:read', 'tenant:update', 'applications:*', 'activity:read', 'infrastructure:read', 'database:read',
@@ -184,7 +191,7 @@ export const USER_TYPE_PERMISSIONS: Record<UserType, string[]> = Object.fromEntr
 ) as Record<UserType, string[]>;
 
 /** Resources that exist only at platform level. */
-export const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support', 'platform-audit']);
+export const PLATFORM_RESOURCES = new Set(['platform', 'tenants', 'platform-users', 'platform-settings', 'app-registry', 'menus', 'support', 'platform-audit', 'plans']);
 
 /**
  * Can a tenant-scoped role (or group role, or delegation) grant this to a

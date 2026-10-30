@@ -21,6 +21,7 @@ import { tenantAdmins } from '../lib/tenant-lifecycle.js';
 import { signedInCodeRateLimit } from '../lib/rate-limits.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isTenantAdmin } from '../utils/authorization.js';
+import { endBillingFor } from '../lib/billing/subscriptions.js';
 
 export const closureRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/closure', {
@@ -63,6 +64,8 @@ export const closureRoutes: FastifyPluginAsync = async (fastify) => {
       where: { id: tenant.id },
       data: { status: 'SUSPENDED', statusBeforeClose: tenant.status, closedAt: now, closedBy, deleteAfter },
     });
+    // No more renewals; what's paid for runs to the end of its period
+    await endBillingFor(tenant.id, 'period_end');
     await audit(request, 'tenant.closed', {
       tenantId: tenant.id,
       resource: { type: 'tenant', id: tenant.id, label: tenant.slug },

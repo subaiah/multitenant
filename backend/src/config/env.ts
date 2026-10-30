@@ -144,6 +144,20 @@ const envSchema = z.object({
   // In-app notifications older than this are removed
   NOTIFICATION_RETENTION_DAYS: z.string().default('90').transform(Number),
 
+  // Billing (lib/billing/, docs/BILLING.md). Prices in INR are charged
+  // through Razorpay, every other currency through Stripe. Each provider is
+  // on when its keys are set.
+  RAZORPAY_KEY_ID: unsetIfEmpty(z.string().optional()),
+  RAZORPAY_KEY_SECRET: unsetIfEmpty(z.string().optional()),
+  RAZORPAY_WEBHOOK_SECRET: unsetIfEmpty(z.string().optional()),
+  RAZORPAY_API_URL: z.string().url().default('https://api.razorpay.com'),
+  STRIPE_SECRET_KEY: unsetIfEmpty(z.string().optional()),
+  STRIPE_WEBHOOK_SECRET: unsetIfEmpty(z.string().optional()),
+  STRIPE_API_URL: z.string().url().default('https://api.stripe.com'),
+  // Days an organization keeps working after its payments start failing,
+  // before it becomes read-only
+  BILLING_GRACE_DAYS: z.string().default('7').transform(Number).pipe(z.number().min(0)),
+
   // Background jobs (lib/jobs.ts): notifications, data exports, audit
   // archiving, usage snapshots, trials and closures, rate-limit cleanup. On by
   // default; turn off on API servers when a separate worker runs them
@@ -174,6 +188,12 @@ const envSchema = z.object({
   MAIL_FROM: z.string().default('Multitenant Platform <no-reply@localhost>'),
   MAIL_OUTBOX_FILE: z.string().optional(),
 }).superRefine((env, ctx) => {
+  for (const [provider, keys] of [['Razorpay', ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']], ['Stripe', ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']]] as const) {
+    const set = keys.filter((k) => env[k]);
+    if (set.length && set.length < keys.length) {
+      ctx.addIssue({ code: 'custom', path: [keys.find((k) => !env[k])!], message: `${provider} billing needs all of ${keys.join(', ')}` });
+    }
+  }
   if (env.EMAIL_TRANSPORT === 'smtp' && !env.SMTP_URL) {
     ctx.addIssue({ code: 'custom', path: ['SMTP_URL'], message: 'SMTP_URL is required when EMAIL_TRANSPORT=smtp' });
   }
@@ -334,6 +354,15 @@ export const config = {
   dnsServers: env.DNS_SERVERS ? env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean) : [],
   supportSelfApproval: env.SUPPORT_SELF_APPROVAL === 'true',
   notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,
+  billing: {
+    razorpay: env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET && env.RAZORPAY_WEBHOOK_SECRET
+      ? { keyId: env.RAZORPAY_KEY_ID, keySecret: env.RAZORPAY_KEY_SECRET, webhookSecret: env.RAZORPAY_WEBHOOK_SECRET, apiUrl: env.RAZORPAY_API_URL.replace(/\/+$/, '') }
+      : null,
+    stripe: env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET
+      ? { secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET, apiUrl: env.STRIPE_API_URL.replace(/\/+$/, '') }
+      : null,
+    graceDays: env.BILLING_GRACE_DAYS,
+  },
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,
   sentry: {
