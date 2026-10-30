@@ -53,4 +53,6 @@ enum AuditActorType {
   SYSTEM
   /// Not signed in (e.g. a failed sign-in)
   ANONYMOUS
+  /// An API key (lib/api-keys.ts)
+  API_KEY
 }

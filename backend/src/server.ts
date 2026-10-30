@@ -52,6 +52,8 @@ import { startJobs, stopJobs } from './lib/jobs.js';
 import { flushErrorReports } from './lib/error-reporting.js';
 import { clientErrorRoutes } from './routes/client-errors.js';
 import { billingRoutes } from './routes/billing.js';
+import { apiKeyRoutes } from './routes/api-keys.js';
+import { webhookRoutes } from './routes/webhooks.js';
 import { billingWebhookRoutes } from './routes/billing-webhooks.js';
 import { platformBillingRoutes } from './routes/platform-billing.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
@@ -270,6 +272,9 @@ async function registerRoutes() {
     await protectedRoutes.register(dataExportRoutes, { prefix: '/data-exports' });
     // The organization's plan, subscription and invoices
     await protectedRoutes.register(billingRoutes, { prefix: '/billing' });
+    // Other systems: API keys to call in, webhooks to be called
+    await protectedRoutes.register(apiKeyRoutes, { prefix: '/api-keys' });
+    await protectedRoutes.register(webhookRoutes, { prefix: '/webhooks' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
     if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });

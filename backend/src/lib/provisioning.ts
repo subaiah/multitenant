@@ -296,6 +296,7 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
       controlDb.signupRequest.deleteMany({ where: { tenantId } }),
       controlDb.tenantApplication.deleteMany({ where: { tenantId } }),
       controlDb.tenantUsage.deleteMany({ where: { tenantId } }),
+      controlDb.webhookWork.deleteMany({ where: { tenantId } }),
       controlDb.databaseConfig.deleteMany({ where: { tenantId } }),
       controlDb.tenant.delete({ where: { id: tenantId } }),
     ]);

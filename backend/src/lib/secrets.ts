@@ -83,6 +83,7 @@ export const SECRET_FIELDS = {
   clientSecret: { model: 'AuthProvider', table: 'auth_providers', column: 'client_secret' },
   totpSecret: { model: 'User', table: 'users', column: 'totp_secret' },
   platformTotpSecret: { model: 'PlatformUser', table: 'platform_users', column: 'totp_secret' },
+  signingSecret: { model: 'WebhookEndpoint', table: 'webhook_endpoints', column: 'signing_secret' },
 } as const;
 
 export type SecretField = keyof typeof SECRET_FIELDS;

@@ -477,6 +477,8 @@ enum AuditActorType {
   PLATFORM
   SYSTEM
   ANONYMOUS
+  /// An API key (lib/api-keys.ts)
+  API_KEY
 }
 
 // The latest entry of each audit chain ("platform" or a tenant id), kept
@@ -783,4 +785,14 @@ model BillingEvent {
   @@unique([provider, eventId])
   @@index([receivedAt])
   @@map("billing_events")
+}
+
+// Organizations with webhook deliveries waiting (lib/webhooks.ts), so the
+// sender doesn't have to look in every tenant's database
+model WebhookWork {
+  tenantId String   @id @map("tenant_id")
+  dueAt    DateTime @map("due_at")
+
+  @@index([dueAt])
+  @@map("webhook_work")
 }

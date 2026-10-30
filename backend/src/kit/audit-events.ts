@@ -134,6 +134,15 @@ export const KIT_AUDIT_EVENTS = {
   'tenant.invitation_not_sent': p("Tenant's first administrator's invitation email failed", 'tenant'),
   'platform.test_email_sent': p('Test email sent', 'config'),
 
+  // Other systems: API keys and webhooks (lib/api-keys.ts, lib/webhooks.ts)
+  'api_key.created': t('API key created', 'security'),
+  'api_key.revoked': t('API key revoked', 'security'),
+  'webhook.created': t('Webhook added', 'config'),
+  'webhook.updated': t('Webhook changed', 'config'),
+  'webhook.deleted': t('Webhook removed', 'config'),
+  'webhook.secret_rotated': t("Webhook's signing secret replaced", 'security'),
+  'webhook.disabled': t('Webhook turned off after failing', 'config'),
+
   // Billing (lib/billing/): the organization's own log, and plans in the platform's
   'billing.checkout_started': t('Checkout started', 'config'),
   'billing.subscribed': t('Subscription started', 'config'),

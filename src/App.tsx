@@ -26,6 +26,7 @@ const Infrastructure = lazy(() => import('./pages/Infrastructure'));
 const DataIsolation = lazy(() => import('./pages/DataIsolation'));
 const Authentication = lazy(() => import('./pages/Authentication'));
 const ApiManagement = lazy(() => import('./pages/ApiManagement'));
+const Developers = lazy(() => import('./pages/Developers'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Groups = lazy(() => import('./pages/Groups'));
 const RoleAssignments = lazy(() => import('./pages/RoleAssignments'));
@@ -200,6 +201,11 @@ export default function App() {
               <Route path="/authentication" element={
                 <PermissionGuard permission="auth:manage" redirectTo="/unauthorized">
                   <Authentication />
+                </PermissionGuard>
+              } />
+              <Route path="/developers" element={
+                <PermissionGuard permission="api:read" redirectTo="/unauthorized">
+                  <Developers />
                 </PermissionGuard>
               } />
               <Route path="/api" element={

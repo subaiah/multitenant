@@ -49,7 +49,11 @@ declare module 'fastify' {
 export async function loadPermissions(request: FastifyRequest): Promise<Set<string>> {
   if (!request.effectivePermissions) {
     const { userId, userType } = request.user;
-    if (request.supportSession) {
+    if (request.apiKey) {
+      // An API key: exactly its own permissions (fixed when it was made)
+      request.effectivePermissions = new Set(request.apiKey.permissions);
+      request.scopedGrants = [];
+    } else if (request.supportSession) {
       // Platform staff in a tenant: the session's tenant permissions, plus their
       // platform-only ones (a platform admin's '*' must not cover tenant data)
       const { permissions } = await getEnhancedUserPermissions(userId, undefined, userType);
@@ -85,7 +89,11 @@ export async function authorize(request: FastifyRequest, reply: FastifyReply) {
     request.log.error({ route: request.routeOptions.url, method: request.method }, 'Route has no permission declaration');
     return reply.status(403).send({ error: 'Forbidden', message: 'This route has no access policy' });
   }
-  if (required === AUTHENTICATED) return;
+  // "Any signed-in person" routes are about that person's own account: not for keys
+  if (required === AUTHENTICATED) {
+    if (request.apiKey) return reply.status(403).send({ error: 'Forbidden', code: 'NOT_FOR_API_KEYS', message: 'API keys cannot use this route: it is for people signed in to their own account' });
+    return;
+  }
 
   const anyOf = Array.isArray(required) ? required : [required];
   if (await hasPermission(request, ...anyOf)) return;
