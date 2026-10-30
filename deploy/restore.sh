@@ -9,21 +9,23 @@
 # then everything is started again. Encrypted backups need the private key
 # file made with age-keygen (docs/DEPLOYMENT.md, "Backups").
 set -eu
+# The key file, relative to where this was run from (before changing folder)
+key="${2:-}"
+if [ -n "$key" ]; then
+  [ -f "$key" ] || { echo "No such file: $key" >&2; exit 1; }
+  key="$(cd "$(dirname "$key")" && pwd)/$(basename "$key")"
+fi
 cd "$(dirname "$0")"
 
 if [ "${1:-}" = "list" ] || [ -z "${1:-}" ]; then
-  docker compose run --rm --no-deps backup restore.sh list
+  docker compose run --rm --no-deps -T backup restore.sh list
   [ -n "${1:-}" ] || echo "Usage: deploy/restore.sh <stamp> [age private key file]"
   exit 0
 fi
 
 stamp="$1"
-key="${2:-}"
 mount=""
-if [ -n "$key" ]; then
-  [ -f "$key" ] || { echo "No such file: $key" >&2; exit 1; }
-  mount="-v $(cd "$(dirname "$key")" && pwd)/$(basename "$key"):/run/age-identity:ro"
-fi
+[ -z "$key" ] || mount="-v $key:/run/age-identity:ro"
 
 printf 'This replaces ALL current data with the backup from %s. Type "restore" to go on: ' "$stamp"
 read -r answer
@@ -31,7 +33,7 @@ read -r answer
 
 docker compose stop web api worker 2>/dev/null || docker compose stop web api
 # shellcheck disable=SC2086
-if docker compose run --rm $mount backup restore.sh "$stamp"; then
+if docker compose run --rm -T $mount backup restore.sh "$stamp"; then
   docker compose up -d
   echo "Restored $stamp; everything is running again."
 else

@@ -219,12 +219,33 @@ jobs:
           cat smoke.txt
           if [ $s -ne 0 ]; then grep -vE '^\s*$|agent-proxy' smoke.txt | tail -20 | while IFS= read -r l; do echo "::error::$l"; done; fi
           exit $s
-      - name: Backup
+      - name: Backup (encrypted, test-restored)
         run: |
-          deploy/backup.sh "$PWD/backups"
-          ls -la backups
-          test "$(gunzip -c backups/db-*.sql.gz | grep -c 'CREATE DATABASE')" -ge 3
-          tar -tzf backups/audit-archive-*.tar.gz >/dev/null
+          # An encryption key, as an operator would make one
+          $COMPOSE run --rm --no-deps -T backup age-keygen > ci-key.txt
+          recipient="$(grep -o 'age1[a-z0-9]*' ci-key.txt)"
+          echo "BACKUP_AGE_RECIPIENT=$recipient" >> deploy/.env
+          $COMPOSE up -d backup
+          deploy/backup.sh 2>&1 | tee backup.log
+          grep -q "verify: restored OK" backup.log
+          ls -la deploy/backups
+          grep -q '"status":"ok"' deploy/backups/last-backup.json
+          grep -q '"encrypted":true' deploy/backups/last-backup.json
+          stamp="$(sed -n 's/.*"files":"\([^"]*\)".*/\1/p' deploy/backups/last-backup.json)"
+          echo "STAMP=$stamp" >> "$GITHUB_ENV"
+          test -s "deploy/backups/db-$stamp.sql.gz.age"
+          test -s "deploy/backups/audit-archive-$stamp.tar.gz.age"
+          # The scheduler is running and has its next run
+          $COMPOSE logs backup | grep -q "scheduled daily at"
+      - name: Restore it
+        run: |
+          deploy/restore.sh list
+          # Something made after the backup, which the restore takes away
+          $COMPOSE exec -T db psql -U postgres -d multitenant -c "CREATE TABLE after_backup (x int)"
+          echo restore | deploy/restore.sh "$STAMP" ci-key.txt
+          test "$($COMPOSE exec -T db psql -U postgres -d multitenant -Atc "SELECT to_regclass('after_backup') IS NULL")" = t
+          for i in $(seq 60); do curl -fs -o /dev/null http://localhost/api/health/ready && break; sleep 2; done
+          curl -fs http://localhost/api/health/ready
       - name: Audit logs verify
         run: $COMPOSE run --rm --no-deps api node dist/cli/audit.js verify
       - name: Logs
