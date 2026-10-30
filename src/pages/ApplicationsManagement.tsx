@@ -60,7 +60,7 @@ export default function ApplicationsManagement() {
 
   const fetchApplications = async () => {
     try {
-      const response = await apiGet<any>('/applications');
+      const response = await apiGet<{ applications: Application[] }>('/applications');
       setApplications(response.applications);
       if (response.applications.length > 0 && !selectedApp) {
         setSelectedApp(response.applications[0]);
@@ -74,7 +74,7 @@ export default function ApplicationsManagement() {
 
   const fetchPermissions = async (appId: string) => {
     try {
-      const response = await apiGet<any>(`/applications/${appId}/permissions`);
+      const response = await apiGet<{ permissions: Permission[] }>(`/applications/${appId}/permissions`);
       setPermissions(response.permissions);
     } catch (error) {
       console.error('Failed to fetch permissions:', error);

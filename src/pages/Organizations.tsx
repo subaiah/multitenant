@@ -59,7 +59,7 @@ export default function Organizations() {
 
   const fetchOrganizations = async () => {
     try {
-      const response = await apiGet<any>('/organizations');
+      const response = await apiGet<{ organizations: Organization[] }>('/organizations');
       setOrganizations(response.organizations);
       if (response.organizations.length > 0 && !selectedOrg) {
         setSelectedOrg(response.organizations[0]);
@@ -73,7 +73,7 @@ export default function Organizations() {
 
   const fetchOrgUnits = async (orgId: string) => {
     try {
-      const response = await apiGet<any>(`/org-units/organization/${orgId}`);
+      const response = await apiGet<{ units: OrgUnit[] }>(`/org-units/organization/${orgId}`);
       setOrgUnits(response.units);
     } catch (error) {
       console.error('Failed to fetch org units:', error);

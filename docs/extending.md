@@ -177,6 +177,22 @@ The `tenantMenu` entries go right after Dashboard in the tenant sidebar; the rel
 
 Add the page under `src/product/` in the frontend, and its route in `src/App.tsx` behind the same permission.
 
+Pages read from the API with `useApi<T>(path)` (`src/hooks/useApi.ts`), and give the answer a type:
+
+```tsx
+const invoices = useApi<{ invoices: Invoice[] }>('/invoices');
+// <DataView {...invoices}>{(d) => ...}</DataView> shows loading and errors
+```
+
+Reads are cached with [TanStack Query](https://tanstack.com/query) (`src/lib/query.ts`):
+- Coming back to a page shows what it had at once, and checks the server again.
+- Pages asking for the same path share one request.
+- The cache is emptied when someone signs in or out.
+
+After a change, call the hook's `reload()`, or `invalidateApi('/invoices')` to refresh every cached read under that path.
+
+The frontend has no explicit `any`; `npm run typecheck` refuses one. The API helpers return `unknown` unless you name the type.
+
 ## What the kit calls, and when
 
 | Hook | Called |
