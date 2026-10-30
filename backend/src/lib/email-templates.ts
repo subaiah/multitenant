@@ -164,3 +164,48 @@ export function testEmail(to: string, from: string): Mail {
     html: layout('Email delivery works', `<p>This is a test email from ${escape(from)}. If you can read it, invitations, password resets and notifications will reach people too.</p>`),
   };
 }
+
+/** To the NEW address: confirm it to finish changing the account's email. */
+export function emailChangeConfirmEmail(to: string, link: string, account: string, hours: number): Mail {
+  return {
+    to,
+    subject: `Confirm your new email address for ${account}`,
+    text: `Someone asked to use ${to} as the sign-in email for an account in ${account}. If it was you, confirm it within ${hours} hours: ${link}\n\nIf it wasn't you, ignore this email: nothing changes.`,
+    html: layout('Confirm your new email address', `<p>Someone asked to use <strong>${escape(to)}</strong> as the sign-in email for an account in <strong>${escape(account)}</strong>. If it was you, confirm it within ${hours} hours.</p>
+${button(link, 'Confirm this address')}
+<p style="color:#475569">If it wasn't you, ignore this email: nothing changes.</p>`),
+  };
+}
+
+/** To the OLD address when a change is asked for: a heads-up, in case it wasn't them. */
+export function emailChangeRequestedEmail(to: string, newEmail: string, account: string): Mail {
+  return {
+    to,
+    subject: `Your ${account} sign-in email is about to change`,
+    text: `A change of your ${account} sign-in email to ${newEmail} was asked for. It happens when the new address is confirmed.\n\nIf this wasn't you or your administrator, change your password now and tell your administrator.`,
+    html: layout('Your sign-in email is about to change', `<p>A change of your <strong>${escape(account)}</strong> sign-in email to <strong>${escape(newEmail)}</strong> was asked for. It happens when the new address is confirmed.</p>
+<p>If this wasn't you or your administrator, change your password now and tell your administrator.</p>`),
+  };
+}
+
+/** To the OLD address once the change is done. */
+export function emailChangedEmail(to: string, newEmail: string, account: string): Mail {
+  return {
+    to,
+    subject: `Your ${account} sign-in email was changed`,
+    text: `Your ${account} sign-in email is now ${newEmail}, and you were signed out everywhere. If this wasn't you, contact your administrator straight away.`,
+    html: layout('Your sign-in email was changed', `<p>Your <strong>${escape(account)}</strong> sign-in email is now <strong>${escape(newEmail)}</strong>, and you were signed out everywhere.</p>
+<p>If this wasn't you, contact your administrator straight away.</p>`),
+  };
+}
+
+/** After someone changes their own password. */
+export function passwordChangedEmail(to: string, account: string): Mail {
+  return {
+    to,
+    subject: `Your ${account} password was changed`,
+    text: `The password for ${to} in ${account} was just changed, and other sessions were signed out. If this wasn't you, reset your password and tell your administrator.`,
+    html: layout('Your password was changed', `<p>The password for <strong>${escape(to)}</strong> in <strong>${escape(account)}</strong> was just changed, and your other sessions were signed out.</p>
+<p>If this wasn't you, reset your password and tell your administrator.</p>`),
+  };
+}

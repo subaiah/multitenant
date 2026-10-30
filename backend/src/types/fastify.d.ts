@@ -7,6 +7,8 @@ export interface AuthUser {
   userId: string;
   tenantId?: string;
   userType: UserType;
+  /** Session id (the refresh-token family) on browser sessions */
+  sid?: string;
 }
 
 declare module '@fastify/jwt' {

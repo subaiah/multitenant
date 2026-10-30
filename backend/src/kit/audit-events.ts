@@ -26,6 +26,10 @@ export const KIT_AUDIT_EVENTS = {
   'auth.mfa_failed': t('Two-factor code rejected', 'security'),
   'auth.signed_out_everywhere': t('Signed out everywhere', 'security'),
   'auth.password_reset': t('Password reset', 'security'),
+  'account.password_changed': t('Password changed', 'security'),
+  'account.email_change_requested': t('Email change requested', 'account'),
+  'account.email_changed': t('Email address changed', 'security'),
+  'user.email_change_requested': t("A user's email change requested by an administrator", 'access'),
   'auth.invitation_accepted': t('Invitation accepted', 'account'),
   'platform.auth.signed_in': p('Platform user signed in', 'security'),
   'platform.auth.sign_in_failed': p('Platform sign-in failed', 'security'),
@@ -37,6 +41,9 @@ export const KIT_AUDIT_EVENTS = {
   'account.mfa_disabled': t('Two-factor turned off', 'account'),
   'account.recovery_codes_regenerated': t('New recovery codes made', 'account'),
   'platform.account.mfa_enabled': p('Platform user turned on two-factor', 'account'),
+  'platform.account.password_changed': p('Platform user changed their password', 'account'),
+  'platform.account.email_change_requested': p('Platform user asked to change their email', 'account'),
+  'platform.account.email_changed': p('Platform user changed their email', 'account'),
   'platform.account.mfa_disabled': p('Platform user turned off two-factor', 'account'),
   'platform.account.recovery_codes_regenerated': p('Platform user made new recovery codes', 'account'),
 
@@ -124,6 +131,7 @@ export const KIT_AUDIT_EVENTS = {
   'tenant.provisioning_retried': p('Tenant setup retried', 'tenant'),
   'tenant.credentials_rotated': p('Tenant database credentials rotated', 'tenant'),
   'tenant.invitation_resent': p("Tenant's first administrator invited again", 'tenant'),
+  'tenant.invitation_not_sent': p("Tenant's first administrator's invitation email failed", 'tenant'),
   'platform.test_email_sent': p('Test email sent', 'config'),
   'tenant.migrations_run': p('Tenant migrations run', 'tenant'),
 

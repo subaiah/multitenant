@@ -39,6 +39,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const SignUp = lazy(() => import('./pages/SignUp'));
 const SignupVerify = lazy(() => import('./pages/SignupVerify'));
+const ConfirmEmail = lazy(() => import('./pages/ConfirmEmail'));
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -92,6 +93,7 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/signup/verify" element={<SignupVerify />} />
+            <Route path="/confirm-email" element={<ConfirmEmail />} />
             <Route path="/:tenantSlug/forgot-password" element={<ForgotPassword />} />
             
             {/* Platform Portal - Protected by PLATFORM_* user types */}

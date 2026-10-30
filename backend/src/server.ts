@@ -23,6 +23,7 @@ import { activityRoutes } from './routes/activities.js';
 import { bffRoutes } from './routes/bff.js';
 import { bffAuthRoutes } from './routes/bff-auth.js';
 import { twoFactorRoutes } from './routes/two-factor.js';
+import { myAccountRoutes } from './routes/my-account.js';
 import { accountRoutes } from './routes/account.js';
 import { signupRoutes, siteRoutes, tlsAskRoutes } from './routes/signup.js';
 import { customDomainRoutes } from './routes/custom-domain.js';
@@ -285,6 +286,7 @@ async function registerRoutes() {
 
     // Managing your own two-factor sign-in
     await protectedRoutes.register(platformScoped(twoFactorRoutes), { prefix: '/bff/two-factor' });
+    await protectedRoutes.register(platformScoped(myAccountRoutes), { prefix: '/bff/my-account' });
 
     // BFF routes (Backend for Frontend)
     await protectedRoutes.register(bffRoutes, { prefix: '/bff' });
