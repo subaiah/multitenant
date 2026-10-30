@@ -300,6 +300,20 @@ export const KIT_NOTIFICATION_TYPES: Record<string, NotificationType> = {
     audience: () => ({ permission: 'tenants:manage' }),
     render: (e) => ({ title: `${d(e, 'organization') || e.resource.label} signed up`, body: `${e.actor.email ?? 'Someone'} created it; it's on a trial.`, link: '/platform/tenants' }),
   },
+  'tenant.invitation_not_sent': {
+    label: "First administrator's invitation not sent",
+    description: 'A new tenant is ready, but the email inviting its first administrator could not be sent',
+    category: 'tenants',
+    scope: 'platform',
+    // In the app only: email is what's broken
+    defaults: { inApp: true, email: false },
+    audience: () => ({ permission: 'tenants:manage' }),
+    render: (e) => ({
+      title: `${d(e, 'name') || e.resource.label}: invitation not sent`,
+      body: `The email to ${d(e, 'to') ?? 'its first administrator'} failed: ${d(e, 'error') ?? 'unknown error'}. Resend it, or share its link, from the tenant's panel.`,
+      link: '/platform/tenants',
+    }),
+  },
   'tenant.trial_ended': {
     label: 'Trial ended',
     description: 'An organization’s trial ended; it’s read-only until its status changes',

@@ -3,6 +3,7 @@ import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiPost } from '../lib/api-client';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
+import { SignInDetails } from '../components/SignInDetails';
 import { PlatformRolesCard, UserRolesDialog, type RoleCatalog } from '../components/PlatformRoles';
 import { useState } from 'react';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatRelative, humanize } from '../components/ui';
@@ -40,8 +41,12 @@ export default function PlatformUsers() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader title="Platform Users" description="People who operate the platform across all tenants" />
-      <Card title="Your two-factor sign-in">
-        <TwoFactorSettings />
+      <Card title="Your sign-in">
+        <SignInDetails />
+        <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-white mb-3">Two-factor sign-in</h3>
+          <TwoFactorSettings />
+        </div>
       </Card>
       <DataView {...users}>
         {({ users: list }) =>

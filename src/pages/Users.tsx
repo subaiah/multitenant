@@ -38,6 +38,7 @@ export default function Users() {
   const status = params.get('status') ?? '';
   const page = Number(params.get('page') ?? '1');
   const [inviting, setInviting] = useState(false);
+  const [changingEmail, setChangingEmail] = useState<{ id: string; email: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // An invitation whose email didn't go out: its link, to pass on
   const [unsent, setUnsent] = useState<{ email: string; outcome: InviteOutcome } | null>(null);
@@ -165,6 +166,7 @@ export default function Users() {
                               <ActionsMenu
                                 label={`More actions for ${u.email}`}
                                 actions={[
+                                  ...(canUpdate && manageable ? [{ label: 'Change email', onSelect: () => setChangingEmail({ id: u.id, email: u.email }) }] : []),
                                   ...(u.status === 'PENDING' && canCreate && manageable
                                     ? [{ label: 'Resend invitation', onSelect: () => act(async () => {
                                         const r = await apiPost<InviteOutcome>(`/users/${u.id}/resend-invite`, {});
@@ -217,6 +219,23 @@ export default function Users() {
           )
         }
       </DataView>
+
+      {changingEmail && (
+        <ChangeEmailDialog
+          user={changingEmail}
+          onClose={() => setChangingEmail(null)}
+          onChanged={async (r) => {
+            const was = changingEmail.email;
+            setChangingEmail(null);
+            setUnsent(null);
+            setError(null);
+            if (r.pendingEmail) setNotice(`We sent a confirmation link to ${r.pendingEmail.newEmail}. ${was} keeps working until it's opened.`);
+            else if (r.invitationSent === false) { setNotice(null); setUnsent({ email: r.email, outcome: r }); }
+            else setNotice(`The invitation now goes to ${r.email}.`);
+            await list.reload();
+          }}
+        />
+      )}
 
       {inviting && (
         <InviteDialog
@@ -276,6 +295,44 @@ function InviteDialog({ types, onClose, onInvited }: { types: readonly string[];
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
           <button type="submit" disabled={saving} className={primaryButtonClass}>{saving ? 'Sending…' : 'Send invitation'}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+type EmailChangeResult = InviteOutcome & { email: string; pendingEmail: { newEmail: string } | null };
+
+/** Correct someone's address: an invitee is re-invited there; anyone else confirms it from the new address */
+function ChangeEmailDialog({ user, onClose, onChanged }: { user: { id: string; email: string }; onClose: () => void; onChanged: (r: EmailChangeResult) => Promise<void> }) {
+  const [email, setEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await onChanged(await apiPost<EmailChangeResult>(`/users/${user.id}/email`, { email: email.trim() }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the email');
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <form role="dialog" aria-label="Change email" onSubmit={submit} onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md bg-white dark:bg-slate-800 rounded-lg p-6 space-y-4 shadow-xl">
+        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Change email</h3>
+        <p className="text-sm text-slate-600 dark:text-slate-300">For <strong>{user.email}</strong>. The new address gets a link to confirm the change, and the current one is told. Until it's confirmed, they keep signing in as now.</p>
+        <label className="block text-sm">
+          <span className="text-slate-600 dark:text-slate-300">New email address</span>
+          <input type="email" required autoFocus className={`${inputClass} mt-1`} value={email} onChange={(e) => setEmail(e.target.value)} />
+        </label>
+        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={secondaryButtonClass} onClick={onClose}>Cancel</button>
+          <button type="submit" disabled={saving || !email.trim()} className={primaryButtonClass}>{saving ? 'Sending…' : 'Send confirmation'}</button>
         </div>
       </form>
     </div>

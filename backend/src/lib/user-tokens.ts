@@ -4,7 +4,8 @@ import { dbForTenant } from './tenant-db.js';
 import { PLATFORM_SLUG } from './platform.js';
 
 /**
- * Single-use tokens sent by email (invitations, password resets).
+ * Single-use tokens sent by email (invitations, password resets, confirming
+ * a new email address).
  *
  * The raw token only ever exists in the emailed link; the database stores a
  * SHA-256 hash, so a database leak doesn't expose usable links. The token
@@ -16,15 +17,18 @@ const hash = (token: string) => crypto.createHash('sha256').update(token).digest
 
 export const INVITE_TTL_DAYS = 7;
 export const RESET_TTL_MINUTES = 60;
+export const EMAIL_CHANGE_TTL_HOURS = 24;
 
-export type UserTokenType = 'INVITE' | 'PASSWORD_RESET';
+export type UserTokenType = 'INVITE' | 'PASSWORD_RESET' | 'EMAIL_CHANGE';
 export type TokenOwner = { tenantId: string; tenantSlug: string } | 'platform';
 
 /** Issue a new token, invalidating any earlier unused token of the same type for this user. */
-export async function issueUserToken(owner: TokenOwner, userId: string, type: UserTokenType, ttlMs: number, createdById?: string): Promise<string> {
+export async function issueUserToken(
+  owner: TokenOwner, userId: string, type: UserTokenType, ttlMs: number, createdById?: string, newEmail?: string,
+): Promise<string> {
   const prefix = owner === 'platform' ? PLATFORM_SLUG : owner.tenantSlug;
   const token = `${prefix}.${crypto.randomBytes(32).toString('base64url')}`;
-  const record = { userId, type, tokenHash: hash(token), expiresAt: new Date(Date.now() + ttlMs), createdById };
+  const record = { userId, type, tokenHash: hash(token), expiresAt: new Date(Date.now() + ttlMs), createdById, newEmail: newEmail ?? null };
   if (owner === 'platform') {
     await controlDb.$transaction([
       controlDb.platformUserToken.updateMany({ where: { userId, type, usedAt: null }, data: { usedAt: new Date() } }),
@@ -46,6 +50,8 @@ export interface ValidUserToken {
   /** null for platform users */
   tenant: { id: string; name: string; slug: string; passwordPolicy: string } | null;
   user: { email: string; name: string | null; status: string };
+  /** EMAIL_CHANGE: the address being confirmed */
+  newEmail: string | null;
 }
 
 /** Look up a valid (unused, unexpired) token without consuming it. */
@@ -58,7 +64,7 @@ export async function findValidUserToken(token: string, type: UserTokenType): Pr
 
   if (slug === PLATFORM_SLUG) {
     const t = await controlDb.platformUserToken.findFirst({ where, include: { user: { select: userSelect } } });
-    return t ? { id: t.id, userId: t.userId, tenant: null, user: t.user } : null;
+    return t ? { id: t.id, userId: t.userId, tenant: null, user: t.user, newEmail: t.newEmail } : null;
   }
 
   const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, name: true, slug: true, status: true, provisioningStatus: true } });
@@ -72,7 +78,25 @@ export async function findValidUserToken(token: string, type: UserTokenType): Pr
     userId: t.userId,
     tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug, passwordPolicy: authConfig?.passwordPolicy ?? 'STANDARD' },
     user: t.user,
+    newEmail: t.newEmail,
   };
+}
+
+/** A pending email change for this user, if any (unused and unexpired) */
+export async function pendingEmailChange(owner: TokenOwner, userId: string): Promise<{ newEmail: string; expiresAt: Date } | null> {
+  const where = { userId, type: 'EMAIL_CHANGE' as const, usedAt: null, expiresAt: { gt: new Date() } };
+  const select = { newEmail: true, expiresAt: true } as const;
+  const t = owner === 'platform'
+    ? await controlDb.platformUserToken.findFirst({ where, select, orderBy: { createdAt: 'desc' } })
+    : await (await dbForTenant(owner.tenantId)).userToken.findFirst({ where: { ...where, tenantId: owner.tenantId }, select, orderBy: { createdAt: 'desc' } });
+  return t?.newEmail ? { newEmail: t.newEmail, expiresAt: t.expiresAt } : null;
+}
+
+/** Withdraw a user's unused tokens of a type (an email change they cancelled) */
+export async function cancelUserTokens(owner: TokenOwner, userId: string, type: UserTokenType): Promise<void> {
+  const data = { usedAt: new Date() };
+  if (owner === 'platform') await controlDb.platformUserToken.updateMany({ where: { userId, type, usedAt: null }, data });
+  else await (await dbForTenant(owner.tenantId)).userToken.updateMany({ where: { tenantId: owner.tenantId, userId, type, usedAt: null }, data });
 }
 
 /** Mark a token used. Returns false if it was already used (e.g. a concurrent request won). */

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound, Bell } from 'lucide-react';
 import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
+import { SignInDetails } from '../components/SignInDetails';
 
 interface UserInfo {
   id: string;
@@ -190,16 +191,7 @@ export default function Profile() {
                   placeholder="Enter your full name"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Email Address
-                </label>
-                <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg">
-                  <Mail size={18} className="text-slate-400" />
-                  <span className="text-slate-700 dark:text-slate-200">{user.email}</span>
-                  <span className="ml-auto text-xs text-slate-400">Cannot be changed</span>
-                </div>
-              </div>
+
             </div>
           </div>
 
@@ -233,6 +225,15 @@ export default function Profile() {
                 </p>
               </div>
             </div>
+          </div>
+
+          {/* Email and password */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <Mail size={20} className="text-blue-500" />
+              Email and password
+            </h3>
+            <SignInDetails />
           </div>
 
           {/* Two-factor sign-in */}

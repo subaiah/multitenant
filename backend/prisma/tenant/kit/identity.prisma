@@ -84,6 +84,8 @@ model UserToken {
   expiresAt   DateTime      @map("expires_at")
   usedAt      DateTime?     @map("used_at")
   createdById String?       @map("created_by_id")
+  /// EMAIL_CHANGE: the address being confirmed
+  newEmail    String?       @map("new_email")
   createdAt   DateTime      @default(now()) @map("created_at")
 
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -95,6 +97,8 @@ model UserToken {
 enum UserTokenType {
   INVITE
   PASSWORD_RESET
+  // A new email address waiting for its owner to confirm it (new_email)
+  EMAIL_CHANGE
 }
 
 model OtpCode {

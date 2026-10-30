@@ -86,6 +86,22 @@ Rules:
 Self-service endpoints (signed in): `GET /bff/two-factor`, `POST /bff/two-factor/enroll/start`,
 `POST /bff/two-factor/enroll/confirm`, `POST /bff/two-factor/recovery-codes`, `POST /bff/two-factor/disable`.
 
+## Changing your password or email
+
+Everyone, tenant users and platform staff alike, changes their own sign-in details on their profile (Profile, or Platform users → Your sign-in). The API is `/bff/my-account`. Both changes need the current password.
+
+- **Password.** It must meet the organization's password policy (STRONG for platform staff). Your other sessions are signed out; the current one goes on. The account's address is emailed about the change.
+- **Email.** A link goes to the **new** address, valid for 24 hours. The current address gets a heads-up that a change was asked for. Nothing changes until the link is opened and confirmed with a click (`/confirm-email`), so mail scanners that open links don't trigger it. Then:
+  - the account signs in with the new address, and every session ends;
+  - the old address is told the change happened;
+  - it's recorded in the audit log.
+
+  A pending change can be cancelled, and asking again replaces the earlier link.
+- **Administrators** correct someone else's address from the Users page (`POST /users/:id/email`, `users:update`, for user types they can manage):
+  - for someone who hasn't accepted their invitation yet, the address simply changes and the invitation is sent again to it (the old link stops working);
+  - for anyone else, the same confirmation goes to the new address.
+- **Accounts without a password** (single sign-on or email codes only) can't change their own email. An administrator does it for them.
+
 ## Sessions
 
 Every session has two limits, checked by the server:

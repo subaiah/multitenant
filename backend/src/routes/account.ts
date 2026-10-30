@@ -9,7 +9,7 @@ import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
 import { sendMail } from '../lib/mailer.js';
 import { appOriginForTenant, assertSignInHost } from '../lib/domains.js';
-import { passwordResetEmail } from '../lib/email-templates.js';
+import { emailChangedEmail, passwordResetEmail } from '../lib/email-templates.js';
 import { RESET_TTL_MINUTES, consumeUserToken, findValidUserToken, issueUserToken, type ValidUserToken } from '../lib/user-tokens.js';
 import { otpRequestRateLimit } from '../lib/rate-limits.js';
 import { PLATFORM_SLUG, isPlatformSlug } from '../lib/platform.js';
@@ -160,5 +160,61 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
       ]);
     }
     return { message: 'Your password has been changed. Sign in with your new password.', tenantSlug: slugFor(reset), email: reset.user.email };
+  });
+
+  // Confirming a new email address (the link sent to it; routes/my-account.ts
+  // and the Users page start the change)
+  fastify.get('/email/confirm/:token', {
+    schema: { tags: ['account'], summary: 'Check an email confirmation link', params: { type: 'object', required: ['token'], properties: { token: { type: 'string' } } } },
+  }, async (request) => {
+    const { token } = request.params as { token: string };
+    const change = await findValidUserToken(token, 'EMAIL_CHANGE');
+    if (!change?.newEmail) throw new AppError('This link is invalid or has expired. Ask for the change again.', 404);
+    return { email: change.user.email, newEmail: change.newEmail, organization: change.tenant?.name ?? 'Platform Administration' };
+  });
+
+  fastify.post('/email/confirm', {
+    schema: {
+      tags: ['account'],
+      summary: 'Confirm a new email address (signs the account out everywhere)',
+      body: { type: 'object', required: ['token'], properties: { token: { type: 'string' } } },
+    },
+  }, async (request) => {
+    const { token } = z.object({ token: z.string().min(10) }).parse(request.body);
+    const change = await findValidUserToken(token, 'EMAIL_CHANGE');
+    if (!change?.newEmail) throw new AppError('This link is invalid or has expired. Ask for the change again.', 404);
+    const oldEmail = change.user.email;
+    const newEmail = change.newEmail;
+    // Someone may have taken the address since the link was sent
+    const taken = change.tenant
+      ? await (await dbForTenant(change.tenant.id)).user.findFirst({ where: { tenantId: change.tenant.id, email: newEmail, NOT: { id: change.userId } }, select: { id: true } })
+      : await controlDb.platformUser.findFirst({ where: { email: newEmail, NOT: { id: change.userId } }, select: { id: true } });
+    if (taken) throw new AppError('Another account now uses that email address.', 409, true, 'EMAIL_TAKEN');
+    if (!(await consumeUserToken(change))) throw new AppError('This link has already been used.', 409);
+
+    // The new address signs in from now on; every session ends
+    if (change.tenant) {
+      const db = await dbForTenant(change.tenant.id);
+      await db.$transaction([
+        db.user.update({ where: { id: change.userId }, data: { email: newEmail } }),
+        ...endAllSessions(db, change.userId),
+      ]);
+      await logActivity({ tenantId: change.tenant.id, userId: change.userId, action: 'changed email', target: `${oldEmail} to ${newEmail}`, type: 'AUTH' });
+      await audit(request, 'account.email_changed', { resource: { type: 'user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } }, {
+        actor: { type: 'USER', id: change.userId, email: newEmail },
+        tenantId: change.tenant.id,
+      });
+    } else {
+      await controlDb.$transaction([
+        controlDb.platformUser.update({ where: { id: change.userId }, data: { email: newEmail } }),
+        ...endAllPlatformSessions(change.userId),
+      ]);
+      await audit(request, 'platform.account.email_changed', { resource: { type: 'platform_user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } }, {
+        actor: { type: 'PLATFORM', id: change.userId, email: newEmail },
+        tenantId: null,
+      });
+    }
+    await sendMail(emailChangedEmail(oldEmail, newEmail, change.tenant?.name ?? 'Platform Administration')).catch(() => {});
+    return { message: 'Your email address is changed. Sign in with the new one.', tenantSlug: slugFor(change), email: newEmail };
   });
 };

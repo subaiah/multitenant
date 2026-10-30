@@ -53,6 +53,14 @@ test("a tenant is set up even when its first administrator's invitation can't be
   assert.match(shown.json.adminInviteError, /smtp\.example\.invalid/);
   assert.ok(!JSON.stringify(shown.json).includes('secret-pw'), 'never the SMTP password');
 
+  // Platform staff hear about it in the app
+  let note: { type: string; title: string } | undefined;
+  for (let i = 0; i < 40 && !note; i++) {
+    note = ((await api('GET', '/notifications', { cookie })).json.data as { type: string; title: string }[]).find((n) => n.type === 'tenant.invitation_not_sent' && n.title.startsWith('Mail Fail Co'));
+    if (!note) await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.ok(note, 'an in-app notification');
+
   // Resent while email still fails: the link, to share another way
   const again = await broken.api('POST', `/tenants/${t.id}/resend-invite`, { cookie });
   assert.equal(again.status, 200, JSON.stringify(again.json));
