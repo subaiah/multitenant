@@ -157,7 +157,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Get user by ID
   fastify.get('/:id', {
-    config: { permission: AUTHENTICATED },
+    // Your own record, or anyone's with users:read (API keys: always the latter)
+    config: { permission: AUTHENTICATED, allowApiKeys: true },
     schema: {
       tags: ['users'],
       summary: 'Get user by ID',
@@ -349,9 +350,9 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     return { mfaEnabled: false };
   });
 
-  // Update user
+  // Update user: your own profile, or anyone's with users:update (API keys: always the latter)
   fastify.patch('/:id', {
-    config: { permission: AUTHENTICATED },
+    config: { permission: AUTHENTICATED, allowApiKeys: true },
     schema: {
       tags: ['users'],
       summary: 'Update user',

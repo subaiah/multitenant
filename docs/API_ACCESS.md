@@ -15,7 +15,7 @@ Code: `backend/src/lib/api-keys.ts`, `backend/src/lib/webhooks.ts`, `routes/api-
 ## API keys
 
 ```
-curl -H "Authorization: Bearer mtk_…" https://<your domain>/api/users
+curl -H "Authorization: Bearer mtk_…" https://<your domain>/api/v1/users
 ```
 
 `X-API-Key: mtk_…` works too. A key:
@@ -43,7 +43,7 @@ The organization's own state still applies: an ended trial or overdue payments m
 
 **Rate limits:** the per-address flood limit (`RATE_LIMIT_MAX` per `RATE_LIMIT_TIME_WINDOW`) applies to keys as to anyone. A system making many calls from one address should stay under it, or the limit should be raised.
 
-**What can be called:** the interactive reference at `/api/docs` lists every route, with the permission each needs. In production it's off unless `API_DOCS=true`.
+**What can be called:** [API v1](API_V1.md) is the contract for other systems, documented at `/api/v1/openapi.json`, with a typed TypeScript client in `clients/typescript`. A key can also call other routes its permissions allow, but only v1's are promised to stay compatible.
 
 ## Webhooks
 

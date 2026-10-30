@@ -12,7 +12,7 @@ import { API_URL, apiDelete, apiGet, apiPatch, apiPost } from '../lib/api-client
 import { Dialog, Field } from '../components/Dialog';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, formatDateTime, formatRelative, inputClass, primaryButtonClass, secondaryButtonClass, selectClass } from '../components/ui';
 
-const apiBase = () => new URL(API_URL, window.location.origin).toString().replace(/\/$/, '');
+const apiBase = () => `${new URL(API_URL, window.location.origin).toString().replace(/\/$/, '')}/v1`;
 
 function CopyBox({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -138,6 +138,7 @@ function KeysTab() {
       <p className="text-xs text-slate-500">
         Send <code className="font-mono">Authorization: Bearer mtk_…</code> (or <code className="font-mono">X-API-Key</code>) to {apiBase()}. Keys can call any route their permissions allow,
         except the ones for a signed-in person's own account. They can't make keys, change webhooks or pay.
+        The routes promised to stay compatible, with every parameter and answer, are in <a className="text-blue-600 hover:underline" href={`${apiBase()}/openapi.json`} target="_blank" rel="noreferrer">the API v1 document</a>.
       </p>
       {creating && <NewKeyDialog onClose={() => setCreating(false)} onMade={async (m) => { setCreating(false); setMade(m); await keys.reload(); }} />}
     </div>

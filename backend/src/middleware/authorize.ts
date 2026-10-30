@@ -35,6 +35,8 @@ declare module 'fastify' {
      * so the route check also lets through someone who holds it in some scope
      */
     scoped?: boolean;
+    /** AUTHENTICATED routes only: API keys may use it too (the handler checks permissions for anything not the caller's own) */
+    allowApiKeys?: boolean;
     /** Allowed in an organization whose trial has ended (read-only otherwise; lib/tenant-lifecycle.ts) */
     allowWhenTrialEnded?: boolean;
   }
@@ -91,7 +93,7 @@ export async function authorize(request: FastifyRequest, reply: FastifyReply) {
   }
   // "Any signed-in person" routes are about that person's own account: not for keys
   if (required === AUTHENTICATED) {
-    if (request.apiKey) return reply.status(403).send({ error: 'Forbidden', code: 'NOT_FOR_API_KEYS', message: 'API keys cannot use this route: it is for people signed in to their own account' });
+    if (request.apiKey && !request.routeOptions.config.allowApiKeys) return reply.status(403).send({ error: 'Forbidden', code: 'NOT_FOR_API_KEYS', message: 'API keys cannot use this route: it is for people signed in to their own account' });
     return;
   }
 
