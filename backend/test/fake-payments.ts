@@ -36,9 +36,11 @@ export interface FakePayments {
   };
 }
 
-export async function startFakePayments(): Promise<FakePayments> {
+export async function startFakePayments(port = 0): Promise<FakePayments> {
   let n = 0;
-  const id = (prefix: string) => `${prefix}_${(++n).toString().padStart(6, '0')}`;
+  // Unique across runs, as the providers' own ids are
+  const run = Math.random().toString(36).slice(2, 8);
+  const id = (prefix: string) => `${prefix}_${run}${(++n).toString().padStart(4, '0')}`;
   const calls: FakePayments['calls'] = [];
   const rz = { plans: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[] };
   const st = { prices: new Map<string, Any>(), sessions: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[] };
@@ -60,6 +62,26 @@ export async function startFakePayments(): Promise<FakePayments> {
     });
   };
 
+  function completeStripe(sessionId: string) {
+    const s = st.sessions.get(sessionId)!;
+    const sub = {
+      id: id('sub'), object: 'subscription', status: 'active', customer: s.customer ?? id('cus'), cancel_at_period_end: false, cancel_at: null,
+      metadata: { tenantId: s.tenantId },
+      // Billing periods on the item, as in 2025-03-31.basil and later
+      items: { data: [{ id: id('si'), price: { id: s.price }, quantity: s.quantity, current_period_end: now() + 30 * 86400 }] },
+    };
+    st.subs.set(sub.id, sub);
+    s.subscription = sub.id;
+    stInvoice(sub);
+    return sub;
+  }
+  function authorizeRazorpay(subId: string, method: 'card' | 'upi' = 'card') {
+    const sub = rz.subs.get(subId)!;
+    Object.assign(sub, { status: 'active', method, customer_id: sub.customer_id ?? id('cust'), current_start: now(), current_end: now() + 30 * 86400 });
+    rzInvoice(sub);
+    return sub;
+  }
+
   const server: Server = createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -74,6 +96,24 @@ export async function startFakePayments(): Promise<FakePayments> {
         else body = Object.fromEntries(new URLSearchParams(raw));
       }
       calls.push({ method: req.method ?? '', path: `${path}${url.search}`, body });
+
+      // ---- The payment pages a customer visits (for browser checks): paying
+      // completes the checkout and goes back to the app
+      let page: RegExpMatchArray | null;
+      if (req.method === 'GET' && (page = path.match(/^\/stripe\/pay\/([^/]+)$/))) {
+        const s = st.sessions.get(page[1]);
+        if (!s) return json(404, { error: 'No such checkout' });
+        if (!s.subscription) completeStripe(s.id);
+        return res.writeHead(302, { location: s.success_url.replace('{CHECKOUT_SESSION_ID}', s.id) }).end();
+      }
+      if (req.method === 'GET' && (page = path.match(/^\/rzp\/pay\/([^/]+)$/))) {
+        if (!rz.subs.has(page[1])) return json(404, { error: 'No such subscription' });
+        authorizeRazorpay(page[1], 'card');
+        return res.writeHead(302, { location: process.env.FAKE_PAYMENTS_RETURN_URL ?? '/' }).end();
+      }
+      if (req.method === 'GET' && /^\/(stripe|rzp)\/(portal|invoice)/.test(path)) {
+        return res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><title>Payment provider</title><h1>Payment provider page (stand-in)</h1>');
+      }
 
       // ---- Razorpay
       if (auth.startsWith('Basic ')) {
@@ -165,7 +205,7 @@ export async function startFakePayments(): Promise<FakePayments> {
       return json(401, { error: 'No credentials' });
     });
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   return {
@@ -175,12 +215,7 @@ export async function startFakePayments(): Promise<FakePayments> {
     razorpay: {
       plans: rz.plans,
       subs: rz.subs,
-      authorize(subId, method = 'card') {
-        const sub = rz.subs.get(subId)!;
-        Object.assign(sub, { status: 'active', method, customer_id: sub.customer_id ?? id('cust'), current_start: now(), current_end: now() + 30 * 86400 });
-        rzInvoice(sub);
-        return sub;
-      },
+      authorize: authorizeRazorpay,
       renew(subId) {
         const sub = rz.subs.get(subId)!;
         if (sub.scheduled) Object.assign(sub, sub.scheduled);
@@ -197,19 +232,7 @@ export async function startFakePayments(): Promise<FakePayments> {
       prices: st.prices,
       sessions: st.sessions,
       subs: st.subs,
-      complete(sessionId) {
-        const s = st.sessions.get(sessionId)!;
-        const sub = {
-          id: id('sub'), object: 'subscription', status: 'active', customer: s.customer ?? id('cus'), cancel_at_period_end: false, cancel_at: null,
-          metadata: { tenantId: s.tenantId },
-          // Billing periods on the item, as in 2025-03-31.basil and later
-          items: { data: [{ id: id('si'), price: { id: s.price }, quantity: s.quantity, current_period_end: now() + 30 * 86400 }] },
-        };
-        st.subs.set(sub.id, sub);
-        s.subscription = sub.id;
-        stInvoice(sub);
-        return sub;
-      },
+      complete: completeStripe,
       setStatus(subId, status) {
         st.subs.get(subId)!.status = status;
       },

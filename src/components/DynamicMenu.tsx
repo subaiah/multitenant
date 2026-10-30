@@ -6,14 +6,14 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
 import {
-  Activity, Boxes, Building2, ClipboardCheck, Code, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
+  Activity, Boxes, Building2, ClipboardCheck, Code, CreditCard, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
   Network, Package, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound, type LucideIcon,
 } from 'lucide-react';
 import { useMenuItems, type MenuItem } from '../hooks/useMenuItems';
 import { useAuth } from '../contexts/AuthContext';
 
 const ICONS: Record<string, LucideIcon> = {
-  Activity, Boxes, Building2, ClipboardCheck, Code, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
+  Activity, Boxes, Building2, ClipboardCheck, Code, CreditCard, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
   Network, Package, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound,
 };
 

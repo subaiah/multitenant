@@ -85,7 +85,8 @@ export async function billingOverview(tenantId: string) {
 
 const planCode = z.enum(PLAN_CODES as [PlanCode, ...PlanCode[]]);
 const interval = z.enum(['MONTH', 'YEAR']);
-const manage = { permission: 'billing:manage', allowWhenTrialEnded: true, rateLimit: { max: 20, timeWindow: '10 minutes' } };
+// Works while read-only (paying is the way out of it); a few changes per few minutes
+const changing = { allowWhenTrialEnded: true, rateLimit: { max: 20, timeWindow: '10 minutes' } };
 
 export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/', {
@@ -94,7 +95,7 @@ export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request) => billingOverview(request.tenant.id));
 
   fastify.post('/checkout', {
-    config: manage,
+    config: { permission: 'billing:manage', ...changing },
     schema: { tags: ['billing'], summary: 'Start a subscription: returns the page to pay at' },
   }, async (request) => {
     const body = z.object({ plan: planCode, interval, currency: z.string().trim().length(3) }).parse(request.body);
@@ -113,7 +114,7 @@ export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/change', {
-    config: manage,
+    config: { permission: 'billing:manage', ...changing },
     schema: { tags: ['billing'], summary: 'Move the subscription to another plan or billing interval' },
   }, async (request) => {
     const body = z.object({ plan: planCode, interval }).parse(request.body);
@@ -122,7 +123,7 @@ export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/cancel', {
-    config: manage,
+    config: { permission: 'billing:manage', ...changing },
     schema: { tags: ['billing'], summary: 'Cancel at the end of the current period (then the Free plan)' },
   }, async (request) => {
     await cancelSubscription(request.tenant.id, await actorOf(request));
@@ -130,7 +131,7 @@ export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/resume', {
-    config: manage,
+    config: { permission: 'billing:manage', ...changing },
     schema: { tags: ['billing'], summary: 'Keep a subscription that was set to cancel' },
   }, async (request) => {
     await resumeSubscription(request.tenant.id, await actorOf(request));
@@ -138,7 +139,7 @@ export const billingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/portal', {
-    config: manage,
+    config: { permission: 'billing:manage', ...changing },
     schema: { tags: ['billing'], summary: "Stripe's page for payment methods and invoices" },
   }, async (request) => {
     await actorOf(request);

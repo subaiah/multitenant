@@ -260,6 +260,10 @@ The `.env` must be the one the backup was made with. The keys especially: stored
 
 To add a key version, add the variable to `.env` and to the `x-api-env` block in `docker-compose.yml`.
 
+## Billing
+
+Plans, limits and payments (Razorpay for INR, Stripe for other currencies) are set up as described in [BILLING.md](BILLING.md): the keys go in `deploy/.env`, and the webhook URLs are `https://<your domain>/api/bff/billing/webhooks/razorpay` and `.../stripe`.
+
 ## Self-service sign-up
 
 On by default (`SELF_SIGNUP=true`). The sign-in page links to `/signup`, where someone enters an organization name, its sign-in address, their name, email and a strong password. Nothing is created yet. The server emails a link that works for 24 hours (so `EMAIL_TRANSPORT=smtp` must work). Opening it:

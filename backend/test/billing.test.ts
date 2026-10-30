@@ -35,6 +35,9 @@ before(async () => {
   }
 });
 after(async () => {
+  // The prices this run made (organizations' subscriptions go with them in cleanup)
+  const { controlDb } = await db();
+  await controlDb.billingPrice.deleteMany({ where: { providerPriceId: { in: [...pay.razorpay.plans.keys(), ...pay.stripe.prices.keys()] } } });
   await stopServerAndCleanUp();
   await pay.stop();
 });
