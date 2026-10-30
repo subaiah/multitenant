@@ -2,6 +2,9 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 // Environment variable schema
+/** An optional setting given as "" is treated as not given */
+const unsetIfEmpty = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === '' ? undefined : v), schema);
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
@@ -153,11 +156,12 @@ const envSchema = z.object({
   // for server errors, and one for errors in people's browsers (can be the
   // same project). Browsers send theirs through the API (/bff/errors), so no
   // other address has to be allowed in the content policy.
-  SENTRY_DSN: z.string().url().optional(),
-  SENTRY_FRONTEND_DSN: z.string().url().optional(),
-  SENTRY_ENVIRONMENT: z.string().optional(),
+  // (Empty counts as not set: docker compose passes unset ones as "")
+  SENTRY_DSN: unsetIfEmpty(z.string().url().optional()),
+  SENTRY_FRONTEND_DSN: unsetIfEmpty(z.string().url().optional()),
+  SENTRY_ENVIRONMENT: unsetIfEmpty(z.string().optional()),
   // Which build is running (a git commit, say): shown with each error
-  APP_VERSION: z.string().optional(),
+  APP_VERSION: unsetIfEmpty(z.string().optional()),
 
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
