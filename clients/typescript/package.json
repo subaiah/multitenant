@@ -1,0 +1,22 @@
+{
+  "name": "@multitenant/api-client",
+  "version": "1.0.0",
+  "description": "A typed client for the Multitenant API v1, generated from its OpenAPI document",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "generate": "openapi-typescript ../../docs/api/openapi-v1.json -o src/schema.d.ts",
+    "build": "tsc -p tsconfig.json && cp src/schema.d.ts dist/schema.d.ts",
+    "check": "npm run generate && git diff --exit-code -- src/schema.d.ts && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "^5.9.0"
+  }
+}

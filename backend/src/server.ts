@@ -51,6 +51,7 @@ import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
 import { startJobs, stopJobs } from './lib/jobs.js';
 import { flushErrorReports } from './lib/error-reporting.js';
 import { clientErrorRoutes } from './routes/client-errors.js';
+import { openApiRoutes } from './routes/openapi.js';
 import { billingRoutes } from './routes/billing.js';
 import { apiKeyRoutes } from './routes/api-keys.js';
 import { webhookRoutes } from './routes/webhooks.js';
@@ -71,6 +72,16 @@ const fastify = Fastify({
   trustProxy: config.trustProxy,
   // Kept from the proxy's X-Request-ID when it sends one (lib/request-guard.ts)
   genReqId: requestIdFor,
+  // API v1 (src/api/v1.ts): /v1/... is the same route as /...; the version is
+  // for other systems, so they keep working as the app's own paths change
+  rewriteUrl: (req) => {
+    const url = req.url ?? '/';
+    if (url === '/v1' || url.startsWith('/v1/') || url.startsWith('/v1?')) {
+      (req as { apiVersion?: string }).apiVersion = '1';
+      return url.slice(3) || '/';
+    }
+    return url;
+  },
   logger: {
     level: config.logLevel,
     // Request lines without the secrets some URLs carry (lib/log-redaction.ts)
@@ -93,9 +104,11 @@ async function registerPlugins() {
     exposedHeaders: ['X-Request-ID'],
   });
 
-  // Every response says which request it answers (quoted in support requests)
+  // Every response says which request it answers (quoted in support requests),
+  // and, called as /v1/..., which API version answered
   fastify.addHook('onRequest', async (request, reply) => {
     reply.header('X-Request-ID', request.id);
+    if ((request.raw as { apiVersion?: string }).apiVersion) reply.header('API-Version', '1');
   });
   // State-changing requests with cookies must come from this app's own pages
   fastify.addHook('onRequest', originGuard(config.corsOrigin.split(',')));
@@ -221,6 +234,8 @@ async function registerRoutes() {
   // Self-service sign-up, and what the public pages need about this address
   await fastify.register(signupRoutes, { prefix: '/bff/signup' });
   await fastify.register(siteRoutes, { prefix: '/bff' });
+  // The API v1 contract, always published (the interactive reference is API_DOCS)
+  await fastify.register(openApiRoutes);
   // Errors in people's browsers, for error tracking
   await fastify.register(clientErrorRoutes, { prefix: '/bff' });
   // Payment providers' webhooks (signed; lib/billing/)

@@ -26,6 +26,34 @@ jobs:
       - name: Typecheck scripts and tests
         run: npx tsc -p tsconfig.check.json
       - run: npm run build
+      # API v1 (src/api/v1.ts, docs/API_V1.md): the committed document is the
+      # contract, and a pull request may only add to it
+      - name: API v1 document is up to date
+        run: npm run openapi && git diff --exit-code -- ../docs/api/openapi-v1.json
+      - name: API v1 stays compatible with the base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth 1 origin "${{ github.base_ref }}"
+          if git show FETCH_HEAD:docs/api/openapi-v1.json > /tmp/base-v1.json 2>/dev/null; then
+            npm run openapi -- --check /tmp/base-v1.json
+          else
+            echo "The base branch has no API v1 document yet"
+          fi
+
+  # The generated TypeScript client matches the API v1 document and compiles
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run build
 
   backend-tests:
     runs-on: ubuntu-latest

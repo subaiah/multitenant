@@ -11,6 +11,7 @@
     "build": "tsc && node -e \"require('fs').cpSync('src/generated', 'dist/generated', { recursive: true })\"",
     "start": "node dist/server.js",
     "worker": "tsx src/worker.ts",
+    "openapi": "tsx src/cli/openapi.ts",
     "migrate": "tsx src/cli/migrate.ts",
     "platform:admin": "tsx src/cli/create-admin.ts",
     "test": "tsx --test test/*.test.ts",
