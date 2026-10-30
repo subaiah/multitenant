@@ -13,6 +13,7 @@ import { startTenantLifecycle, stopTenantLifecycle } from './tenant-lifecycle.js
 import { startAuditArchiving, stopAuditArchiving } from './audit.js';
 import { notificationsSettled, startNotifications, stopNotifications } from './notifications.js';
 import { startRateLimitCleanup, stopRateLimitCleanup } from './rate-limit-store.js';
+import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
 import { controlDb } from './prisma.js';
 import { runExport } from './data-export.js';
 import { reportError } from './error-reporting.js';
@@ -63,6 +64,7 @@ export async function startJobs(log: JobLogger) {
   startRateLimitCleanup((err) => log.warn(`Removing expired rate-limit counters failed: ${(err as Error)?.message ?? err}`));
   startTenantLifecycle(failed);
   startExportPolling(log);
+  startWebhooks(failed);
   log.info('Background jobs started');
 }
 
@@ -72,9 +74,10 @@ export async function stopJobs() {
   stopNotifications();
   stopRateLimitCleanup();
   stopTenantLifecycle();
+  stopWebhooks();
   if (exportTimer) clearInterval(exportTimer);
   exportTimer = undefined;
   // Let work in progress finish (a few seconds at most; an export that's cut
   // short is picked up again later)
-  await Promise.race([notificationsSettled(), new Promise((r) => setTimeout(r, 5000))]);
+  await Promise.race([Promise.all([notificationsSettled(), webhooksSettled()]), new Promise((r) => setTimeout(r, 5000))]);
 }

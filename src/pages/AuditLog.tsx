@@ -6,8 +6,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Search, ShieldCheck, ShieldAlert, Download, ChevronDown, ChevronRight, Archive, Loader2, Bot, User, Building2, UserX,
-} from 'lucide-react';
+  Search, ShieldCheck, ShieldAlert, Download, ChevronDown, ChevronRight, Archive, Loader2, Bot, User, Building2, UserX, KeyRound } from 'lucide-react';
 import { API_URL, apiGet, apiPost } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
@@ -21,7 +20,7 @@ interface Entry {
   event: string;
   category: string;
   outcome: 'SUCCESS' | 'FAILURE';
-  actorType: 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS';
+  actorType: 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY';
   actorId: string | null;
   actorEmail: string | null;
   resourceType: string | null;
@@ -56,6 +55,7 @@ const ACTORS = {
   PLATFORM: { icon: Building2, label: 'Platform staff' },
   SYSTEM: { icon: Bot, label: 'System' },
   ANONYMOUS: { icon: UserX, label: 'Not signed in' },
+  API_KEY: { icon: KeyRound, label: 'API key' },
 };
 
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));

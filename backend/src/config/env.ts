@@ -158,6 +158,10 @@ const envSchema = z.object({
   // before it becomes read-only
   BILLING_GRACE_DAYS: z.string().default('7').transform(Number).pipe(z.number().min(0)),
 
+  // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
+  // allows private ones and plain http (development and tests only)
+  WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+
   // Background jobs (lib/jobs.ts): notifications, data exports, audit
   // archiving, usage snapshots, trials and closures, rate-limit cleanup. On by
   // default; turn off on API servers when a separate worker runs them
@@ -363,6 +367,7 @@ export const config = {
       : null,
     graceDays: env.BILLING_GRACE_DAYS,
   },
+  webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,
   sentry: {

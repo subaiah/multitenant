@@ -72,7 +72,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       children: [
         { label: 'Applications', path: '/applications', icon: 'Package', permission: 'applications:read' },
         { label: 'Infrastructure', path: '/infrastructure', icon: 'Server', permission: 'infrastructure:read' },
-        { label: 'API', path: '/api', icon: 'Code', permission: 'api:manage' },
+        { label: 'API gateway', path: '/api', icon: 'Network', permission: 'api:manage' },
       ],
     },
     {
@@ -81,6 +81,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
         { label: 'Entitlements', path: '/tenant-entitlements', icon: 'Boxes', permission: 'applications:manage' },
         { label: 'Data isolation', path: '/data-isolation', icon: 'Database', permission: 'database:manage' },
         { label: 'Billing', path: '/billing', icon: 'CreditCard', permission: 'billing:read' },
+        { label: 'Developers', path: '/developers', icon: 'Code', permission: 'api:read' },
         { label: 'Settings', path: '/settings', icon: 'Settings', permission: 'settings:read' },
       ],
     },

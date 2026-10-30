@@ -9,6 +9,7 @@ import { verifySession } from '../lib/sessions.js';
 import { activeSupportSession, type ActiveSupportSession } from '../lib/support.js';
 import { trialEnded } from '../lib/tenant-lifecycle.js';
 import { enabledProviders } from '../lib/billing/providers.js';
+import { apiKeyUserId, keyFromRequest, verifyApiKey } from '../lib/api-keys.js';
 
 const billingAvailable = () => enabledProviders().length > 0;
 
@@ -50,15 +51,28 @@ declare module 'fastify' {
  *      with an active support session for it (lib/support.ts).
  */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
+  const rawKey = keyFromRequest(request);
   try {
-    // Also checks the account is still active and the session not ended,
-    // and refreshes userType from the database
-    await verifySession(request);
+    if (rawKey) {
+      // Another system with an API key (lib/api-keys.ts): it acts in its
+      // organization with the key's permissions, never as a person
+      const key = await verifyApiKey(rawKey, request.ip);
+      request.apiKey = key;
+      request.user = { userId: apiKeyUserId(key.id), userType: key.userType, tenantId: key.tenantId, type: 'access' } as typeof request.user;
+    } else {
+      // Also checks the account is still active and the session not ended,
+      // and refreshes userType from the database
+      await verifySession(request);
+    }
   } catch (err) {
     // The tenant's database being briefly unreachable is not a reason to sign
     // anyone out: let the error handler answer 503
     if (classifyDatabaseError(err) || (err instanceof AppError && err.statusCode >= 500)) throw err;
-    return reply.status(401).send({ error: 'Unauthorized', message: err instanceof Error ? err.message : undefined });
+    return reply.status(401).send({
+      error: 'Unauthorized',
+      message: err instanceof Error ? err.message : undefined,
+      ...(err instanceof AppError && err.code && { code: err.code }),
+    });
   }
 
   const { userId, userType, tenantId: tokenTenantId } = request.user;

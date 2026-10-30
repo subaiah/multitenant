@@ -61,7 +61,7 @@ export function auditCatalog(): Record<string, AuditEventDefinition> {
 // ---------------------------------------------------------------------------
 
 export type AuditOutcome = 'SUCCESS' | 'FAILURE';
-export type AuditActorType = 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS';
+export type AuditActorType = 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY';
 
 export interface AuditActor {
   type: AuditActorType;
@@ -253,7 +253,11 @@ async function actorOf(request: FastifyRequest): Promise<AuditActor> {
   if (cached) return cached;
   const user = (request as { user?: { userId?: string; tenantId?: string; userType?: string } }).user;
   let actor: AuditActor = { type: 'ANONYMOUS' };
-  if (user?.userId) {
+  const key = (request as { apiKey?: { id: string; name: string } }).apiKey;
+  if (key) {
+    // Another system, with one of the organization's API keys
+    actor = { type: 'API_KEY', id: key.id, email: `API key "${key.name}"`.slice(0, 200) };
+  } else if (user?.userId) {
     if (isPlatformUser(user.userType as never)) {
       const u = await controlDb.platformUser.findUnique({ where: { id: user.userId }, select: { email: true } });
       actor = { type: 'PLATFORM', id: user.userId, email: u?.email ?? null };
@@ -306,7 +310,7 @@ export async function audit(
 /** Record an entry outside a request (background jobs, scripts). Throws for an unknown event or missing tenant. */
 export async function recordAudit(ctx: AuditContext, event: string, input: AuditInput = {}): Promise<{ chain: string; seq: number; hash: string }> {
   // Whatever reacts to entries (notifications) registers its hooks when loaded
-  extensionsLoaded ??= import('./notifications.js');
+  extensionsLoaded ??= Promise.all([import('./notifications.js'), import('./webhooks.js')]);
   await extensionsLoaded;
   const definition = auditCatalog()[event];
   if (!definition) throw new Error(`Unknown audit event "${event}": add it to src/kit/audit-events.ts or the product's auditEvents`);
