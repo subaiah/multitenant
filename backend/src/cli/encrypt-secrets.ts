@@ -52,7 +52,8 @@ export async function encryptStoredSecrets({ check = false, only }: { check?: bo
       let rows: { id: string; [k: string]: string | null }[];
       try {
         rows = await delegate.findMany({
-          where: { [field]: { not: null }, ...(only && { id: { in: only[field] ?? [] } }) },
+          // Not '' rather than not null: some secret columns can't be null
+          where: { [field]: { not: '' }, ...(only && { id: { in: only[field] ?? [] } }) },
           select: { id: true, [field]: true },
         });
       } catch (err) {
