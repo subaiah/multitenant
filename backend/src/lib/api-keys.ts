@@ -36,14 +36,13 @@ export function formatKey(tenantId: string, keyId: string, secret: string) {
 
 export function parseKey(key: string): { tenantId: string; keyId: string; secret: string } | null {
   if (!key.startsWith(KEY_PREFIX) || key.length > 200) return null;
-  const parts = key.slice(KEY_PREFIX.length).split('_');
-  // The secret is base64url too, and may contain "_": everything after the second separator
-  if (parts.length < 3) return null;
-  const [t, k, ...rest] = parts;
-  const tenantId = b64ToUuid(t);
-  const keyId = b64ToUuid(k);
-  const secret = rest.join('_');
-  if (!tenantId || !keyId || secret.length < 32) return null;
+  // Fixed lengths: the ids (22 characters each) may contain "_" themselves
+  const body = key.slice(KEY_PREFIX.length);
+  if (body[22] !== '_' || body[45] !== '_') return null;
+  const tenantId = b64ToUuid(body.slice(0, 22));
+  const keyId = b64ToUuid(body.slice(23, 45));
+  const secret = body.slice(46);
+  if (!tenantId || !keyId || !/^[\w-]{32}$/.test(secret)) return null;
   return { tenantId, keyId, secret };
 }
 

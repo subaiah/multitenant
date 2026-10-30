@@ -228,3 +228,15 @@ test('webhooks only go to public addresses, over https', async () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', '0.0.0.0']) assert.ok(isPrivateAddress(ip), ip);
   for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700::1111', '172.32.0.1']) assert.ok(!isPrivateAddress(ip), ip);
 });
+
+test('every key reads back, whatever characters its ids happen to have', async () => {
+  const { randomUUID, randomBytes } = await import('node:crypto');
+  const { formatKey, parseKey } = await import('../src/lib/api-keys.js');
+  for (let i = 0; i < 5000; i++) {
+    const tenantId = randomUUID();
+    const keyId = randomUUID();
+    const secret = randomBytes(24).toString('base64url');
+    assert.deepEqual(parseKey(formatKey(tenantId, keyId, secret)), { tenantId, keyId, secret });
+  }
+  for (const junk of ['mtk_', 'mtk_x', 'mtk_' + 'a'.repeat(100), 'sk_live_abc']) assert.equal(parseKey(junk), null, junk);
+});

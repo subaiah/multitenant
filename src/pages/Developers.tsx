@@ -367,8 +367,9 @@ function EndpointRow({ e, canManage, onEdit, onChanged, onSecret }: { e: Endpoin
                       </details>
                     </td>
                     <td className="py-1.5 pr-3">
-                      <Badge value={d.status === 'PENDING' && d.attempts > 0 ? 'SCHEDULED' : d.status === 'DELIVERED' ? 'ACTIVE' : d.status === 'FAILED' ? 'ERROR' : d.status} />
-                      <div className="text-xs text-slate-500">{d.status === 'DELIVERED' ? 'Delivered' : d.status === 'FAILED' ? `Gave up after ${d.attempts}` : d.nextAttemptAt && d.attempts ? `Retry ${formatRelative(d.nextAttemptAt)}` : 'Sending'}</div>
+                      <Badge value={d.status === 'PENDING' && d.attempts > 0 ? 'SCHEDULED' : d.status} />
+                      {d.status === 'FAILED' && <div className="text-xs text-slate-500">Gave up after {d.attempts} {d.attempts === 1 ? 'try' : 'tries'}</div>}
+                      {d.status === 'PENDING' && d.attempts > 0 && d.nextAttemptAt && <div className="text-xs text-slate-500">Next try {formatRelative(d.nextAttemptAt)}</div>}
                     </td>
                     <td className="py-1.5 pr-3 hidden md:table-cell text-xs text-slate-600 dark:text-slate-400">{d.responseStatus ?? '—'}{d.lastError && d.status !== 'DELIVERED' ? ` · ${d.lastError}` : ''}{d.durationMs !== null ? ` · ${d.durationMs} ms` : ''}</td>
                     <td className="py-1.5 pr-3 hidden md:table-cell text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{formatDateTime(d.createdAt)}</td>
