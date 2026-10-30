@@ -212,8 +212,12 @@ async function runSteps(tenantId: string) {
   // who created the tenant, or, for someone who signed up, given the password
   // they chose then (routes/signup.ts) and told the organization is ready
   if (admin && admin.status === 'PENDING' && !tenant.adminInvitedAt) {
+    let inviteError: string | null = null;
     if (tenant.createdById) {
-      await sendInvitation(tenant, admin, tenant.createdById);
+      // The tenant is ready either way: a failed email is recorded, and the
+      // invitation can be resent (or its link shared) from the Tenants page
+      const invite = await sendInvitation(tenant, admin, tenant.createdById);
+      inviteError = invite.sent ? null : (invite.error ?? 'The email could not be sent');
     } else {
       const signup = await controlDb.signupRequest.findUnique({ where: { tenantId } });
       if (signup?.passwordHash) {
@@ -223,7 +227,7 @@ async function runSteps(tenantId: string) {
         await sendMail(organizationReadyEmail(admin.email, `${origin}/${tenant.slug}/login?email=${encodeURIComponent(admin.email)}`, tenant.name)).catch(() => {});
       }
     }
-    await controlDb.tenant.update({ where: { id: tenantId }, data: { adminInvitedAt: new Date() } });
+    await controlDb.tenant.update({ where: { id: tenantId }, data: { adminInvitedAt: new Date(), adminInviteError: inviteError } });
   }
 }
 

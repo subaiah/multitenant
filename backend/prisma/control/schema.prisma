@@ -53,6 +53,8 @@ model Tenant {
   initialAdminEmail  String?            @map("initial_admin_email")
   initialAdminName   String?            @map("initial_admin_name")
   adminInvitedAt     DateTime?          @map("admin_invited_at")
+  // Why the first administrator's invitation email failed (it can be resent from the Tenants page)
+  adminInviteError   String?            @map("admin_invite_error")
   /// The platform user who created the tenant (named in the invitation)
   createdById        String?            @map("created_by_id")
 

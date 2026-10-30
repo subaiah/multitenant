@@ -154,3 +154,13 @@ export function customDomainLostEmail(to: string, organization: string, domain: 
 ${button(link, 'Go to Settings')}`),
   };
 }
+
+/** "Send a test email" on the notification settings. */
+export function testEmail(to: string, from: string): Mail {
+  return {
+    to,
+    subject: 'Test email',
+    text: `This is a test email from ${from}. If you can read it, email delivery works.`,
+    html: layout('Email delivery works', `<p>This is a test email from ${escape(from)}. If you can read it, invitations, password resets and notifications will reach people too.</p>`),
+  };
+}

@@ -1,5 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
-import { sendInvitation } from '../lib/invitations.js';
+import { sendInvitation, type InvitationResult } from '../lib/invitations.js';
+
+/** What the inviter is told: sent, or the link to share because the email failed */
+const inviteOutcome = (r: InvitationResult) =>
+  r.sent ? { invitationSent: true } : { invitationSent: false, inviteLink: r.link, emailError: r.error };
 import { z } from 'zod';
 import { explainAccess } from '../lib/access.js';
 import { endAllSessions } from '../lib/sessions.js';
@@ -254,8 +258,9 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       });
     await audit(request, 'user.invited', { resource: { type: 'user', id: user.id, label: user.email }, details: { name: user.name, userType: user.userType } });
 
-    await sendInvitation(request.tenant, user, request.user.userId);
-    return reply.status(201).send({ ...user, invitationSent: true });
+    // The invitation exists even if the email didn't go out: hand back the link to share another way
+    const invite = await sendInvitation(request.tenant, user, request.user.userId);
+    return reply.status(201).send({ ...user, ...inviteOutcome(invite) });
   });
 
   // Resend an invitation (invalidates the previous link)
@@ -279,9 +284,9 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('This user has already accepted their invitation', 409);
     }
     requireCanManageUserType(request.user.userType, user.userType);
-    await sendInvitation(request.tenant, user, request.user.userId);
-    await audit(request, 'user.invitation_resent', { resource: { type: 'user', id: user.id, label: user.email } });
-    return { invitationSent: true };
+    const invite = await sendInvitation(request.tenant, user, request.user.userId);
+    await audit(request, 'user.invitation_resent', { resource: { type: 'user', id: user.id, label: user.email }, details: { emailed: invite.sent } });
+    return inviteOutcome(invite);
   });
 
   // Clear a user's two-factor (lost device): they set it up again at their next sign-in

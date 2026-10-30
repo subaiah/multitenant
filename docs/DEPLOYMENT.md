@@ -74,6 +74,25 @@ docker compose up -d --build
 - **Tenants that failed to migrate** are listed on the Tenants page. The rest keep working.
 - **Several API servers:** run the release step once (`docker compose run --rm migrate`), then roll the servers. The release step takes locks, so two copies running at once is safe too.
 
+## Email
+
+Invitations, password resets, sign-in codes, sign-up confirmations, trial and closure notices, and notifications all go through `SMTP_URL`. Some working setups:
+
+| Provider | `SMTP_URL` | Notes |
+| --- | --- | --- |
+| Gmail (personal) | `smtps://you%40gmail.com:APPPASSWORD@smtp.gmail.com:465` | Needs 2-Step Verification and an [app password](https://myaccount.google.com/apppasswords). About 500 emails a day. `MAIL_FROM` must be the same address. |
+| Azure Communication Services | `smtp://SMTPUSERNAME:CLIENTSECRET@smtp.azurecomm.net:587` | An Entra app with the Communication and Email Service Owner role, plus an SMTP Username linked to it. The Azure-managed domain gives a `DoNotReply@….azurecomm.net` sender. |
+| Brevo, Resend, Postmark, SES… | as their docs give it | Add their SPF and DKIM records to your domain. |
+
+Put an `@` in the username as `%40`, and URL-encode any special characters in the password. Microsoft 365 mailboxes with a password (`smtp.office365.com`) stop working by default at the end of 2026, as Microsoft retires Basic authentication for SMTP, so don't start with them.
+
+**Check it from the browser.** As a platform admin, go to Notifications → **Email**. It shows where email goes (never the password) and has **Send a test email**, which reports the problem in plain words if sending fails. Tenant admins have the same button under Notifications → Organization.
+
+**When email fails anyway:**
+- Tenants still finish setting up. The Tenants page marks one whose first administrator's invitation wasn't sent; **Resend invitation** there tries again and, if it still can't send, shows the link to pass on another way.
+- Inviting a user on the Users page works the same way.
+- Notifications are retried for about a day and listed as failed under Notifications → Organization.
+
 ## Continuous deployment
 
 `.github/workflows/deploy.yml` deploys every commit on `main` that passes CI:

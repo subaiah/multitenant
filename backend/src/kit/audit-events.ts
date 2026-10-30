@@ -106,6 +106,7 @@ export const KIT_AUDIT_EVENTS = {
   'audit.exported': t('Audit log exported', 'audit'),
   'data_export.requested': t('Data export requested', 'data'),
   'data_export.downloaded': t('Data export downloaded', 'data'),
+  'notifications.test_email_sent': t('Test email sent', 'config'),
   'audit.archived': t('Old audit entries archived', 'audit'),
   'platform.audit.exported': p('Platform audit log exported', 'audit'),
   'platform.audit.archived': p('Old platform audit entries archived', 'audit'),
@@ -122,6 +123,8 @@ export const KIT_AUDIT_EVENTS = {
   'tenant.provisioning_failed': p('Tenant setup failed', 'tenant'),
   'tenant.provisioning_retried': p('Tenant setup retried', 'tenant'),
   'tenant.credentials_rotated': p('Tenant database credentials rotated', 'tenant'),
+  'tenant.invitation_resent': p("Tenant's first administrator invited again", 'tenant'),
+  'platform.test_email_sent': p('Test email sent', 'config'),
   'tenant.migrations_run': p('Tenant migrations run', 'tenant'),
 
   // Platform: catalogue, menus, people, support

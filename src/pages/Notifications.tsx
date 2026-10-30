@@ -44,14 +44,62 @@ const CATEGORY_LABELS: Record<string, string> = {
 const groupBy = <T extends { category: string }>(list: T[]) =>
   Object.entries(list.reduce<Record<string, T[]>>((acc, x) => ((acc[x.category] ??= []).push(x), acc), {}));
 
+/** Sends a test email to the signed-in person and says what happened */
+function TestEmailButton({ path }: { path: string }) {
+  const [state, setState] = useState<{ busy: boolean; result?: { sent: boolean; to: string; error?: string }; failed?: string }>({ busy: false });
+  const send = async () => {
+    setState({ busy: true });
+    try {
+      setState({ busy: false, result: await apiPost(path) });
+    } catch (err) {
+      setState({ busy: false, failed: err instanceof Error ? err.message : 'Could not send' });
+    }
+  };
+  const r = state.result;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-3">
+      {r?.sent && <span role="status" className="text-sm text-green-700 dark:text-green-400">Sent to {r.to}. Check that inbox (and spam).</span>}
+      {(r && !r.sent) && <span role="alert" className="text-sm text-red-600">Not sent: {r.error}</span>}
+      {state.failed && <span role="alert" className="text-sm text-red-600">{state.failed}</span>}
+      <button className={secondaryButtonClass} onClick={send} disabled={state.busy}>{state.busy ? 'Sending…' : 'Send a test email'}</button>
+    </div>
+  );
+}
+
+/** Platform: where email goes, and a test message */
+function PlatformEmail() {
+  const [setup, setSetup] = useState<{ transport: string; from: string; smtp: { host: string; port: number; secure: boolean; user: string | null } | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    apiGet<NonNullable<typeof setup>>('/platform/email').then(setSetup).catch((err) => setError(err instanceof Error ? err.message : 'Could not load'));
+  }, []);
+  if (error) return <ErrorState error={error} />;
+  if (!setup) return <LoadingState />;
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="flex gap-4 py-2 border-t border-slate-100 dark:border-slate-700 first:border-0"><dt className="w-32 shrink-0 text-slate-500">{label}</dt><dd className="font-mono text-slate-800 dark:text-slate-100 break-all">{value}</dd></div>
+  );
+  return (
+    <Card title="Email delivery" description="Invitations, password resets, sign-in codes, sign-up confirmations and notifications. Set in the server's .env (SMTP_URL, MAIL_FROM)." actions={<TestEmailButton path="/platform/email/test" />}>
+      <dl className="text-sm">
+        {row('Sender', setup.from)}
+        {row('Transport', setup.transport === 'smtp' ? 'SMTP' : `${setup.transport} (emails are not delivered)`)}
+        {setup.smtp && row('Server', `${setup.smtp.host}:${setup.smtp.port}${setup.smtp.secure ? ' (TLS)' : ' (STARTTLS)'}`)}
+        {setup.smtp?.user && row('Username', setup.smtp.user)}
+      </dl>
+    </Card>
+  );
+}
+
 export default function Notifications({ scope }: { scope: 'tenant' | 'platform' }) {
   const { hasPermission } = useAuth();
   const [params, setParams] = useSearchParams();
   const canManage = scope === 'tenant' && hasPermission('notifications:manage');
+  const canManageEmail = scope === 'platform' && hasPermission('platform-settings:manage');
   const tabs = [
     { id: 'inbox', label: 'Inbox' },
     { id: 'preferences', label: 'My preferences' },
     ...(canManage ? [{ id: 'organization', label: 'Organization' }] : []),
+    ...(canManageEmail ? [{ id: 'email', label: 'Email' }] : []),
   ];
   const tab = tabs.some((t) => t.id === params.get('tab')) ? params.get('tab')! : 'inbox';
 
@@ -69,6 +117,7 @@ export default function Notifications({ scope }: { scope: 'tenant' | 'platform' 
       {tab === 'inbox' && <Inbox />}
       {tab === 'preferences' && <Preferences />}
       {tab === 'organization' && canManage && <Organization />}
+      {tab === 'email' && canManageEmail && <PlatformEmail />}
     </div>
   );
 }
@@ -327,7 +376,7 @@ function Organization() {
         </table>
       </Card>
 
-      <Card title="Email delivery" description="Emails are retried for about a day before they are given up on.">
+      <Card title="Email delivery" description="Emails are retried for about a day before they are given up on." actions={<TestEmailButton path="/notification-settings/test-email" />}>
         <div className="flex flex-wrap items-center gap-4 text-sm">
           <span className="text-slate-600 dark:text-slate-300">{data.delivery.pending} waiting · <span className={data.delivery.failedEmails ? 'text-red-600 font-medium' : ''}>{data.delivery.failedEmails} failed</span></span>
           {data.delivery.failedEmails > 0 && (

@@ -13,6 +13,8 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity, logPlatformActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
+import { dbForTenant } from '../lib/tenant-db.js';
+import { sendInvitation } from '../lib/invitations.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -62,6 +64,8 @@ function present(t: TenantRow) {
   const latest = latestMigration();
   return {
     ...tenant,
+    // Who the first administrator's invitation went to (shown when it needs resending)
+    firstAdminEmail: initialAdminEmail ?? null,
     isolation: databaseConfig?.strategy ?? null,
     migration: databaseConfig
       ? {
@@ -157,6 +161,36 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     await audit(request, 'tenant.provisioning_retried', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug } });
     void startProvisioning(id);
     return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
+  });
+
+  // The first administrator's invitation again: after its email failed, or expired
+  fastify.post('/:id/resend-invite', {
+    config: { permission: 'tenants:manage' },
+    schema: {
+      tags: ['tenants'],
+      summary: "Invite the tenant's first administrator again (a new link; the old one stops working)",
+      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const tenant = await controlDb.tenant.findUnique({ where: { id } });
+    if (!tenant) throw new AppError('Tenant not found', 404);
+    if (tenant.provisioningStatus !== 'READY') throw new AppError('This tenant is not set up yet', 409);
+    if (!tenant.initialAdminEmail) throw new AppError('This tenant has no first administrator to invite', 409);
+    const admin = await (await dbForTenant(id)).user.findFirst({
+      where: { tenantId: id, email: tenant.initialAdminEmail },
+      select: { id: true, email: true, status: true },
+    });
+    if (!admin) throw new AppError('The first administrator is no longer a user of this tenant', 409);
+    if (admin.status !== 'PENDING') throw new AppError(`${admin.email} has already accepted the invitation`, 409);
+
+    const invite = await sendInvitation(tenant, admin, request.user.userId);
+    await controlDb.tenant.update({ where: { id }, data: { adminInvitedAt: new Date(), adminInviteError: invite.sent ? null : (invite.error ?? 'The email could not be sent') } });
+    await audit(request, 'tenant.invitation_resent', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { to: admin.email, emailed: invite.sent } });
+    // The link only when the email didn't go out, to share another way
+    return invite.sent
+      ? { invitationSent: true, to: admin.email }
+      : { invitationSent: false, to: admin.email, inviteLink: invite.link, emailError: invite.error };
   });
 
   // Undo an organization's own closure during its grace period
