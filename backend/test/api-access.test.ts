@@ -86,7 +86,8 @@ test('an API key works with its own permissions, and only those', async () => {
   assert.equal(listed.key, undefined);
   assert.equal(listed.status, 'ACTIVE');
   assert.ok(listed.lastUsedAt);
-  assert.doesNotMatch(JSON.stringify(listed), new RegExp(k.key.split('_').pop()!));
+  // The secret is the key's last 32 characters
+  assert.ok(!JSON.stringify(listed).includes(k.key.slice(-32)), 'no secret in the list');
 });
 
 test("a key can't have more than its maker, or make keys, or pay", async () => {
