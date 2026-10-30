@@ -9,11 +9,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config/env.js';
 import { serializeRequest } from './lib/log-redaction.js';
 import { controlDb, disconnectDatabases } from './lib/prisma.js';
-import { resumeProvisioning } from './lib/provisioning.js';
 import { checkTenantServer } from './lib/tenant-server-check.js';
 import { latestMigration, tenantsBehind } from './lib/tenant-migrations.js';
-import { startUsageRefresh, stopUsageRefresh } from './lib/tenant-usage.js';
-import { startTenantLifecycle, stopTenantLifecycle } from './lib/tenant-lifecycle.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
@@ -51,14 +48,15 @@ import { permissionRoutes } from './routes/permissions.js';
 import { platformRoutes } from './routes/platform.js';
 import { deploymentRoutes } from './routes/deployments.js';
 import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
-import { startAuditArchiving, stopAuditArchiving } from './lib/audit.js';
-import { notificationsSettled, startNotifications, stopNotifications } from './lib/notifications.js';
+import { startJobs, stopJobs } from './lib/jobs.js';
+import { flushErrorReports } from './lib/error-reporting.js';
+import { clientErrorRoutes } from './routes/client-errors.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
 import { authorize } from './middleware/authorize.js';
 import { emailDeliveryWarning } from './lib/mailer.js';
-import { RateLimitStore, startRateLimitCleanup, stopRateLimitCleanup } from './lib/rate-limit-store.js';
+import { RateLimitStore } from './lib/rate-limit-store.js';
 import { pendingControlMigrations } from './lib/control-migrations.js';
 
 // Create Fastify instance
@@ -218,6 +216,8 @@ async function registerRoutes() {
   // Self-service sign-up, and what the public pages need about this address
   await fastify.register(signupRoutes, { prefix: '/bff/signup' });
   await fastify.register(siteRoutes, { prefix: '/bff' });
+  // Errors in people's browsers, for error tracking
+  await fastify.register(clientErrorRoutes, { prefix: '/bff' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
 
@@ -363,14 +363,16 @@ async function start() {
     fastify.log.info(`Server started on http://${config.host}:${config.port}`);
     if (config.apiDocs) fastify.log.info(`API reference at http://localhost:${config.port}/docs`);
 
-    // Background work: finish provisioning interrupted by a restart, and keep
-    // platform usage snapshots fresh
-    await resumeProvisioning().catch((err) => fastify.log.error({ err }, 'Resuming provisioning failed'));
-    startUsageRefresh((msg) => fastify.log.warn(msg), resumeProvisioning);
-    startAuditArchiving((msg, err) => fastify.log.error({ err }, msg));
-    startNotifications((msg, err) => fastify.log.error({ err }, msg));
-    startRateLimitCleanup((err) => fastify.log.warn({ err }, 'Removing expired rate-limit counters failed'));
-    startTenantLifecycle((msg, err) => fastify.log.error({ err }, msg));
+    // Background jobs, unless a separate worker runs them (RUN_JOBS=false)
+    if (config.runJobs) {
+      await startJobs({
+        info: (msg) => fastify.log.info(msg),
+        warn: (msg) => fastify.log.warn(msg),
+        error: (err, msg) => fastify.log.error({ err }, msg),
+      });
+    } else {
+      fastify.log.info('Background jobs are off on this server (RUN_JOBS=false): a worker runs them');
+    }
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -380,13 +382,8 @@ async function start() {
 // Graceful shutdown
 const shutdown = async () => {
   fastify.log.info('Shutting down gracefully...');
-  stopUsageRefresh();
-  stopAuditArchiving();
-  stopNotifications();
-  stopRateLimitCleanup();
-  stopTenantLifecycle();
-  // Let notification work in progress finish (a few seconds at most)
-  await Promise.race([notificationsSettled(), new Promise((r) => setTimeout(r, 5000))]);
+  await stopJobs();
+  await flushErrorReports();
   await disconnectDatabases();
   await fastify.close();
   process.exit(0);

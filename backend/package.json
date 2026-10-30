@@ -10,6 +10,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc && node -e \"require('fs').cpSync('src/generated', 'dist/generated', { recursive: true })\"",
     "start": "node dist/server.js",
+    "worker": "tsx src/worker.ts",
     "migrate": "tsx src/cli/migrate.ts",
     "platform:admin": "tsx src/cli/create-admin.ts",
     "test": "tsx --test test/*.test.ts",

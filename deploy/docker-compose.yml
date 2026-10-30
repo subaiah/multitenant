@@ -50,6 +50,11 @@ x-api-env: &api-env
   CUSTOM_DOMAIN_TARGET: ${CUSTOM_DOMAIN_TARGET:-}
   API_DOCS: ${API_DOCS:-false}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Error tracking (optional): Sentry projects' DSNs (docs/DEPLOYMENT.md)
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_FRONTEND_DSN: ${SENTRY_FRONTEND_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+  APP_VERSION: ${APP_VERSION:-}
 
 services:
   db:
@@ -95,6 +100,27 @@ services:
     image: ${API_IMAGE:-multitenant-api:local}
     build: ../backend
     restart: unless-stopped
+    environment:
+      <<: *api-env
+      # false when the worker below runs the background jobs
+      RUN_JOBS: ${API_RUN_JOBS:-true}
+    volumes:
+      - audit-archive:/data/audit-archive
+      - exports:/data/exports
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 20s
+
+  # Optional: the background jobs (notifications, data exports, audit
+  # archiving, trials) in their own container, so heavy work doesn't slow the
+  # API. To use it, set in .env:  COMPOSE_PROFILES=worker  and  API_RUN_JOBS=false
+  worker:
+    image: ${API_IMAGE:-multitenant-api:local}
+    build: ../backend
+    profiles: [worker]
+    command: ["node", "dist/worker.js"]
+    restart: unless-stopped
     environment: *api-env
     volumes:
       - audit-archive:/data/audit-archive
@@ -103,6 +129,47 @@ services:
       migrate:
         condition: service_completed_successfully
     stop_grace_period: 20s
+
+  # Nightly backups (deploy/backup/): every database and the audit archive,
+  # test-restored, optionally encrypted and copied to object storage. Files
+  # are kept in deploy/backups/ too. Back up now: deploy/backup.sh; restore:
+  # deploy/restore.sh. Set up: docs/DEPLOYMENT.md, "Backups".
+  backup:
+    image: multitenant-backup:local
+    build:
+      context: .
+      dockerfile: backup.Dockerfile
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      # Daily, HH:MM in TZ (UTC by default; TZ=Asia/Kolkata for Indian time)
+      BACKUP_TIME: ${BACKUP_TIME:-02:15}
+      TZ: ${BACKUP_TZ:-UTC}
+      BACKUP_KEEP_LOCAL: ${BACKUP_KEEP_LOCAL:-7}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      BACKUP_VERIFY: ${BACKUP_VERIFY:-true}
+      # An age public key (age1...): backups are encrypted to it
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      # A healthchecks.io (or similar) URL: alerts when a backup fails or doesn't happen
+      BACKUP_PING_URL: ${BACKUP_PING_URL:-}
+      # S3-compatible object storage (Oracle Object Storage, Backblaze B2, AWS S3, ...)
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-multitenant}
+      RCLONE_CONFIG_OFFSITE_TYPE: s3
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_REGION: ${BACKUP_S3_REGION:-}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET: "true"
+    volumes:
+      - ./backups:/backups
+      - audit-archive:/audit-archive
+    depends_on:
+      db:
+        condition: service_healthy
 
   web:
     image: ${WEB_IMAGE:-multitenant-web:local}

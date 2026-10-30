@@ -2,6 +2,7 @@ import { FastifyError, FastifyRequest, FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import { classifyDatabaseError } from '../lib/db-errors.js';
 import { controlDb } from '../lib/prisma.js';
+import { reportError } from '../lib/error-reporting.js';
 
 export class AppError extends Error {
   statusCode: number;
@@ -37,6 +38,7 @@ export const errorHandler = async (
 
   // Custom application errors
   if (error instanceof AppError) {
+    if (error.statusCode >= 500) reportError(error, { request });
     return reply.status(error.statusCode).send({
       error: error.name,
       message: error.message,
@@ -62,6 +64,7 @@ export const errorHandler = async (
       request.tenant?.name ??
       (tenantId ? (await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }).catch(() => null))?.name : undefined);
     request.log.error({ err: error, tenantId }, 'Database unavailable');
+    reportError(error, { request });
     return reply.status(503).send({
       error: 'Service Unavailable',
       message: name ? `${name}'s data is temporarily unavailable. Try again shortly.` : 'The database is temporarily unavailable. Try again shortly.',
@@ -112,8 +115,9 @@ export const errorHandler = async (
     });
   }
 
-  // Default error
+  // Default error: unexpected, so it's also reported (error tracking)
   request.log.error(error);
+  reportError(error, { request });
 
   return reply.status(500).send({
     error: 'Internal Server Error',
