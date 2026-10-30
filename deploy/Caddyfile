@@ -31,7 +31,11 @@
 		# Caddy sends the client's address in X-Forwarded-For, replacing any
 		# the client sent itself; the API trusts this one hop (TRUST_PROXY=1).
 		# Behind a CDN or load balancer as well, see docs/DEPLOYMENT.md.
-		reverse_proxy {$API_UPSTREAM:api:4000}
+		# It also gives each request an ID, kept by the API in its logs, audit
+		# entries and responses (any X-Request-ID the client sent is replaced)
+		reverse_proxy {$API_UPSTREAM:api:4000} {
+			header_up X-Request-ID {http.request.uuid}
+		}
 	}
 
 	# The app: files from the build, everything else is a client-side route

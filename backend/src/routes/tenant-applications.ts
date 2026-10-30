@@ -5,6 +5,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -38,8 +39,9 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', state } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     const where = {
       tenantId,
@@ -52,7 +54,7 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       controlDb.tenantApplication.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           application: {
@@ -76,10 +78,10 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       tenantApplications,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

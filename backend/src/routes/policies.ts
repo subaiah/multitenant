@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createPolicySchema = z.object({
   name: z.string().min(2).max(100),
@@ -49,8 +50,9 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', enabled, effect } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     // Only the current tenant's policies (platform staff select a tenant with x-tenant-id)
     const where = {
@@ -65,7 +67,7 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.accessPolicy.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
         include: {
           _count: {
@@ -79,10 +81,10 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       policies,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

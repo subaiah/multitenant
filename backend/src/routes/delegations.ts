@@ -6,6 +6,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { pageOf } from '../lib/pagination.js';
 
 const createDelegationSchema = z.object({
   delegateId: z.string().uuid(),
@@ -42,8 +43,9 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     const userType = (request.user as any).userType;
     const tenantId = request.tenant.id;
     const { page = '1', limit = '20', status, delegateId, delegatorId } = request.query as any;
+    const paging = pageOf(page, limit);
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = paging.skip;
     
     const where = {
       tenantId,
@@ -58,7 +60,7 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
       request.db.delegation.findMany({
         where,
         skip,
-        take: parseInt(limit),
+        take: paging.limit,
         orderBy: { createdAt: 'desc' },
         include: {
           delegator: {
@@ -82,10 +84,10 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
     return {
       delegations,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: paging.page,
+        limit: paging.limit,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / paging.limit),
       },
     };
   });

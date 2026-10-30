@@ -124,3 +124,12 @@ How:
 
 Access tokens must be session tokens (`type: 'access'`): any other token signed with the
 same key is refused as a session.
+Session tokens are signed with HS256 and only HS256 is accepted, so a token naming any other algorithm (`none`, say) is refused.
+
+## Requests from other websites
+
+The session cookies are httpOnly and `SameSite=Lax`, so browsers don't send them with another website's POST, PUT, PATCH or DELETE. As a second line of defence (`src/lib/request-guard.ts`):
+
+- A state-changing request that carries cookies must come from an allowed origin: one listed in `CORS_ORIGIN`, or the address the request was sent to (a tenant's custom domain reaches the API through its own address). Its `Origin` header decides, or its `Referer` when there's no `Origin`. Anything else is refused with 403 `BAD_ORIGIN`.
+- Requests without cookies (API clients with a bearer token), and requests with neither header (not from a page in a browser), are not affected.
+- Bodies must be JSON: `text/plain`, which any web page can send to another site without asking first, is refused with 415.

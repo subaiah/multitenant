@@ -32,7 +32,8 @@ import { dataExportRoutes } from './routes/data-exports.js';
 import { databaseRoutes } from './routes/database.js';
 import { authConfigRoutes } from './routes/auth-config.js';
 import { apiConfigRoutes } from './routes/api-config.js';
-import { healthRoutes } from './routes/health.js';
+import { healthDetailRoutes, healthRoutes } from './routes/health.js';
+import { originGuard, requestIdFor } from './lib/request-guard.js';
 import { roleRoutes } from './routes/roles.js';
 import { groupRoutes } from './routes/groups.js';
 import { organizationRoutes } from './routes/organizations.js';
@@ -65,6 +66,8 @@ const fastify = Fastify({
   // Behind a proxy, request.ip (rate limits, audit, sign-in history) comes
   // from X-Forwarded-For, believed only for the configured hops
   trustProxy: config.trustProxy,
+  // Kept from the proxy's X-Request-ID when it sends one (lib/request-guard.ts)
+  genReqId: requestIdFor,
   logger: {
     level: config.logLevel,
     // Request lines without the secrets some URLs carry (lib/log-redaction.ts)
@@ -84,7 +87,19 @@ async function registerPlugins() {
     // @fastify/cors only allows GET, HEAD and POST by default, which blocked
     // every PATCH/PUT/DELETE the frontend makes.
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    exposedHeaders: ['X-Request-ID'],
   });
+
+  // Every response says which request it answers (quoted in support requests)
+  fastify.addHook('onRequest', async (request, reply) => {
+    reply.header('X-Request-ID', request.id);
+  });
+  // State-changing requests with cookies must come from this app's own pages
+  fastify.addHook('onRequest', originGuard(config.corsOrigin.split(',')));
+  // Bodies are JSON. Fastify also parses
+  // text/plain by default, a type any web page can send to another site
+  // without asking first; nothing here uses it.
+  fastify.removeContentTypeParser('text/plain');
 
   // Security headers. The API only returns JSON, so its content policy allows
   // nothing to load or frame it; the API reference sets its own (below).
@@ -101,9 +116,12 @@ async function registerPlugins() {
     // Browsers authenticate with the httpOnly cookie set by /bff/auth/login;
     // API clients can still send `Authorization: Bearer` (checked first).
     cookie: { cookieName: 'access_token', signed: false },
+    // The algorithm is fixed both ways: a token claiming any other is refused
     sign: {
+      algorithm: 'HS256',
       expiresIn: config.jwtExpiresIn,
     },
+    verify: { algorithms: ['HS256'] },
   });
 
   // Stamp user tokens with a millisecond issue time. The standard `iat` is in
@@ -211,6 +229,9 @@ async function registerRoutes() {
     // Enforce each route's declared permission (see authorize.ts). Runs before
     // body validation so unauthorized callers get 403, not schema details.
     protectedRoutes.addHook('preValidation', authorize);
+
+    // Database latency, memory, uptime: platform staff only
+    await protectedRoutes.register(platformScoped(healthDetailRoutes), { prefix: '/health' });
 
     // Tenant management
     await protectedRoutes.register(platformScoped(tenantRoutes), { prefix: '/tenants' });
