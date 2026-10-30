@@ -256,7 +256,7 @@ test('silent sign-in follows the site session: a different or ended session asks
   assert.ok(first.location!.searchParams.get('code'));
   // Again, with prompt=none: no interaction needed
   const again = await signIn(browser, app.clientId, { prompt: 'none' });
-  assert.ok(again.location!.searchParams.get('code'), again.location?.href);
+  assert.ok(again.location!.searchParams.get('code'), again.location?.href ?? 'no redirect');
 
   // Someone else signs in to the site in the same browser
   for (const name of ['access_token', 'refresh_token']) browser.jar.delete(name);
