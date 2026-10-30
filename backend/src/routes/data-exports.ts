@@ -16,6 +16,7 @@ import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { audit } from '../lib/audit.js';
 import { exportFile, runExport } from '../lib/data-export.js';
+import { config } from '../config/env.js';
 import { isTenantAdmin } from '../utils/authorization.js';
 
 const PER_DAY = 5;
@@ -63,7 +64,8 @@ export const dataExportRoutes: FastifyPluginAsync = async (fastify) => {
     const user = await request.db.user.findFirst({ where: { id: request.user.userId, tenantId }, select: { email: true } });
     const created = await controlDb.dataExport.create({ data: { tenantId, requestedById: request.user.userId, requestedBy: user?.email ?? null } });
     await audit(request, 'data_export.requested', { resource: { type: 'data_export', id: created.id, label: 'Organization data' } });
-    void runExport(created.id);
+    // Built here, or by the worker when this server doesn't run jobs (lib/jobs.ts)
+    if (config.runJobs) void runExport(created.id);
     return reply.status(202).send(view(created));
   });
 

@@ -157,7 +157,9 @@ async function freePort(): Promise<number> {
 
 async function spawnServer(port: number, env: Record<string, string>): Promise<ChildProcess> {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
-    env: { ...process.env, ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
+    // Exports are built when asked for; no server polls for waiting ones
+    // unless a test says so (operations.test.ts), so tests see what they started
+    env: { ...process.env, EXPORT_POLL_MS: '0', ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   let exited = false;

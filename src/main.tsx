@@ -8,6 +8,13 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "./index.css";
 import App from "./App.tsx";
 import { APP_NAME } from "./lib/brand";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { installErrorReporting } from "./lib/error-reporting";
 
 document.title = APP_NAME;
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+installErrorReporting();
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
+);

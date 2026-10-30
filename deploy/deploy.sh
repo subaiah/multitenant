@@ -28,8 +28,12 @@ set_env() {
 }
 set_env API_IMAGE "$api"
 set_env WEB_IMAGE "$web"
+# Shown with each error in error tracking: the commit the images were built from
+set_env APP_VERSION "${api##*:}"
 
 docker compose pull migrate api web
+# The backup service's small image is built here, from this checkout
+docker compose build backup
 # The release step first, on its own: if a migration fails, the running API
 # keeps serving the old version and the deploy stops here
 docker compose run --rm migrate

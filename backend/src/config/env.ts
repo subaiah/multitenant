@@ -2,6 +2,9 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 // Environment variable schema
+/** An optional setting given as "" is treated as not given */
+const unsetIfEmpty = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === '' ? undefined : v), schema);
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
@@ -140,6 +143,25 @@ const envSchema = z.object({
   NOTIFICATION_POLL_MS: z.string().default('15000').transform(Number),
   // In-app notifications older than this are removed
   NOTIFICATION_RETENTION_DAYS: z.string().default('90').transform(Number),
+
+  // Background jobs (lib/jobs.ts): notifications, data exports, audit
+  // archiving, usage snapshots, trials and closures, rate-limit cleanup. On by
+  // default; turn off on API servers when a separate worker runs them
+  // (node dist/worker.js; the `worker` service in deploy/docker-compose.yml).
+  RUN_JOBS: z.enum(['true', 'false']).default('true'),
+  // How often the job runner looks for data exports to build
+  EXPORT_POLL_MS: z.string().default('10000').transform(Number),
+
+  // Error tracking (lib/error-reporting.ts), optional: a Sentry project's DSN
+  // for server errors, and one for errors in people's browsers (can be the
+  // same project). Browsers send theirs through the API (/bff/errors), so no
+  // other address has to be allowed in the content policy.
+  // (Empty counts as not set: docker compose passes unset ones as "")
+  SENTRY_DSN: unsetIfEmpty(z.string().url().optional()),
+  SENTRY_FRONTEND_DSN: unsetIfEmpty(z.string().url().optional()),
+  SENTRY_ENVIRONMENT: unsetIfEmpty(z.string().optional()),
+  // Which build is running (a git commit, say): shown with each error
+  APP_VERSION: unsetIfEmpty(z.string().optional()),
 
   // Development only: return OTP codes in API responses instead of sending them.
   // Ignored unless NODE_ENV=development.
@@ -312,6 +334,14 @@ export const config = {
   dnsServers: env.DNS_SERVERS ? env.DNS_SERVERS.split(',').map((s) => s.trim()).filter(Boolean) : [],
   supportSelfApproval: env.SUPPORT_SELF_APPROVAL === 'true',
   notificationRetentionDays: env.NOTIFICATION_RETENTION_DAYS,
+  runJobs: env.RUN_JOBS === 'true',
+  exportPollMs: env.EXPORT_POLL_MS,
+  sentry: {
+    dsn: env.SENTRY_DSN ?? null,
+    frontendDsn: env.SENTRY_FRONTEND_DSN ?? null,
+    environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
+    release: env.APP_VERSION ?? null,
+  },
 
   /** Encryption keys for stored secrets, by version; see readSecretKeys */
   secretKeys: readSecretKeys(env.NODE_ENV),

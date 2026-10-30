@@ -181,27 +181,73 @@ Two things need backing up. Together they are everything that can't be recreated
 1. **All databases on the Postgres server, and its roles.** That covers the control plane, the shared tenant database, and every database-per-tenant database.
 2. **The audit archive** (the `audit-archive` volume): audit entries past `AUDIT_RETENTION_DAYS`, which have left the database.
 
-`deploy/backup.sh` writes both to a folder. Run it nightly from cron, then copy the files off the server:
+The `backup` service does both every night at `BACKUP_TIME`, with nothing to install on the server. Each run:
+
+1. **Dumps** every database and the roles (`pg_dumpall`), and packs the audit archive.
+2. **Proves the dump restores.** It restores the dump into a throwaway Postgres inside the container and checks the control plane's tables, migrations and tenants are there. A backup that wouldn't restore counts as a failed backup. `BACKUP_VERIFY=false` skips this.
+3. **Encrypts** both files when `BACKUP_AGE_RECIPIENT` is set.
+4. **Copies them off the server** when `BACKUP_S3_BUCKET` is set, and removes copies there older than `BACKUP_KEEP_DAYS` (30).
+5. **Keeps the newest `BACKUP_KEEP_LOCAL` (7)** in `deploy/backups/`, and writes the outcome to `deploy/backups/last-backup.json`.
+6. **Reports** success or failure to `BACKUP_PING_URL`, when set.
+
+A backup on the same disk is not a backup, so set up object storage and an alert.
+
+### Settings (`deploy/.env`)
+
+| Setting | What it does |
+| --- | --- |
+| `BACKUP_TIME` | Daily run time, `HH:MM` (default `02:15`) |
+| `BACKUP_TZ` | Its time zone (default `UTC`; `Asia/Kolkata` for Indian time) |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_REGION`, `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY` | Any S3-compatible storage: Oracle Object Storage, Backblaze B2, Cloudflare R2, AWS S3 |
+| `BACKUP_S3_PREFIX` | Folder inside the bucket (default `multitenant`) |
+| `BACKUP_AGE_RECIPIENT` | An [age](https://age-encryption.org) public key (`age1...`): files are encrypted to it before they leave the server |
+| `BACKUP_PING_URL` | A [healthchecks.io](https://healthchecks.io) check URL: you're alerted when a backup fails, or doesn't happen at all |
+| `BACKUP_KEEP_LOCAL`, `BACKUP_KEEP_DAYS` | How many to keep on the server; how many days in object storage |
+
+**Oracle Object Storage.** Create a bucket (private). Then, under your user, go to *Customer secret keys → Generate secret key*: that's the access key and secret. The endpoint is `https://<namespace>.compat.objectstorage.<region>.oraclecloud.com`; the namespace is on the bucket's page. Set `BACKUP_S3_REGION` to the region, e.g. `ap-hyderabad-1`.
+
+**Encryption key.** Make the key pair once:
 
 ```sh
-15 2 * * * cd /srv/multitenant && deploy/backup.sh /srv/backups && rclone copy /srv/backups remote:multitenant-backups
+docker compose run --rm --no-deps backup age-keygen
 ```
+
+Put the `age1...` public key in `BACKUP_AGE_RECIPIENT`. Keep the whole output, the `AGE-SECRET-KEY-...` line included, in your password manager, **not on the server**. Then whoever gets a copy of the backups (or the server) can't read them. Without that private key, encrypted backups can't be restored.
+
+After changing settings, apply them with `docker compose up -d backup`.
+
+### Day to day
+
+- **Back up now:** `deploy/backup.sh`
+- **Check the last one:** `cat deploy/backups/last-backup.json`, or `docker compose logs backup`
+- **See what can be restored:** `deploy/restore.sh list` (shows files on the server and in object storage)
 
 `pg_dumpall` is consistent within each database, which is enough for a nightly copy. For point-in-time recovery, use a managed Postgres with it turned on, or WAL archiving such as pgBackRest or WAL-G.
 
-**Restore** (rehearse this before you need it):
+### Restoring
+
+Rehearse this before you need it, on a spare server if you can.
 
 ```sh
-docker compose down
-docker volume rm multitenant_pgdata              # a fresh, empty database server
-docker compose up -d db                          # init.sh runs again
-gunzip -c db-<stamp>.sql.gz | docker compose exec -T db psql -U postgres -d postgres
-docker compose run --rm --no-deps -T --entrypoint tar api -C /data -xzf - < audit-archive-<stamp>.tar.gz
-docker compose up -d
+deploy/restore.sh list
+deploy/restore.sh 20261030T021500Z ~/age-key.txt     # the key file only for encrypted backups
 docker compose run --rm --no-deps api node dist/cli/audit.js verify   # every chain should be intact
 ```
 
-The `.env` must be the one the backup was made with. The keys especially: stored secrets and audit signatures depend on them.
+What `deploy/restore.sh` does:
+
+- It asks you to type `restore` before going on, then stops the API, worker and web server.
+- It fetches the files from object storage if they aren't on the server, and decrypts them.
+- It replaces every database and role with the backup's, and restores the audit archive.
+- It starts everything again; the release step then brings an older backup up to the current schema.
+
+The `.env` must be the one the backup was made with. The keys especially: stored secrets and audit signatures depend on them, so keep a copy of `.env` with the age key in your password manager.
+
+**On a new server** (the old one is gone):
+
+1. Install as in [First installation](#first-installation), with the old `.env`.
+2. `docker compose up -d db backup`
+3. `deploy/restore.sh <stamp> <key file>`
 
 ## Keys
 
@@ -301,7 +347,54 @@ The server is safe to run several times behind a load balancer:
 - **Per-server limit.** The per-IP flood limit (`RATE_LIMIT_MAX` per `RATE_LIMIT_TIME_WINDOW`) is counted per server.
 - **Shared audit archive.** Every server must write to the same folder, so mount shared storage (NFS, EFS) at `/data/audit-archive`, or run archiving on one server only (`AUDIT_ARCHIVE_INTERVAL_MS=0` on the others).
 
+### A separate worker for background jobs
+
+By default each API server also runs the background jobs: notifications, data exports, audit archiving, usage snapshots, and trials and closures. Exports especially can be heavy. To keep that work off the servers answering requests, run it in its own container. Set this in `deploy/.env`:
+
+```sh
+COMPOSE_PROFILES=worker     # starts the worker service
+API_RUN_JOBS=false          # the API leaves the jobs to it
+```
+
+Then run `docker compose up -d`. The worker is the same image running `node dist/worker.js`. You can also run more than one: each job takes a lock or claims its work.
+
 ## Monitoring
+
+### Uptime alerts
+
+Point a free uptime monitor at `https://<your domain>/api/health/ready`, checked every minute or few, and have it email you (or send to your phone) when it stops answering 200. For example:
+
+- [UptimeRobot](https://uptimerobot.com): *New monitor → HTTP(s)*.
+- [Better Stack](https://betterstack.com/uptime).
+
+That one check covers four failures: the server being down, Caddy failing, the API crashing, and the databases being unreachable.
+
+The backups' alert is separate: `BACKUP_PING_URL` ([Backups](#backups)).
+
+### Error tracking
+
+Unexpected errors can go to [Sentry](https://sentry.io), whose free plan is enough to start, or to self-hosted [GlitchTip](https://glitchtip.com), which speaks the same protocol. In `deploy/.env`:
+
+| Setting | What it does |
+| --- | --- |
+| `SENTRY_DSN` | Server errors: 500 responses, an unreachable tenant database, failed background jobs. A project's DSN, from *Settings → Client Keys*. |
+| `SENTRY_FRONTEND_DSN` | Errors in people's browsers. It can be the same DSN, or a second project. |
+| `SENTRY_ENVIRONMENT` | Default `production`. |
+
+The browser's errors are sent through the API (`POST /api/bff/errors`), so the content policy needs no other address and ad blockers don't drop them.
+
+Each event carries:
+
+- the error and its stack trace;
+- the route (its pattern, never the URL with its query string);
+- the request ID;
+- the tenant's and user's IDs, and the release.
+
+It never carries request bodies, headers, cookies, email addresses or IP addresses. Deploys through GitHub set the release (`APP_VERSION`) to the commit. Sending is capped at 30 events a minute per server, so an outage doesn't flood the project.
+
+In Sentry, set up an alert rule ("a new issue is created" → email) to hear about each new kind of error.
+
+### What's built in
 
 - **Health:** `GET /api/health`, liveness with no database access (container health checks). `GET /api/health/ready` answers 200 when the control plane and the shared tenant database are reachable and 503 when not, and says nothing more: point an uptime monitor at it. `GET /api/health/detailed` adds latencies, memory and uptime, for signed-in platform staff only.
 - **Request IDs:** Caddy gives every API request an ID (`X-Request-ID`). The API keeps it in its log lines and audit entries and sends it back in the response, so one request can be followed from Caddy's log into the API's, and a user reporting a problem can quote it.
@@ -324,4 +417,5 @@ The server is safe to run several times behind a load balancer:
 | Archive old audit entries now | `docker compose run --rm --no-deps api node dist/cli/audit.js archive` |
 | Secrets still on an old key | `docker compose run --rm --no-deps api node dist/cli/encrypt-secrets.js --check` |
 | A database shell | `docker compose exec db psql -U postgres -d multitenant` |
-| Backup | `deploy/backup.sh <folder>` |
+| Back up now | `deploy/backup.sh` |
+| List backups / restore one | `deploy/restore.sh list` / `deploy/restore.sh <stamp> [key file]` |
