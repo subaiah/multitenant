@@ -3,12 +3,14 @@
  * Filter, open an entry to see exactly what changed, check the log hasn't
  * been tampered with, export it, and download archived (older) entries.
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Search, ShieldCheck, ShieldAlert, Download, ChevronDown, ChevronRight, Archive, Loader2, Bot, User, Building2, UserX, KeyRound } from 'lucide-react';
 import { API_URL, apiGet, apiPost } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { apiKey } from '../lib/query';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, humanize, inputClass, secondaryButtonClass, selectClass, formatDateTime } from '../components/ui';
 
@@ -80,32 +82,27 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
   const labelOf = useCallback((key: string) => events.data?.find((e) => e.key === key)?.label ?? humanize(key.replace(/[._]/g, ' ')), [events.data]);
   const tenantName = (id: string | null) => (id ? tenants.data?.data.find((t) => t.id === id)?.name ?? id.slice(0, 8) : null);
 
-  // Newest first, "Load older" appends
-  const [rows, setRows] = useState<Entry[]>([]);
-  const [nextBefore, setNextBefore] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
-
-  const load = useCallback(async (before?: number) => {
-    setLoading(true);
-    setError(null);
-    try {
+  // Newest first, 50 at a time; "Load older" adds the next page (cached like
+  // every read, so coming back keeps what was loaded)
+  type Page = { data: Entry[]; nextBefore: number | null };
+  const pages = useInfiniteQuery({
+    queryKey: [...apiKey(base), filterQuery],
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam }) => {
       const q = new URLSearchParams(filterQuery);
       q.set('limit', '50');
-      if (before) q.set('before', String(before));
-      const page = await apiGet<{ data: Entry[]; nextBefore: number | null }>(`${base}?${q}`);
-      setRows((prev) => (before ? [...prev, ...page.data] : page.data));
-      setNextBefore(page.nextBefore);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load the audit log');
-    } finally {
-      setLoading(false);
-    }
-  }, [base, filterQuery]);
-  useEffect(() => {
-    void load();
-  }, [load]);
+      if (pageParam) q.set('before', String(pageParam));
+      return apiGet<Page>(`${base}?${q}`);
+    },
+    getNextPageParam: (last: Page) => last.nextBefore ?? undefined,
+  });
+  const rows = useMemo(() => pages.data?.pages.flatMap((p) => p.data) ?? [], [pages.data]);
+  const nextBefore = pages.hasNextPage;
+  const loading = pages.isFetching;
+  const error = pages.error ? (pages.error instanceof Error ? pages.error.message : 'Could not load the audit log') : null;
+  const [open, setOpen] = useState<string | null>(null);
+  // From the newest again (after archiving, or retrying after an error)
+  const load = () => pages.refetch();
 
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -303,7 +300,7 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
           </table>
           {nextBefore && (
             <div className="p-3 text-center border-t border-slate-100 dark:border-slate-700">
-              <button className={secondaryButtonClass} disabled={loading} onClick={() => void load(nextBefore)}>
+              <button className={secondaryButtonClass} disabled={loading} onClick={() => void pages.fetchNextPage()}>
                 {loading && <Loader2 size={14} className="animate-spin" />}Load older entries
               </button>
             </div>

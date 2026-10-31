@@ -67,6 +67,10 @@ let actingTenantId: string | null = null;
 export function setActingTenant(tenantId: string | null) {
   actingTenantId = tenantId;
 }
+/** The organization a support session is working in, if any (part of every cache key, lib/query.ts) */
+export function actingTenant(): string | null {
+  return actingTenantId;
+}
 
 async function send(url: string, options: RequestInit): Promise<Response> {
   const headers = new Headers(options.headers);
@@ -87,7 +91,7 @@ async function parse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): Promise<T> {
+export async function apiRequest<T = unknown>(endpoint: string, options: ApiOptions = {}): Promise<T> {
   const { skipAuth = false, background = false, ...fetchOptions } = options;
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
   if (background) fetchOptions.headers = { ...(fetchOptions.headers as Record<string, string>), 'x-background-request': '1' };
@@ -123,23 +127,23 @@ function sessionEnded() {
   window.dispatchEvent(new CustomEvent<SessionEndReason>(SESSION_ENDED_EVENT, { detail: reason }));
 }
 
-export function apiGet<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
+export function apiGet<T = unknown>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'GET' });
 }
 
-export function apiPost<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+export function apiPost<T = unknown>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'POST', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-export function apiPut<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+export function apiPut<T = unknown>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'PUT', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-export function apiPatch<T = any>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
+export function apiPatch<T = unknown>(endpoint: string, data?: unknown, options?: Omit<ApiOptions, 'method' | 'body'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'PATCH', body: data === undefined ? undefined : JSON.stringify(data) });
 }
 
-export function apiDelete<T = any>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
+export function apiDelete<T = unknown>(endpoint: string, options?: Omit<ApiOptions, 'method'>): Promise<T> {
   return apiRequest<T>(endpoint, { ...options, method: 'DELETE' });
 }
 

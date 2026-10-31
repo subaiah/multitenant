@@ -1,7 +1,9 @@
 import { useAuth } from '../contexts/AuthContext';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Package, Plus, Edit2, Trash2, Key, CheckCircle, XCircle } from 'lucide-react';
-import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { invalidateApi } from '../lib/query';
 import ApplicationSignIn from '../components/ApplicationSignIn';
 
 interface Application {
@@ -27,11 +29,15 @@ interface Permission {
 }
 
 export default function ApplicationsManagement() {
-  const [applications, setApplications] = useState<Application[]>([]);
+  const list = useApi<{ applications: Application[] }>('/applications');
+  const applications = list.data?.applications ?? [];
+  const loading = list.loading;
   const canManage = useAuth().hasPermission('app-registry:manage');
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [loading, setLoading] = useState(true);
+  // The chosen application, read from the latest list (the first by default)
+  const [selectedId, setSelectedId] = useState<string | null | undefined>(undefined);
+  const selectedApp = (selectedId === undefined ? applications[0] : applications.find((a) => a.id === selectedId)) ?? null;
+  const setSelectedApp = (app: Application | null) => setSelectedId(app?.id ?? null);
+  const permissions = useApi<{ permissions: Permission[] }>(selectedApp ? `/applications/${selectedApp.id}/permissions` : null).data?.permissions ?? [];
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -48,38 +54,9 @@ export default function ApplicationsManagement() {
     action: 'read',
   });
 
-  useEffect(() => {
-    fetchApplications();
-  }, []);
-
-  useEffect(() => {
-    if (selectedApp) {
-      fetchPermissions(selectedApp.id);
-    }
-  }, [selectedApp]);
-
-  const fetchApplications = async () => {
-    try {
-      const response = await apiGet<any>('/applications');
-      setApplications(response.applications);
-      if (response.applications.length > 0 && !selectedApp) {
-        setSelectedApp(response.applications[0]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch applications:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchPermissions = async (appId: string) => {
-    try {
-      const response = await apiGet<any>(`/applications/${appId}/permissions`);
-      setPermissions(response.permissions);
-    } catch (error) {
-      console.error('Failed to fetch permissions:', error);
-    }
-  };
+  // After a change: the catalogue (here, and the organizations' pages that list it)
+  const fetchApplications = () => invalidateApi('/applications', '/tenant-applications');
+  const fetchPermissions = (appId: string) => invalidateApi(`/applications/${appId}/permissions`, '/applications');
 
   const handleCreateApp = async () => {
     try {

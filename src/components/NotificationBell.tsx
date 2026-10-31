@@ -3,10 +3,13 @@
  * focus, as a background request so it doesn't keep an idle session alive)
  * and the latest notifications.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api-client';
+import { useQuery } from '@tanstack/react-query';
+import { useApi } from '../hooks/useApi';
+import { apiKey, invalidateApi } from '../lib/query';
 import { formatRelative } from './ui';
 
 export interface InboxItem {
@@ -23,29 +26,22 @@ const POLL_MS = 30_000;
 
 export default function NotificationBell({ allPath, dark = false }: { allPath: string; dark?: boolean }) {
   const navigate = useNavigate();
-  const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<InboxItem[] | null>(null);
   const panel = useRef<HTMLDivElement>(null);
 
-  const refreshCount = useCallback(async () => {
-    try {
-      setCount((await apiGet<{ count: number }>('/notifications/unread-count', { background: true })).count);
-    } catch {
-      /* signed out or offline: try again later */
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshCount();
-    const timer = setInterval(() => document.visibilityState === 'visible' && void refreshCount(), POLL_MS);
-    const onFocus = () => void refreshCount();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [refreshCount]);
+  // A background request: polling mustn't keep an idle session alive. Every
+  // 30 seconds while the tab is visible, and when the window gets focus.
+  const unread = useQuery({
+    queryKey: apiKey('/notifications/unread-count'),
+    queryFn: () => apiGet<{ count: number }>('/notifications/unread-count', { background: true }),
+    refetchInterval: POLL_MS,
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+  const count = unread.data?.count ?? 0;
+  // The latest few, while the panel is open
+  const latest = useApi<{ data: InboxItem[]; unread: number }>(open ? '/notifications?limit=8' : null);
+  const items = open && !latest.loading ? latest.data?.data ?? [] : null;
 
   // Close on a click outside or Escape
   useEffect(() => {
@@ -60,23 +56,13 @@ export default function NotificationBell({ allPath, dark = false }: { allPath: s
     };
   }, [open]);
 
-  const toggle = async () => {
-    if (open) return setOpen(false);
-    setOpen(true);
-    setItems(null);
-    try {
-      const page = await apiGet<{ data: InboxItem[]; unread: number }>('/notifications?limit=8');
-      setItems(page.data);
-      setCount(page.unread);
-    } catch {
-      setItems([]);
-    }
-  };
+  const toggle = () => setOpen((o) => !o);
 
+  // The count, this panel and the Notifications page
   const openItem = async (n: InboxItem) => {
     if (!n.readAt) {
       await apiPost('/notifications/read', { ids: [n.id] }).catch(() => {});
-      setCount((c) => Math.max(0, c - 1));
+      void invalidateApi('/notifications');
     }
     setOpen(false);
     if (n.link) navigate(n.link);
@@ -84,8 +70,7 @@ export default function NotificationBell({ allPath, dark = false }: { allPath: s
 
   const readAll = async () => {
     await apiPost('/notifications/read', {}).catch(() => {});
-    setCount(0);
-    setItems((list) => list?.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })) ?? null);
+    await invalidateApi('/notifications');
   };
 
   return (

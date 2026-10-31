@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound, Bell } from 'lucide-react';
-import { getCurrentUser, apiPatch, apiGet } from '../lib/api-client';
+import { apiPatch, type CurrentUser } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { invalidateApi } from '../lib/query';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
 import { SignInDetails } from '../components/SignInDetails';
 
@@ -39,36 +41,20 @@ interface RoleAssignment {
 }
 
 export default function Profile() {
-  const [user, setUser] = useState<UserInfo | null>(null);
-  const [tenant, setTenant] = useState<TenantInfo | null>(null);
-  const [groups, setGroups] = useState<GroupMembership[]>([]);
-  const [roleAssignments, setRoleAssignments] = useState<RoleAssignment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const me = useApi<CurrentUser>('/bff/auth/me');
+  const user: UserInfo | null = me.data?.user ?? null;
+  const tenant: TenantInfo | null = me.data?.tenant ?? null;
+  const roles = useApi<{ groups?: GroupMembership[]; roleAssignments?: RoleAssignment[] }>(user ? `/roles/user/${user.id}` : null);
+  const groups = roles.data?.groups ?? [];
+  const roleAssignments = roles.data?.roleAssignments ?? [];
+  const loading = me.loading;
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const data = await getCurrentUser();
-        setUser(data.user);
-        setTenant(data.tenant);
-        setName(data.user.name || '');
-
-        // Fetch user's groups and role assignments
-        const userRolesData = await apiGet(`/roles/user/${data.user.id}`);
-        setGroups(userRolesData.groups || []);
-        setRoleAssignments(userRolesData.roleAssignments || []);
-      } catch (error) {
-        console.error('Failed to fetch user:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, []);
+  // The name field starts from the saved name once it has loaded
+  const savedName = user?.name ?? '';
+  useEffect(() => setName(savedName), [savedName]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -78,7 +64,7 @@ export default function Profile() {
 
     try {
       await apiPatch(`/users/${user.id}`, { name });
-      setUser({ ...user, name });
+      await invalidateApi('/bff/auth/me', '/users');
       setMessage({ type: 'success', text: 'Profile updated successfully' });
     } catch (error) {
       console.error('Failed to update profile:', error);

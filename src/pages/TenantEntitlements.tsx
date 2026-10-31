@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar } from 'lucide-react';
-import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { invalidateApi } from '../lib/query';
 
 interface Application {
   id: string;
@@ -21,31 +23,17 @@ interface TenantApplication {
 }
 
 export default function TenantEntitlements() {
-  const [availableApps, setAvailableApps] = useState<Application[]>([]);
-  const [entitledApps, setEntitledApps] = useState<TenantApplication[]>([]);
-  const [loading, setLoading] = useState(true);
+  const apps = useApi<{ applications: Application[] }>('/applications');
+  const entitlements = useApi<{ tenantApplications: TenantApplication[] }>('/tenant-applications');
+  const availableApps = apps.data?.applications ?? [];
+  const entitledApps = entitlements.data?.tenantApplications ?? [];
+  const loading = apps.loading || entitlements.loading;
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedAppId, setSelectedAppId] = useState('');
   const [validTo, setValidTo] = useState('');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    try {
-      const [appsResponse, entitlementsResponse] = await Promise.all([
-        apiGet<any>('/applications'),
-        apiGet<any>('/tenant-applications'),
-      ]);
-      setAvailableApps(appsResponse.applications);
-      setEntitledApps(entitlementsResponse.tenantApplications);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // After a change: the entitlements here, and the Applications page's list
+  const fetchData = () => invalidateApi('/tenant-applications', '/applications');
 
   const handleAddEntitlement = async () => {
     if (!selectedAppId) return;

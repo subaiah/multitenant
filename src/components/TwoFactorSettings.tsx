@@ -1,7 +1,9 @@
 /** Your own two-factor sign-in: set it up, make new recovery codes, turn it off. */
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { KeyRound, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api-client';
+import { apiPost } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { invalidateApi } from '../lib/query';
 import { CodeField, EnrollInstructions, RecoveryCodes, type Enrollment } from './TwoFactor';
 
 interface Status {
@@ -16,7 +18,8 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : 'Somet
 const btn = 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function TwoFactorSettings() {
-  const [status, setStatus] = useState<Status | null>(null);
+  const current = useApi<Status>('/bff/two-factor');
+  const status = current.data;
   const [mode, setMode] = useState<Mode>('idle');
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [code, setCode] = useState('');
@@ -24,10 +27,7 @@ export function TwoFactorSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => apiGet<Status>('/bff/two-factor').then(setStatus).catch((err) => setError(messageOf(err))), []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = () => invalidateApi('/bff/two-factor');
 
   const reset = () => {
     setMode('idle');
@@ -75,7 +75,8 @@ export function TwoFactorSettings() {
   };
 
   if (!status) {
-    return error ? <p className="text-sm text-red-600">{error}</p> : <Loader2 size={18} className="animate-spin text-slate-400" />;
+    const problem = error ?? current.error;
+    return problem ? <p className="text-sm text-red-600">{problem}</p> : <Loader2 size={18} className="animate-spin text-slate-400" />;
   }
 
   return (

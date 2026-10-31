@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Building2, Plus, Edit2, Trash2, Users, ChevronRight } from 'lucide-react';
-import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { invalidateApi } from '../lib/query';
 import { PermissionButton } from '../components/PermissionGuard';
 
 interface Organization {
@@ -32,10 +34,14 @@ interface OrgUnit {
 }
 
 export default function Organizations() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
-  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
-  const [loading, setLoading] = useState(true);
+  const list = useApi<{ organizations: Organization[] }>('/organizations');
+  const organizations = list.data?.organizations ?? [];
+  const loading = list.loading;
+  // The chosen organization, read from the latest list (the first by default)
+  const [selectedId, setSelectedId] = useState<string | null | undefined>(undefined);
+  const selectedOrg = (selectedId === undefined ? organizations[0] : organizations.find((o) => o.id === selectedId)) ?? null;
+  const setSelectedOrg = (org: Organization | null) => setSelectedId(org?.id ?? null);
+  const orgUnits = useApi<{ units: OrgUnit[] }>(selectedOrg ? `/org-units/organization/${selectedOrg.id}` : null).data?.units ?? [];
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
@@ -47,38 +53,9 @@ export default function Organizations() {
     parentUnitId: '',
   });
 
-  useEffect(() => {
-    fetchOrganizations();
-  }, []);
-
-  useEffect(() => {
-    if (selectedOrg) {
-      fetchOrgUnits(selectedOrg.id);
-    }
-  }, [selectedOrg]);
-
-  const fetchOrganizations = async () => {
-    try {
-      const response = await apiGet<any>('/organizations');
-      setOrganizations(response.organizations);
-      if (response.organizations.length > 0 && !selectedOrg) {
-        setSelectedOrg(response.organizations[0]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch organizations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchOrgUnits = async (orgId: string) => {
-    try {
-      const response = await apiGet<any>(`/org-units/organization/${orgId}`);
-      setOrgUnits(response.units);
-    } catch (error) {
-      console.error('Failed to fetch org units:', error);
-    }
-  };
+  // After a change: organizations (and their member counts) and units, wherever they're shown
+  const fetchOrganizations = () => invalidateApi('/organizations', '/org-units');
+  const fetchOrgUnits = (_orgId: string) => invalidateApi('/org-units', '/organizations');
 
   const handleCreateOrg = async () => {
     try {
