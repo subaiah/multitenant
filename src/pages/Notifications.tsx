@@ -2,10 +2,13 @@
  * Notifications: your inbox, what you get and how (preferences), and for
  * tenant admins, what the organization sends (Organization).
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCheck, Lock, Loader2, RotateCw } from 'lucide-react';
 import { apiGet, apiPost, apiPut } from '../lib/api-client';
+import { useApi } from '../hooks/useApi';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { apiKey, invalidateApi } from '../lib/query';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, formatRelative, primaryButtonClass, secondaryButtonClass, formatDateTime } from '../components/ui';
 import type { InboxItem } from '../components/NotificationBell';
@@ -68,11 +71,9 @@ function TestEmailButton({ path }: { path: string }) {
 
 /** Platform: where email goes, and a test message */
 function PlatformEmail() {
-  const [setup, setSetup] = useState<{ transport: string; from: string; smtp: { host: string; port: number; secure: boolean; user: string | null } | null } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    apiGet<NonNullable<typeof setup>>('/platform/email').then(setSetup).catch((err) => setError(err instanceof Error ? err.message : 'Could not load'));
-  }, []);
+  const email = useApi<{ transport: string; from: string; smtp: { host: string; port: number; secure: boolean; user: string | null } | null }>('/platform/email');
+  const setup = email.data;
+  const error = email.error;
   if (error) return <ErrorState error={error} />;
   if (!setup) return <LoadingState />;
   const row = (label: string, value: React.ReactNode) => (
@@ -125,34 +126,27 @@ export default function Notifications({ scope }: { scope: 'tenant' | 'platform' 
 function Inbox() {
   const navigate = useNavigate();
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [items, setItems] = useState<InboxItem[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [next, setNext] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  type Page = { data: InboxItem[]; nextBefore: string | null; unread: number };
+  const pages = useInfiniteQuery({
+    queryKey: [...apiKey('/notifications'), { unreadOnly }],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => {
+      const q = new URLSearchParams({ limit: '25', ...(unreadOnly && { unread: 'true' }), ...(pageParam && { before: pageParam }) });
+      return apiGet<Page>(`/notifications?${q}`);
+    },
+    getNextPageParam: (last: Page) => last.nextBefore ?? undefined,
+  });
+  const items = useMemo(() => pages.data?.pages.flatMap((p) => p.data) ?? [], [pages.data]);
+  const unread = pages.data?.pages[0]?.unread ?? 0;
+  const next = pages.hasNextPage;
+  const loading = pages.isFetching;
+  const error = pages.error ? (pages.error instanceof Error ? pages.error.message : 'Could not load notifications') : null;
+  const load = () => pages.refetch();
 
-  const load = useCallback(async (before?: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const q = new URLSearchParams({ limit: '25', ...(unreadOnly && { unread: 'true' }), ...(before && { before }) });
-      const page = await apiGet<{ data: InboxItem[]; nextBefore: string | null; unread: number }>(`/notifications?${q}`);
-      setItems((prev) => (before ? [...prev, ...page.data] : page.data));
-      setNext(page.nextBefore);
-      setUnread(page.unread);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load notifications');
-    } finally {
-      setLoading(false);
-    }
-  }, [unreadOnly]);
-  useEffect(() => void load(), [load]);
-
+  // The inbox and the bell's count
   const markRead = async (ids?: string[]) => {
     await apiPost('/notifications/read', ids ? { ids } : {});
-    const now = new Date().toISOString();
-    setItems((list) => list.map((n) => (!ids || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? now } : n)));
-    setUnread((u) => (ids ? Math.max(0, u - ids.length) : 0));
+    await invalidateApi('/notifications');
   };
 
   if (error) return <ErrorState error={error} onRetry={() => void load()} />;
@@ -190,7 +184,7 @@ function Inbox() {
           </ul>
           {next && (
             <div className="p-3 text-center border-t border-slate-100 dark:border-slate-700">
-              <button className={secondaryButtonClass} disabled={loading} onClick={() => void load(next)}>
+              <button className={secondaryButtonClass} disabled={loading} onClick={() => void pages.fetchNextPage()}>
                 {loading && <Loader2 size={14} className="animate-spin" />}Older
               </button>
             </div>
@@ -202,15 +196,14 @@ function Inbox() {
 }
 
 function Preferences() {
-  const [prefs, setPrefs] = useState<Preference[] | null>(null);
+  const stored = useApi<Preference[]>('/notifications/preferences');
+  const prefs = stored.data;
   const [draft, setDraft] = useState<Record<string, Channels>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [saveError, setError] = useState<string | null>(null);
+  const error = saveError ?? stored.error;
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    apiGet<Preference[]>('/notifications/preferences').then(setPrefs).catch((err) => setError(err.message));
-  }, []);
   const groups = useMemo(() => groupBy(prefs ?? []), [prefs]);
   const value = (p: Preference) => draft[p.type] ?? p.current;
   const dirty = Object.keys(draft).length > 0;
@@ -219,7 +212,8 @@ function Preferences() {
     setSaving(true);
     setError(null);
     try {
-      setPrefs(await apiPut<Preference[]>('/notifications/preferences', { preferences: draft }));
+      await apiPut<Preference[]>('/notifications/preferences', { preferences: draft });
+      await invalidateApi('/notifications/preferences');
       setDraft({});
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -284,21 +278,15 @@ function Preferences() {
 }
 
 function Organization() {
-  const [data, setData] = useState<{ types: OrgType[]; delivery: { failedEmails: number; pending: number } } | null>(null);
+  const settings = useApi<{ types: OrgType[]; delivery: { failedEmails: number; pending: number } }>('/notification-settings');
+  const data = settings.data;
   const [draft, setDraft] = useState<Record<string, OrgType['setting']>>({});
   const [failed, setFailed] = useState<FailedEmail[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [saveError, setError] = useState<string | null>(null);
+  const error = saveError ?? settings.error;
   const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setData(await apiGet('/notification-settings'));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load settings');
-    }
-  }, []);
-  useEffect(() => void load(), [load]);
+  const load = () => invalidateApi('/notification-settings');
 
   const groups = useMemo(() => groupBy(data?.types ?? []), [data]);
   const value = (t: OrgType) => draft[t.type] ?? t.setting;
