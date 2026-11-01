@@ -4,6 +4,7 @@ import {
   type CurrentUser, type MfaStep, type SessionEndReason,
 } from '../lib/api-client';
 import { permissionMatches, type Portal } from '../lib/permissions';
+import { clearApiCache } from '../lib/query';
 
 type User = CurrentUser['user'];
 type Tenant = NonNullable<CurrentUser['tenant']>;
@@ -48,16 +49,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [previewFeatures, setPreviewFeatures] = useState(false);
 
   const clear = useCallback(() => {
+    clearApiCache();
     setUser(null);
     setTenant(null);
     setPermissions([]);
     setScopedPermissions([]);
   }, []);
 
+  const lastUserId = useRef<string | null>(null);
   const reload = useCallback(async (): Promise<Portal | null> => {
     setLoading(true);
     try {
       const me = await getCurrentUser();
+      // Someone else now (signed in as another account): nothing of the last one's
+      if (me.user.id !== lastUserId.current) clearApiCache();
+      lastUserId.current = me.user.id;
       const { permissions, scoped = [] } = await apiGet<{ permissions: string[]; scoped?: { permission: string; scopeAware?: boolean }[] }>('/auth/permissions');
       setUser(me.user);
       setTenant(me.tenant);
@@ -93,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // signed out), unless the server said it timed out
       if (!signedIn.current && reason === 'signed-out') return;
       setSessionEnded(reason);
+      clearApiCache();
       setUser(null);
       setPermissions([]);
     };

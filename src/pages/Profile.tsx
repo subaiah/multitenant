@@ -57,7 +57,7 @@ export default function Profile() {
         setName(data.user.name || '');
 
         // Fetch user's groups and role assignments
-        const userRolesData = await apiGet(`/roles/user/${data.user.id}`);
+        const userRolesData = await apiGet<{ groups?: GroupMembership[]; roleAssignments?: RoleAssignment[] }>(`/roles/user/${data.user.id}`);
         setGroups(userRolesData.groups || []);
         setRoleAssignments(userRolesData.roleAssignments || []);
       } catch (error) {

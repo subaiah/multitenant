@@ -35,8 +35,8 @@ export default function TenantEntitlements() {
   const fetchData = async () => {
     try {
       const [appsResponse, entitlementsResponse] = await Promise.all([
-        apiGet<any>('/applications'),
-        apiGet<any>('/tenant-applications'),
+        apiGet<{ applications: Application[] }>('/applications'),
+        apiGet<{ tenantApplications: TenantApplication[] }>('/tenant-applications'),
       ]);
       setAvailableApps(appsResponse.applications);
       setEntitledApps(entitlementsResponse.tenantApplications);
