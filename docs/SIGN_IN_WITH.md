@@ -25,6 +25,15 @@ Saving shows the **client ID** and the **issuer**. For a server-side application
 
 Turning sign-in off, or setting the application to anything other than `ACTIVE`, makes the client unknown to the provider. Sign-in and token refresh then fail.
 
+## The application's permissions
+
+An application declares what people can do in it as permissions. Platform staff add them on the application's **Permissions** panel.
+
+- **Names.** A permission is `resource:action`, and the resource starts with the application's key: `crm:admin`, `crm.deals:approve`. So one application's permissions can never widen the platform's own or another application's.
+- **Who can grant them.** While an organization has the application turned on, its role editor lists those permissions under the application's name, and administrators can put them in roles. The organization's administrators hold them all, as they hold everything else in the organization.
+- **What the application receives.** It gets the ones a person holds in the `permissions` claim (`roles` scope), and checks them itself.
+- **When it's turned off.** The permissions are no longer offered and grant nothing. Roles that already contain them keep them, so turning the application back on restores access as it was.
+
 ## What the application does
 
 Give the application the issuer and let its OpenID Connect library discover the rest:
@@ -72,7 +81,7 @@ const info = await client.fetchUserInfo(config, tokens.access_token, claims.sub)
 | `email` | `email`. There's no `email_verified`: the kit doesn't record whether an address was confirmed. |
 | `profile` | `name`, `updated_at` |
 | `organization` | `tenant_id`, `tenant_slug`, `tenant_name` |
-| `roles` | `roles`: the person's role names, directly and through groups. `permissions`: those of the permissions the application declares (its **Permissions** in the catalogue) that the person holds. |
+| `roles` | `roles`: the person's role names, directly and through groups. `permissions`: the application's own permissions that the person holds (see [The application's permissions](#the-applications-permissions)). |
 | `offline_access` | A refresh token. The authorization request must also have `prompt=consent`, as the OpenID spec requires. |
 
 The ID token carries `sub` (and `nonce`, `auth_time` and the usual fields). The other claims come from the userinfo endpoint.

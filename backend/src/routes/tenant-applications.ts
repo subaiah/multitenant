@@ -7,6 +7,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { issuer } from '../lib/oidc/provider.js';
+import { forgetApplicationPermissions } from '../lib/application-permissions.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -22,6 +23,11 @@ const updateTenantApplicationSchema = z.object({
 });
 
 export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
+  // A change to entitlements changes which application permissions roles may hold
+  fastify.addHook('onResponse', async (request) => {
+    if (request.method !== 'GET') forgetApplicationPermissions(request.tenant?.id);
+  });
+
   // The organization's applications, for everyone in it: those turned on now,
   // and how to open each (its sign-in start address, with this issuer)
   fastify.get('/launchpad', {

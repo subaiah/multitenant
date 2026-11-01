@@ -8,6 +8,7 @@ import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
+import { applicationPermissionProblem, forgetApplicationPermissions } from '../lib/application-permissions.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -26,8 +27,9 @@ const updateApplicationSchema = z.object({
 const createPermissionSchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().optional(),
-  resource: z.string().min(2).max(50),
-  action: z.string().min(2).max(50),
+  // Taken from the name (resource:action); accepted for older callers
+  resource: z.string().max(100).optional(),
+  action: z.string().max(50).optional(),
 });
 
 export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
@@ -340,12 +342,12 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       },
       body: {
         type: 'object',
-        required: ['name', 'resource', 'action'],
+        required: ['name'],
         properties: {
           name: { type: 'string', minLength: 2, maxLength: 100 },
           description: { type: 'string' },
-          resource: { type: 'string', minLength: 2, maxLength: 50 },
-          action: { type: 'string', minLength: 2, maxLength: 50 },
+          resource: { type: 'string', maxLength: 100 },
+          action: { type: 'string', maxLength: 50 },
         },
       },
     },
@@ -365,6 +367,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     if (!application) {
       throw new AppError('Application not found', 404);
     }
+    // Namespaced to the application, so it can't widen the platform's or another's (lib/application-permissions.ts)
+    const problem = applicationPermissionProblem(application.key, data.name);
+    if (problem) throw new AppError(`"${data.name}": ${problem}`, 400);
+    const [resource, action] = data.name.split(':');
     
     // Check if permission name already exists
     const existing = await controlDb.permission.findUnique({
@@ -376,10 +382,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     }
     
     const permission = await controlDb.permission.create({
-      data: {
-        applicationId: id,
-        ...data,
-      },
+      data: { applicationId: id, name: data.name, description: data.description, resource, action },
     });
     
     // Log activity
@@ -391,6 +394,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'CONFIG',
       });
     await audit(request, 'permission.created', { resource: { type: 'permission', id: permission.id, label: permission.name }, details: { application: application.name } });
+    forgetApplicationPermissions();
     
     return reply.status(201).send(permission);
   });
@@ -443,6 +447,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'CONFIG',
       });
     await audit(request, 'permission.deleted', { resource: { type: 'permission', id: permission.id, label: permission.name } });
+    forgetApplicationPermissions();
     
     return reply.status(204).send();
   });
