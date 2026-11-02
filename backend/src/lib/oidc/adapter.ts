@@ -9,6 +9,7 @@
 import { controlDb } from '../prisma.js';
 import { decryptSecret, secretContext } from '../secrets.js';
 import type { Prisma } from '../../generated/control/index.js';
+import { isServiceClientId, serviceClientMetadata } from '../product-service.js';
 
 type Payload = Record<string, unknown> & { grantId?: string; userCode?: string; uid?: string; consumed?: number };
 
@@ -60,7 +61,8 @@ export class OidcAdapter {
   }
 
   async find(id: string): Promise<Payload | undefined> {
-    if (this.model === 'Client') return clientMetadata(id);
+    // Service credentials (client credentials only) or an application's sign-in client
+    if (this.model === 'Client') return isServiceClientId(id) ? serviceClientMetadata(id) : clientMetadata(id);
     const row = await controlDb.oidcPayload.findUnique({ where: { model_id: { model: this.model, id } } });
     return present(row);
   }

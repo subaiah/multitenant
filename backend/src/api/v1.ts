@@ -19,6 +19,8 @@
  * ones are promised.
  */
 
+import { SERVICE_SCOPES } from '../lib/service-scopes.js';
+
 type Schema = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
@@ -211,6 +213,45 @@ export const ENDPOINTS: Endpoint[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// For external products calling as themselves (lib/product-service.ts)
+// ---------------------------------------------------------------------------
+// With a service access token (OAuth client credentials), not an API key.
+// docs/PRODUCT_INTEGRATION.md. Tested in test/product-service.test.ts.
+
+export interface ProductEndpoint extends Omit<Endpoint, 'permission'> {
+  /** The scope the token needs (null: any valid token) */
+  scope: string | null;
+}
+
+SCHEMAS.ProductIdentity = obj({
+  product: obj({ id: uuid, key: { type: 'string' }, name: { type: 'string' } }),
+  credential: obj({ id: uuid, name: { type: 'string' } }),
+  scopes: arrayOf({ type: 'string' }),
+});
+
+export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
+  { method: 'GET', path: '/products/me', operationId: 'getProductIdentity', tag: 'Products', summary: 'The product and credential the token belongs to, and its scopes', scope: null,
+    responses: { 200: ref('ProductIdentity') } },
+  { method: 'POST', path: '/product-integrations/operations/:operationId/result', operationId: 'reportOperationResult', tag: 'Products',
+    summary: 'The result of setting an organization up, after answering organization.entitled with 202', scope: 'lifecycle.report',
+    body: obj({
+      generation: { type: 'integer', minimum: 1, description: 'The operation’s generation, from the event' },
+      status: { type: 'string', enum: ['READY', 'FAILED'] },
+      message: { type: 'string', maxLength: 500, description: 'Why it failed (shown to platform staff and the organization)' },
+    }, ['generation', 'status']),
+    responses: { 204: null } },
+];
+
+const productErrors: Record<string, string> = {
+  400: 'The request is not valid',
+  401: 'No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)',
+  403: 'The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE)',
+  404: "Not found (another product's things are not found either)",
+  409: 'A stale operation (STALE_OPERATION) or a result that no longer applies (INVALID_TRANSITION)',
+  429: 'Too many requests',
+};
+
+// ---------------------------------------------------------------------------
 // The OpenAPI document
 // ---------------------------------------------------------------------------
 
@@ -248,6 +289,29 @@ export function openApiDocument(serverUrl = '/api/v1') {
       responses,
     };
   }
+  for (const e of PRODUCT_ENDPOINTS) {
+    const p = openApiPath(e.path);
+    const params = [...e.path.matchAll(/:(\w+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: 'string' } }));
+    const responses: Record<string, unknown> = {};
+    for (const [status, schema] of Object.entries(e.responses)) {
+      responses[status] = schema ? { description: 'OK', content: { 'application/json': { schema } } } : { description: 'Done (no content)' };
+    }
+    for (const [status, description] of Object.entries(productErrors)) {
+      if ((status === '404' || status === '409') && !e.path.includes(':')) continue;
+      responses[status] = { description, content: { 'application/json': { schema: ref('Error') } } };
+    }
+    (paths[p] ??= {})[e.method.toLowerCase()] = {
+      operationId: e.operationId,
+      tags: [e.tag],
+      summary: e.summary,
+      description: e.scope ? `For external products, with a service access token that has the \`${e.scope}\` scope.` : 'For external products, with any valid service access token.',
+      security: [{ productToken: e.scope ? [e.scope] : [] }],
+      'x-scope': e.scope,
+      ...(params.length ? { parameters: params } : {}),
+      ...(e.body ? { requestBody: { required: true, content: { 'application/json': { schema: e.body } } } } : {}),
+      responses,
+    };
+  }
   return {
     openapi: '3.1.0',
     info: {
@@ -257,7 +321,10 @@ export function openApiDocument(serverUrl = '/api/v1') {
     },
     servers: [{ url: serverUrl }],
     security: [{ apiKey: [] }],
-    tags: ['Users', 'Groups', 'Organizations', 'Roles', 'Audit log'].map((name) => ({ name })),
+    tags: [
+      ...['Users', 'Groups', 'Organizations', 'Roles', 'Audit log'].map((name) => ({ name })),
+      { name: 'Products', description: 'For external products calling as themselves, with a service access token (docs/PRODUCT_INTEGRATION.md)' },
+    ],
     paths,
     webhooks: {
       event: {
@@ -270,7 +337,14 @@ export function openApiDocument(serverUrl = '/api/v1') {
       },
     },
     components: {
-      securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'An API key (mtk_…). X-API-Key also works.' } },
+      securitySchemes: {
+        apiKey: { type: 'http', scheme: 'bearer', description: 'An API key (mtk_…). X-API-Key also works.' },
+        productToken: {
+          type: 'oauth2',
+          description: 'An external product’s service access token: client credentials at the platform’s token endpoint, audience urn:multitenant:api:v1, valid 10 minutes.',
+          flows: { clientCredentials: { tokenUrl: '/api/oidc/token', scopes: Object.fromEntries(Object.entries(SERVICE_SCOPES)) } },
+        },
+      },
       schemas: SCHEMAS,
     },
   };

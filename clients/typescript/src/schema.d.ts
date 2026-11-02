@@ -340,6 +340,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/products/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product and credential the token belongs to, and its scopes
+         * @description For external products, with any valid service access token.
+         */
+        get: operations["getProductIdentity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/product-integrations/operations/{operationId}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The result of setting an organization up, after answering organization.entitled with 202
+         * @description For external products, with a service access token that has the `lifecycle.report` scope.
+         */
+        post: operations["reportOperationResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     event: {
@@ -624,6 +664,20 @@ export interface components {
                 details: unknown;
                 requestId: string | null;
             };
+        };
+        ProductIdentity: {
+            product: {
+                /** Format: uuid */
+                id: string;
+                key: string;
+                name: string;
+            };
+            credential: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            scopes: string[];
         };
     };
     responses: never;
@@ -2249,6 +2303,147 @@ export interface operations {
             };
             /** @description The key lacks the permission, a plan limit was reached (PLAN_LIMIT), or the organization is read-only (TRIAL_ENDED, PAYMENT_REQUIRED) */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getProductIdentity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductIdentity"];
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    reportOperationResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The operation’s generation, from the event */
+                    generation: number;
+                    /** @enum {string} */
+                    status: "READY" | "FAILED";
+                    /** @description Why it failed (shown to platform staff and the organization) */
+                    message?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Done (no content) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION) or a result that no longer applies (INVALID_TRANSITION) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

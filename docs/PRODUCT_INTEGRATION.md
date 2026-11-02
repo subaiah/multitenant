@@ -28,7 +28,7 @@ There are two ways to build on the platform:
 | **Menu entries** in the tenant portal, linking to the application's pages | Available | [The manifest](#the-manifest) |
 | **Organizations turn it on** (entitlements) and open it from the Applications page | Available | [SIGN_IN_WITH.md](SIGN_IN_WITH.md) |
 | **Lifecycle events**: an organization turned it on, was suspended or resumed, or left | Available | [Lifecycle events](#lifecycle-events) |
-| **A service credential** to call the platform for every organization that has it on | Planned | [Planned](#planned) |
+| **Service credentials** to call API v1 as the application, for the organizations that have it on | Available | [Calling the platform as the application](#calling-the-platform-as-the-application) |
 
 ## Rules
 
@@ -54,7 +54,7 @@ There are two ways to build on the platform:
 ### Calling the platform and receiving events
 
 11. **Must** call only [API v1](API_V1.md) (`/api/v1/...`). It's the contract that stays compatible; other routes can change. **Must** call it from the application's server, never from the browser.
-12. Until the service credential arrives, an organization that wants the application to read its data creates an [API key](API_ACCESS.md#api-keys) for it, limited to the permissions it needs.
+12. **Must** call the platform as itself with a [service credential](#calling-the-platform-as-the-application), asking only for the scopes it needs, and **must** keep its secret on the server. Organizations' API keys are for their own systems, not for products.
 13. When receiving webhooks, the application **must** check the signature, **must** handle the same event twice (by its ID), and **should** answer within a few seconds and do slow work afterwards ([API_ACCESS.md](API_ACCESS.md#webhooks)).
 
 ### Presence in the platform
@@ -210,11 +210,11 @@ While an organization is `PENDING` or `FAILED`:
 - the application's sidebar section is hidden;
 - **signing in to the application is refused**, with "still being set up" (fail closed).
 
-To report back after a `202`, the application calls the platform with its sign-in client ID and secret (HTTP Basic; confidential clients only), naming the operation from the event:
+To report back after a `202`, the application calls API v1 with a [service access token](#calling-the-platform-as-the-application) that has the `lifecycle.report` scope, naming the operation from the event:
 
 ```
-POST /api/product-api/operations/<operation id>/result
-Authorization: Basic base64(<client id>:<client secret>)
+POST /api/v1/product-integrations/operations/<operation id>/result
+Authorization: Bearer <service access token>
 Content-Type: application/json
 
 { "generation": 1, "status": "READY" }                                → 204
@@ -224,7 +224,8 @@ Content-Type: application/json
 | Answer | Why |
 | --- | --- |
 | `204` | Recorded. The same result again is also `204`, so retrying a report is safe. |
-| `401` | Wrong client ID or secret. |
+| `401` | No token, or an invalid, expired or revoked one. |
+| `403 INSUFFICIENT_SCOPE` | The token doesn't have `lifecycle.report`. |
 | `404` | No such operation for this application. Another application's operations are not found. |
 | `409 STALE_OPERATION` | A newer operation replaced this one, or the generation doesn't match. Drop this work. |
 | `409 INVALID_TRANSITION` | The operation already finished `READY`. A later failure is the application's to handle, not a setup result. |
@@ -246,13 +247,94 @@ Retries are spread by ±20%, so after an outage events don't all arrive at once.
 
 **New signing secret** on the panel makes a new secret, shown once. For the next 24 hours, events are signed with both the new and the old secret. That way the application can switch to the new one without missing or rejecting events. After 24 hours only the new one signs.
 
+## Calling the platform as the application
+
+The application's server calls [API v1](API_V1.md) as itself with **service credentials**: OAuth 2.0 client credentials, separate from its sign-in client. Platform staff make them in the **Service credentials** panel on the Applications page.
+
+Each credential has:
+- a client ID (`mts_…`);
+- a secret, **shown once** and stored encrypted;
+- the scopes it may ask for.
+
+An application can have several credentials at once.
+
+### Scopes
+
+| Scope | Allows |
+| --- | --- |
+| `organizations.read` | Seeing the organizations that have the application on, and their setup status (coming next) |
+| `members.read` | Seeing the people and groups in those organizations (coming next) |
+| `lifecycle.report` | [Reporting setup results](#answering-and-setting-the-organization-up) |
+
+### Getting a token
+
+```
+POST /api/oidc/token
+Authorization: Basic base64(<client id>:<client secret>)
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&scope=lifecycle.report
+```
+
+```json
+{ "access_token": "eyJ…", "token_type": "Bearer", "expires_in": 600, "scope": "lifecycle.report" }
+```
+
+The answer only includes scopes the credential has. Asking for no scope gives a token that can only call `GET /api/v1/products/me`.
+
+The token is a JWT signed by the platform (`typ: at+jwt`), valid for **10 minutes**. Its claims:
+- `iss`: the issuer;
+- `aud`: `urn:multitenant:api:v1`;
+- `client_id`;
+- `product_id`: the application's key;
+- `scope`;
+- `exp`.
+
+The application doesn't need to check it; it only sends it:
+
+```
+GET /api/v1/products/me
+Authorization: Bearer <access token>
+→ { "product": { "id": "…", "key": "appforge", "name": "AppForge" }, "credential": { "id": "…", "name": "Production" }, "scopes": ["lifecycle.report"] }
+```
+
+With the TypeScript client, `createProductClient` gets tokens and renews them a minute before they expire ([clients/typescript](../clients/typescript/README.md)).
+
+### What the platform checks on every call
+
+1. The token: signature, issuer, audience, expiry.
+2. That its credential still exists and isn't revoked, and that the application is active. So **revoking a credential stops it at once**, even its unexpired tokens.
+3. That the route's scope is both in the token and still on the credential.
+4. For anything about an organization: that the organization has the application on **now**. Nothing in the token decides which organizations it can see.
+
+| Answer | Code | Meaning |
+| --- | --- | --- |
+| `401` | `INVALID_TOKEN`, `TOKEN_EXPIRED`, `CREDENTIAL_REVOKED` | Get a new token (or a new credential) |
+| `403` | `INSUFFICIENT_SCOPE` | Ask for the scope, and have it on the credential |
+| `403` | `APPLICATION_INACTIVE` | Platform staff took the application offline |
+
+### Replacing a credential
+
+1. Make a new credential.
+2. Deploy the application with it.
+3. Revoke the old one.
+
+Both work in between, so there's no downtime. A leaked secret: revoke the credential right away.
+
 ## Planned
 
-- **A service credential.** The application will get its own client credentials to call API v1 for any organization that has it turned on: to read people and groups, write to the organization's audit log, and send notifications. API keys from each organization will no longer be needed.
+- **Organizations and members in API v1:**
+  - the organizations that have the application on, with their setup status (`organizations.read`);
+  - their people and groups, paginated (`members.read`).
+- **Revocation:**
+  - OpenID Connect Back-Channel Logout, so the platform tells the application to end a person's sessions;
+  - user events (`user.deactivated`, `user.updated`, `user.removed`, `user.permissions_changed`);
+  - a configurable access token lifetime.
 
 ## Checklist before going live
 
 - [ ] The manifest is in the application's repository, imported, and the client secret is stored on the application's server.
+- [ ] Service credentials (if used) ask only for the scopes needed, live on the server, and can be replaced without downtime.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
 - [ ] Every query is scoped to the organization; a test proves one organization can't read another's data.

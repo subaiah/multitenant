@@ -88,6 +88,7 @@ export const SECRET_FIELDS = {
   privateJwk: { model: 'OidcSigningKey', table: 'oidc_signing_keys', column: 'private_jwk' },
   callbackSigningSecret: { model: 'ApplicationRegistry', table: 'application_registries', column: 'callback_signing_secret' },
   previousCallbackSigningSecret: { model: 'ApplicationRegistry', table: 'application_registries', column: 'previous_callback_signing_secret' },
+  serviceClientSecret: { model: 'ProductServiceCredential', table: 'product_service_credentials', column: 'client_secret' },
 } as const;
 
 export type SecretField = keyof typeof SECRET_FIELDS;

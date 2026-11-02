@@ -30,6 +30,10 @@
     },
     {
       "name": "Audit log"
+    },
+    {
+      "name": "Products",
+      "description": "For external products calling as themselves, with a service access token (docs/PRODUCT_INTEGRATION.md)"
     }
   ],
   "paths": {
@@ -2409,6 +2413,200 @@
           }
         }
       }
+    },
+    "/products/me": {
+      "get": {
+        "operationId": "getProductIdentity",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The product and credential the token belongs to, and its scopes",
+        "description": "For external products, with any valid service access token.",
+        "security": [
+          {
+            "productToken": []
+          }
+        ],
+        "x-scope": null,
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductIdentity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/operations/{operationId}/result": {
+      "post": {
+        "operationId": "reportOperationResult",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The result of setting an organization up, after answering organization.entitled with 202",
+        "description": "For external products, with a service access token that has the `lifecycle.report` scope.",
+        "security": [
+          {
+            "productToken": [
+              "lifecycle.report"
+            ]
+          }
+        ],
+        "x-scope": "lifecycle.report",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "generation": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The operation’s generation, from the event"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "READY",
+                      "FAILED"
+                    ]
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Why it failed (shown to platform staff and the organization)"
+                  }
+                },
+                "required": [
+                  "generation",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Done (no content)"
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION) or a result that no longer applies (INVALID_TRANSITION)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {
@@ -2464,6 +2662,20 @@
         "type": "http",
         "scheme": "bearer",
         "description": "An API key (mtk_…). X-API-Key also works."
+      },
+      "productToken": {
+        "type": "oauth2",
+        "description": "An external product’s service access token: client credentials at the platform’s token endpoint, audience urn:multitenant:api:v1, valid 10 minutes.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "/api/oidc/token",
+            "scopes": {
+              "organizations.read": "See the organizations that have the product turned on, and their setup status",
+              "members.read": "See the people and groups in those organizations",
+              "lifecycle.report": "Report the result of setting an organization up"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -3391,6 +3603,58 @@
           "timestamp",
           "tenantId",
           "data"
+        ]
+      },
+      "ProductIdentity": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "key": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "key",
+              "name"
+            ]
+          },
+          "credential": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "product",
+          "credential",
+          "scopes"
         ]
       }
     }

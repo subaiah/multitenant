@@ -17,7 +17,8 @@
  *   someone else, so signing out of the site also ends silent sign-in.
  */
 import crypto from 'node:crypto';
-import Provider, { interactionPolicy, type Configuration, type KoaContextWithOIDC } from 'oidc-provider';
+import Provider, { errors, interactionPolicy, type Configuration, type KoaContextWithOIDC } from 'oidc-provider';
+import { API_RESOURCE, isServiceClientId, serviceResourceServer, serviceTokenClaims } from '../product-service.js';
 import { config } from '../../config/env.js';
 import { OidcAdapter } from './adapter.js';
 import { signingKeys } from './keys.js';
@@ -118,10 +119,28 @@ export async function createProvider({ readSession, endSession }: { readSession:
       Session: 14 * 24 * 60 * 60,
     },
     // Refresh tokens only when asked for (offline_access); each use returns a new one
+    // Which product a service token belongs to
+    extraTokenClaims: async (_ctx, token) => {
+      const clientId = (token as { clientId?: string }).clientId;
+      return clientId && isServiceClientId(clientId) ? serviceTokenClaims(clientId) : undefined;
+    },
     issueRefreshToken: async (_ctx, client, code) => client.grantTypeAllowed('refresh_token') && code.scopes.has('offline_access'),
     rotateRefreshToken: true,
     features: {
       devInteractions: { enabled: false },
+      // External products calling API v1 themselves (lib/product-service.ts)
+      clientCredentials: { enabled: true },
+      resourceIndicators: {
+        enabled: true,
+        // A service credential's tokens are for API v1, asked for or not
+        defaultResource: async (_ctx, client, oneOf) => (client && isServiceClientId(client.clientId) ? API_RESOURCE : oneOf) as never,
+        getResourceServerInfo: async (_ctx, resource, client) => {
+          const info = resource === API_RESOURCE && isServiceClientId(client.clientId) ? await serviceResourceServer(client.clientId) : null;
+          if (!info) throw new errors.InvalidTarget();
+          return info;
+        },
+        useGrantedResource: async () => false,
+      },
       revocation: { enabled: true },
       userinfo: { enabled: true },
       rpInitiatedLogout: {

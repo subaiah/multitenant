@@ -8,6 +8,7 @@ import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
 import ApplicationSignIn from '../components/ApplicationSignIn';
 import ApplicationLifecycle from '../components/ApplicationLifecycle';
+import ApplicationServiceCredentials from '../components/ApplicationServiceCredentials';
 
 interface Application {
   id: string;
@@ -338,6 +339,7 @@ export default function ApplicationsManagement() {
             </div>
             {canManage && <ApplicationSignIn applicationId={selectedApp.id} applicationName={selectedApp.name} />}
             {canManage && <ApplicationLifecycle applicationId={selectedApp.id} applicationName={selectedApp.name} />}
+            {canManage && <ApplicationServiceCredentials applicationId={selectedApp.id} applicationName={selectedApp.name} />}
             </>
           ) : (
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12 text-center">
