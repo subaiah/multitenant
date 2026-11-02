@@ -15,6 +15,8 @@ interface ImportResult {
   created: boolean;
   clientId: string;
   clientSecret?: string;
+  callbackSigningSecret?: string;
+  organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   menuItems: number;
 }
@@ -69,6 +71,15 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
             <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Copy the client secret now: it isn't shown again. Store it on the application's server.</p>
             <CopyBox value={result.clientSecret} label="Client secret" />
           </div>
+        )}
+        {result.callbackSigningSecret && (
+          <div className="space-y-2 p-4 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10">
+            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Copy the lifecycle events' signing secret now: it isn't shown again.</p>
+            <CopyBox value={result.callbackSigningSecret} label="Signing secret" />
+          </div>
+        )}
+        {!!result.organizationsTold && (
+          <p className="text-sm text-slate-600 dark:text-slate-300">{result.organizationsTold} organization{result.organizationsTold === 1 ? '' : 's'} that already had it on {result.organizationsTold === 1 ? 'is' : 'are'} being told now.</p>
         )}
         {p.notInManifest.length > 0 && (
           <div className="text-sm p-3 rounded-md border border-slate-200 dark:border-slate-600">

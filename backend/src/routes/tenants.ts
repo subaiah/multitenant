@@ -16,6 +16,7 @@ import { audit, diff } from '../lib/audit.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { sendInvitation } from '../lib/invitations.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
+import { organizationStatusChanged } from '../lib/product-lifecycle.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -211,6 +212,7 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
       where: { id },
       data: { status: tenant.statusBeforeClose ?? 'ACTIVE', closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null },
     });
+    await organizationStatusChanged(id, tenant.status, restored.status);
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'restored closed tenant', target: tenant.slug, type: 'CONFIG' });
     await audit(request, 'tenant.restored', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { name: tenant.name, status: restored.status } });
     return restored;
@@ -390,6 +392,8 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
       where: { id },
       data: { ...data, ...extra },
     });
+    // Suspended or resumed: its external products are told (lib/product-lifecycle.ts)
+    await organizationStatusChanged(id, before.status, tenant.status);
 
     // In the tenant's own log once it has one; the platform log before that
     const entry = { tenantId: id, userId: request.user.userId, action: 'updated tenant', target: tenant.name, type: 'CONFIG' as const, metadata: data };

@@ -166,6 +166,8 @@ export const KIT_AUDIT_EVENTS = {
   'application.sign_in_updated': p("Application's sign-in settings changed", 'platform'),
   'application.client_secret_rotated': p("Application's client secret replaced", 'platform'),
   'application.manifest_imported': p("Application's manifest imported", 'platform'),
+  'application.lifecycle_updated': p("Application's lifecycle events changed", 'platform'),
+  'application.organization_provisioning_reported': p('An application reported setting an organization up', 'platform'),
   'menu.changed': p('Menu changed', 'platform'),
   'permission.created': p('Permission added', 'platform'),
   'permission.deleted': p('Permission removed', 'platform'),

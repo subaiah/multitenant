@@ -8,6 +8,7 @@ import { audit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { issuer } from '../lib/oidc/provider.js';
 import { forgetApplicationPermissions } from '../lib/application-permissions.js';
+import { entitlementChanged, kickLifecycleEvents } from '../lib/product-lifecycle.js';
 
 const createTenantApplicationSchema = z.object({
   applicationId: z.string().uuid(),
@@ -51,15 +52,20 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       orderBy: { application: { name: 'asc' } },
     });
     return {
-      applications: rows.map(({ application: a, state, validTo }) => {
+      applications: rows.map(({ application: a, state, validTo, provisioningStatus, provisioningError }) => {
+        // Not until the application has set the organization up (lib/product-lifecycle.ts)
+        const ready = provisioningStatus === 'READY' || provisioningStatus === 'NOT_REQUIRED';
         const signIn = a.signIn?.enabled ? a.signIn : null;
         let openUrl: string | null = null;
-        if (signIn?.initiateLoginUri) {
+        if (ready && signIn?.initiateLoginUri) {
           const u = new URL(signIn.initiateLoginUri);
           u.searchParams.set('iss', issuer());
           openUrl = u.href;
         }
-        return { id: a.id, key: a.key, name: a.name, description: a.description, state, validTo, signIn: !!signIn, openUrl };
+        return {
+          id: a.id, key: a.key, name: a.name, description: a.description, state, validTo, signIn: !!signIn, openUrl,
+          setup: ready ? 'READY' : provisioningStatus, ...(provisioningStatus === 'FAILED' && { setupError: provisioningError }),
+        };
       }),
     };
   });
@@ -212,15 +218,21 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Tenant already has entitlement to this application', 409);
     }
     
-    const tenantApplication = await controlDb.tenantApplication.create({
-      data: {
-        tenantId,
-        applicationId: data.applicationId,
-        state: data.state,
-        validFrom: data.validFrom ? new Date(data.validFrom) : new Date(),
-        validTo: data.validTo ? new Date(data.validTo) : null,
-      },
+    // With the product told, if it takes lifecycle events (lib/product-lifecycle.ts)
+    const tenantApplication = await controlDb.$transaction(async (tx) => {
+      const created = await tx.tenantApplication.create({
+        data: {
+          tenantId,
+          applicationId: data.applicationId,
+          state: data.state,
+          validFrom: data.validFrom ? new Date(data.validFrom) : new Date(),
+          validTo: data.validTo ? new Date(data.validTo) : null,
+        },
+      });
+      await entitlementChanged(tx, null, created);
+      return tx.tenantApplication.findUniqueOrThrow({ where: { id: created.id } });
     });
+    kickLifecycleEvents();
     
     // Log activity
     await logActivity({
@@ -266,19 +278,21 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = updateTenantApplicationSchema.parse(request.body);
     
-    const tenantApplication = await controlDb.tenantApplication.update({
-      where: { id, tenantId },
-      data: {
-        ...data,
-        validFrom: data.validFrom ? new Date(data.validFrom) : undefined,
-        validTo: data.validTo ? new Date(data.validTo) : undefined,
-      },
-      include: {
-        application: {
-          select: { name: true },
+    const tenantApplication = await controlDb.$transaction(async (tx) => {
+      const before = await tx.tenantApplication.findFirst({ where: { id, tenantId } });
+      if (!before) throw new AppError('Entitlement not found', 404);
+      const updated = await tx.tenantApplication.update({
+        where: { id, tenantId },
+        data: {
+          ...data,
+          validFrom: data.validFrom ? new Date(data.validFrom) : undefined,
+          validTo: data.validTo ? new Date(data.validTo) : undefined,
         },
-      },
+      });
+      await entitlementChanged(tx, before, updated);
+      return tx.tenantApplication.findUniqueOrThrow({ where: { id }, include: { application: { select: { name: true } } } });
     });
+    kickLifecycleEvents();
     
     // Log activity
     await logActivity({
@@ -314,14 +328,12 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
-    const tenantApplication = await controlDb.tenantApplication.delete({
-      where: { id, tenantId },
-      include: {
-        application: {
-          select: { name: true },
-        },
-      },
+    const tenantApplication = await controlDb.$transaction(async (tx) => {
+      const removed = await tx.tenantApplication.delete({ where: { id, tenantId }, include: { application: { select: { name: true } } } });
+      await entitlementChanged(tx, removed, null);
+      return removed;
     });
+    kickLifecycleEvents();
     
     // Log activity
     await logActivity({

@@ -26,6 +26,8 @@ export const applicationManifestRoutes: FastifyPluginAsync = async (fastify) => 
         permissionsNotInManifest: result.permissions.notInManifest,
         menuItems: result.menuItems,
         ...(result.clientSecret && { newClientSecret: true }),
+        ...(result.callbackSigningSecret && { newCallbackSigningSecret: true }),
+        ...(result.organizationsTold && { organizationsTold: result.organizationsTold }),
       },
     });
     return reply.status(result.created ? 201 : 200).send(result);

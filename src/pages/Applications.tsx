@@ -18,6 +18,9 @@ interface LaunchpadApp {
   validTo: string | null;
   signIn: boolean;
   openUrl: string | null;
+  /** Whether the application has set the organization up (lifecycle events) */
+  setup: 'READY' | 'PENDING' | 'FAILED';
+  setupError?: string | null;
 }
 
 export default function Applications() {
@@ -55,7 +58,11 @@ export default function Applications() {
                   {a.description && <p className="text-sm text-slate-600 dark:text-slate-300">{a.description}</p>}
                   {a.validTo && <p className="text-xs text-slate-500">Available until {formatDate(a.validTo)}</p>}
                   <div className="mt-auto pt-1">
-                    {a.openUrl ? (
+                    {a.setup === 'PENDING' ? (
+                      <p className="text-xs text-slate-500">Being set up for your organization. Check back in a moment.</p>
+                    ) : a.setup === 'FAILED' ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">Setting it up for your organization didn't finish. Ask the platform team to look at it.</p>
+                    ) : a.openUrl ? (
                       <a href={a.openUrl} target="_blank" rel="noopener" className={primaryButtonClass}>
                         Open <ExternalLink size={14} aria-hidden />
                       </a>

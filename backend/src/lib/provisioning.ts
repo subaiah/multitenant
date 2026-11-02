@@ -37,6 +37,7 @@ import { refreshTenantUsage } from './tenant-usage.js';
 import { accessFor, lockDatabaseAcl, migrateTarget, userOf, withConnection } from './tenant-migrations.js';
 import { removeTenantExports } from './data-export.js';
 import {
+
   sharedGroupRole, databaseOf, ident, ownerUrl, roleNameFor, sharedDatabaseName, targetOf, tenantRoleUrl, type Target,
 } from './tenant-targets.js';
 
@@ -291,6 +292,8 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
     await (await import('./billing/subscriptions.js')).endBillingFor(tenantId, 'now');
     // Its data exports, files and records
     await removeTenantExports(tenantId);
+    // Its external products are told to clean up, before its entitlements go (lib/product-lifecycle.ts)
+    await (await import('./product-lifecycle.js')).organizationDeleting(tenantId);
     await controlDb.$transaction([
       controlDb.supportSession.deleteMany({ where: { tenantId } }),
       controlDb.signupRequest.deleteMany({ where: { tenantId } }),

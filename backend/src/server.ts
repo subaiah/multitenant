@@ -16,6 +16,7 @@ import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
 import { applicationSignInRoutes } from './routes/application-sign-in.js';
 import { applicationManifestRoutes } from './routes/application-manifest.js';
+import { applicationLifecycleRoutes } from './routes/application-lifecycle.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { activityRoutes } from './routes/activities.js';
@@ -59,6 +60,7 @@ import { apiKeyRoutes } from './routes/api-keys.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { billingWebhookRoutes } from './routes/billing-webhooks.js';
 import { oidcRoutes } from './routes/oidc.js';
+import { productApiRoutes } from './routes/product-api.js';
 import { platformBillingRoutes } from './routes/platform-billing.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -245,6 +247,8 @@ async function registerRoutes() {
   await fastify.register(billingWebhookRoutes, { prefix: '/bff/billing/webhooks' });
   // "Sign in with": the OpenID Connect provider for the catalogue's applications (lib/oidc/)
   await fastify.register(oidcRoutes, { prefix: '/oidc' });
+  // What external products call themselves, with their client credentials (lifecycle reports)
+  await fastify.register(productApiRoutes, { prefix: '/product-api' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
 
@@ -270,6 +274,7 @@ async function registerRoutes() {
     await protectedRoutes.register(platformScoped(applicationRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationSignInRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationManifestRoutes), { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationLifecycleRoutes), { prefix: '/applications' });
 
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });

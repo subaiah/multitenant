@@ -145,13 +145,17 @@ const guardedLookup = (hostname: string, options: object, callback: (...args: an
 
 export interface SendResult { ok: boolean; status: number | null; error: string | null; durationMs: number }
 
-/** POST one delivery. 2xx is taken; anything else (redirects too) is a failure. */
-export function post(url: string, headers: Record<string, string>, body: string): Promise<SendResult> {
+/**
+ * POST one delivery. 2xx is taken; anything else (redirects too) is a failure.
+ * `trusted`: an address platform staff registered (a product's lifecycle
+ * callback, lib/product-lifecycle.ts), which may be on the same network.
+ */
+export function post(url: string, headers: Record<string, string>, body: string, { trusted = false, userAgent = 'Multitenant-Webhooks/1' } = {}): Promise<SendResult> {
   const started = Date.now();
   return new Promise((resolve) => {
     let u: URL;
     try {
-      u = assertWebhookUrl(url);
+      u = trusted ? new URL(url) : assertWebhookUrl(url);
     } catch (err) {
       resolve({ ok: false, status: null, error: (err as Error).message, durationMs: 0 });
       return;
@@ -159,8 +163,8 @@ export function post(url: string, headers: Record<string, string>, body: string)
     const send = u.protocol === 'https:' ? httpsRequest : httpRequest;
     const req = send(u, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': 'Multitenant-Webhooks/1', 'content-length': Buffer.byteLength(body).toString(), ...headers },
-      lookup: guardedLookup as never,
+      headers: { 'content-type': 'application/json', 'user-agent': userAgent, 'content-length': Buffer.byteLength(body).toString(), ...headers },
+      ...(!trusted && { lookup: guardedLookup as never }),
       timeout: TIMEOUT_MS,
     }, (res) => {
       // Read a little of the answer (to finish the request), then stop
