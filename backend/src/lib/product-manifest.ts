@@ -10,6 +10,7 @@ import { controlDb } from './prisma.js';
 import { allowedUri, newClientId, newClientSecret } from './oidc/uris.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from './application-permissions.js';
 import { userEventsChanged } from './product-user-events.js';
+import { DEFAULT_ACCESS_TOKEN_LIFETIME } from './oidc/provider.js';
 import { AppError } from '../middleware/error-handler.js';
 import { callbackChanged, callbackUrlSchema, newCallbackSecret } from './product-lifecycle.js';
 
@@ -32,6 +33,8 @@ export const manifestSchema = z
       redirectUris: z.array(uri).min(1).max(10),
       postLogoutRedirectUris: z.array(uri).max(10).optional(),
       openPath: relativePath.optional(),
+      backchannelLogoutUri: callbackUrlSchema.optional(),
+      accessTokenLifetime: z.number().int().min(60).max(86_400).optional(),
     }),
     provisioning: z.object({ callbackUrl: callbackUrlSchema, deletesDataOnDeprovision: z.boolean().default(false), userEvents: z.boolean().default(false) }).optional(),
     permissions: z.array(z.object({ name: z.string().max(100), description: z.string().trim().min(1).max(200) })).max(100).default([]),
@@ -149,6 +152,8 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         redirectUris: [...new Set(m.signIn.redirectUris)],
         postLogoutRedirectUris: [...new Set(m.signIn.postLogoutRedirectUris ?? [])],
         initiateLoginUri: m.signIn.openPath ? `${fields.baseUrl}${m.signIn.openPath}` : null,
+        backchannelLogoutUri: m.signIn.backchannelLogoutUri ?? null,
+        accessTokenLifetime: m.signIn.accessTokenLifetime ?? DEFAULT_ACCESS_TOKEN_LIFETIME,
         ...(secret && { oidcClientSecret: secret, secretCreatedAt: new Date() }),
         ...(!confidential && { oidcClientSecret: null, secretCreatedAt: null }),
       };
@@ -190,10 +195,12 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         callbackUrl: existing?.provisioningCallbackUrl ?? null, deletesDataOnDeprovision: existing?.deletesDataOnDeprovision ?? false, userEvents: existing?.userEvents ?? false,
         clientType: before?.clientType ?? null, redirectUris: before?.redirectUris ?? [], postLogoutRedirectUris: before?.postLogoutRedirectUris ?? [],
         openUrl: before?.initiateLoginUri ?? null, signInEnabled: before?.enabled ?? null,
+        backchannelLogoutUri: before?.backchannelLogoutUri ?? null, accessTokenLifetime: before?.accessTokenLifetime ?? null,
       };
       const now = {
         name: app.name, version: app.version, baseUrl: app.baseUrl, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision, userEvents: fields.userEvents,
         clientType: signIn.clientType, redirectUris: signIn.redirectUris, postLogoutRedirectUris: signIn.postLogoutRedirectUris, openUrl: signIn.initiateLoginUri, signInEnabled: signIn.enabled,
+        backchannelLogoutUri: signIn.backchannelLogoutUri, accessTokenLifetime: signIn.accessTokenLifetime,
       };
       const changes = Object.fromEntries(
         (Object.keys(now) as (keyof typeof now)[]).filter((k) => !same(was[k], now[k])).map((k) => [k, [was[k], now[k]] as [unknown, unknown]]),
@@ -255,6 +262,8 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       redirectUris: app.signIn?.redirectUris ?? [],
       ...(app.signIn?.postLogoutRedirectUris.length && { postLogoutRedirectUris: app.signIn.postLogoutRedirectUris }),
       ...(openPath && { openPath }),
+      ...(app.signIn?.backchannelLogoutUri && { backchannelLogoutUri: app.signIn.backchannelLogoutUri }),
+      ...(app.signIn && app.signIn.accessTokenLifetime !== DEFAULT_ACCESS_TOKEN_LIFETIME && { accessTokenLifetime: app.signIn.accessTokenLifetime }),
     },
     ...(app.provisioningCallbackUrl && { provisioning: { callbackUrl: app.provisioningCallbackUrl, deletesDataOnDeprovision: app.deletesDataOnDeprovision, userEvents: app.userEvents } }),
     permissions: app.permissions.map((p) => ({ name: p.name, description: p.description ?? p.name })),

@@ -9,7 +9,8 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { audit, diff } from '../lib/audit.js';
-import { issuer } from '../lib/oidc/provider.js';
+import { DEFAULT_ACCESS_TOKEN_LIFETIME, issuer } from '../lib/oidc/provider.js';
+import { callbackUrlSchema } from '../lib/product-lifecycle.js';
 import { allowedUri, newClientId, newClientSecret as newSecret } from '../lib/oidc/uris.js';
 
 const MAX_URIS = 10;
@@ -22,6 +23,9 @@ const settingsSchema = z.object({
   redirectUris: z.array(uri).max(MAX_URIS),
   postLogoutRedirectUris: z.array(uri).max(MAX_URIS).default([]),
   initiateLoginUri: z.union([z.literal(''), z.null(), z.string().max(2000).refine((v) => allowedUri(v), 'Use an https:// address (or http://localhost while developing)')]).optional(),
+  // Left out: unchanged (lib/oidc/logout.ts)
+  backchannelLogoutUri: z.union([z.literal(''), z.null(), callbackUrlSchema]).optional(),
+  accessTokenLifetime: z.number().int().min(60).max(86_400).optional(),
 });
 
 
@@ -35,6 +39,8 @@ const view = (s: Awaited<ReturnType<typeof controlDb.applicationSignIn.findUniqu
     redirectUris: s.redirectUris,
     postLogoutRedirectUris: s.postLogoutRedirectUris,
     initiateLoginUri: s.initiateLoginUri,
+    backchannelLogoutUri: s.backchannelLogoutUri,
+    accessTokenLifetime: s.accessTokenLifetime,
     updatedAt: s.updatedAt,
   };
 
@@ -84,6 +90,8 @@ export const applicationSignInRoutes: FastifyPluginAsync = async (fastify) => {
       redirectUris: [...new Set(data.redirectUris)],
       postLogoutRedirectUris: [...new Set(data.postLogoutRedirectUris)],
       initiateLoginUri: data.initiateLoginUri || null,
+      backchannelLogoutUri: data.backchannelLogoutUri === undefined ? (before?.backchannelLogoutUri ?? null) : data.backchannelLogoutUri || null,
+      accessTokenLifetime: data.accessTokenLifetime ?? before?.accessTokenLifetime ?? DEFAULT_ACCESS_TOKEN_LIFETIME,
       ...(secret && { oidcClientSecret: secret, secretCreatedAt: new Date() }),
       ...(data.clientType === 'PUBLIC' && { oidcClientSecret: null, secretCreatedAt: null }),
     };

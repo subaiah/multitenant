@@ -91,7 +91,7 @@ The ID token carries `sub` (and `nonce`, `auth_time` and the usual fields). The 
 | | Lifetime |
 | --- | --- |
 | Authorization code | 1 minute, single use |
-| Access token (opaque) | 1 hour |
+| Access token (opaque) | 15 minutes, unless the application's sign-in settings say otherwise (1 minute to 24 hours: **Access token lifetime** on the Sign-in panel, or `signIn.accessTokenLifetime` in seconds in the manifest) |
 | ID token | 1 hour |
 | Refresh token | 30 days, replaced on every use (the old one stops working) |
 
@@ -120,6 +120,34 @@ Applications sign people out through the end-session endpoint (`end_session_endp
 
 - **With `id_token_hint`**, the person is signed out straight away, of the provider and of the site.
 - **Without it**, they're asked first, so another website can't sign them out.
+
+### When the platform ends someone's sessions: Back-Channel Logout
+
+An application with a **back-channel logout address** (Sign-in panel, or `signIn.backchannelLogoutUri` in the manifest) is told when the platform ends a person's sessions, so it can end its own sessions for them at once. It doesn't have to wait for its access token to expire. This is [OpenID Connect Back-Channel Logout 1.0](https://openid.net/specs/openid-connect-backchannel-1_0.html), and discovery says `backchannel_logout_supported`.
+
+It happens when the person:
+- signs out everywhere;
+- is deactivated or removed;
+- belongs to an organization that is suspended, closed or deleted, or that turns the application off.
+
+Each application the person signed in to is told. At the same moment, everything the provider issued them (access and refresh tokens, grants, and its own sessions) stops working.
+
+Signing out of the site in one browser doesn't send a logout token. The token carries no session id, so it would end the person's sessions on every device. Applications sign people out from their own sign-out button, through the end-session endpoint, which also signs them out of the site.
+
+The platform POSTs `logout_token=<JWT>`, form-encoded, to the address. The JWT is signed like ID tokens (RS256, the keys in `jwks_uri`, header `typ: logout+jwt`), with:
+
+| Claim | Value |
+| --- | --- |
+| `iss` | The issuer |
+| `aud` | The application's client ID |
+| `sub` | The person (`<organization id>.<user id>`, as in the ID token) |
+| `iat`, `exp` | Valid for 2 minutes |
+| `jti` | Unique: ignore one you've seen |
+| `events` | `{"http://schemas.openid.net/event/backchannel-logout": {}}` |
+
+There's no `sid`, because session-level logout isn't required, and never a `nonce`.
+
+The application checks the signature, `iss`, `aud`, `exp` and `events`, then ends that person's sessions and answers `200` (or `204`). Any other answer, or none within 10 seconds, is retried with backoff for about a day and a half, with a new token each time. Platform staff see waiting and given-up logout tokens on the **Integrations** page.
 
 ## Where things are kept
 

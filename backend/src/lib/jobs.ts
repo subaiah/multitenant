@@ -17,6 +17,7 @@ import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
 import { controlDb } from './prisma.js';
 import { runExport } from './data-export.js';
 import { startUserEventSweep, stopUserEventSweep } from './product-user-events.js';
+import { logoutsSettled, startLogouts, stopLogouts } from './oidc/logout.js';
 import { reportError } from './error-reporting.js';
 import { purgeExpiredOidcPayloads } from './oidc/adapter.js';
 import { lifecycleEventsSettled, startLifecycleEvents, stopLifecycleEvents } from './product-lifecycle.js';
@@ -84,6 +85,7 @@ export async function startJobs(log: JobLogger) {
   startOidcCleanup((msg) => log.warn(msg));
   startLifecycleEvents(failed);
   startUserEventSweep(failed);
+  startLogouts(failed);
   log.info('Background jobs started');
 }
 
@@ -96,11 +98,12 @@ export async function stopJobs() {
   stopWebhooks();
   stopLifecycleEvents();
   stopUserEventSweep();
+  stopLogouts();
   if (oidcTimer) clearInterval(oidcTimer);
   oidcTimer = undefined;
   if (exportTimer) clearInterval(exportTimer);
   exportTimer = undefined;
   // Let work in progress finish (a few seconds at most; an export that's cut
   // short is picked up again later)
-  await Promise.race([Promise.all([notificationsSettled(), webhooksSettled(), lifecycleEventsSettled()]), new Promise((r) => setTimeout(r, 5000))]);
+  await Promise.race([Promise.all([notificationsSettled(), webhooksSettled(), lifecycleEventsSettled(), logoutsSettled()]), new Promise((r) => setTimeout(r, 5000))]);
 }

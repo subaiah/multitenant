@@ -32,6 +32,8 @@ There are two ways to build on the platform:
 | **Organizations, people and groups** in API v1, and the application's **event history** | Available | [Reading organizations and people](#reading-organizations-and-people) |
 | **User events**: someone was added, changed, deactivated, reactivated or removed, or their permissions for the application changed | Available (opt-in) | [User events](#user-events) |
 | **What organizations see**: each organization's administrators see what the application's server can learn about their people | Available | [What organizations see](#what-organizations-see) |
+| **Back-Channel Logout** and a configurable **access token lifetime** | Available | [Ending access at once](#ending-access-at-once) |
+| **Integrations page** for platform staff | Available | [The Integrations page](#the-integrations-page) |
 
 ## Rules
 
@@ -115,6 +117,8 @@ Importing **creates the application if its `productId` is new, and updates it ot
 | `signIn.redirectUris` | Yes | 1–10 exact addresses, `https://` or `http://localhost`, without a `#fragment`. |
 | `signIn.postLogoutRedirectUris` | No | Up to 10, same rules. |
 | `signIn.openPath` | No | A path starting with `/`, e.g. `/login`: the page that starts signing in. **Open** goes to `baseUrl + openPath` (OpenID's `initiate_login_uri`, with `?iss=`). |
+| `signIn.backchannelLogoutUri` | No | Where the platform sends a logout token when it ends a person's sessions ([Back-Channel Logout](SIGN_IN_WITH.md#when-the-platform-ends-someones-sessions-back-channel-logout)). Same address rules as the lifecycle callback. |
+| `signIn.accessTokenLifetime` | No | How long access tokens last, in seconds: 60 to 86400 (default 900, 15 minutes). Shorter means a change of access reaches the application sooner. |
 | `provisioning.callbackUrl` | No | Where [lifecycle events](#lifecycle-events) go: an `http(s)` address without credentials or a `#fragment`. In production it must be `https` and not an inside address (loopback, private, link-local, cloud metadata), unless its host is listed in the platform's `PRODUCT_CALLBACK_ALLOWED_HOSTS` (an application on the same network, e.g. `appforge`). Without `provisioning`, organizations need no setup and no events are sent. |
 | `provisioning.deletesDataOnDeprovision` | No | Whether the application deletes an organization's data when told it left (default `false`). Sent with `organization.deprovisioning_requested` and shown to platform staff. |
 | `provisioning.userEvents` | No | Also send [user events](#user-events) when people change (default `false`). Organizations' administrators see this. |
@@ -397,11 +401,24 @@ Nothing secret (passwords, two-factor settings) is ever included.
 - `nextAfter`: pass it as `after` for the next page. It's given on the last page too, so keep it and poll from it to catch any event the application missed;
 - `hasMore`.
 
-## Planned
+## Ending access at once
 
-- **Revocation:**
-  - OpenID Connect Back-Channel Logout, so the platform tells the application to end a person's sessions;
-  - a configurable access token lifetime.
+Three things together mean a person who loses access loses it in the application too, without waiting:
+
+1. **Back-Channel Logout** (`signIn.backchannelLogoutUri`). The platform tells the application to end the person's sessions when they sign out everywhere, are deactivated or removed, or their organization is suspended, closed or turns the application off ([details](SIGN_IN_WITH.md#when-the-platform-ends-someones-sessions-back-channel-logout)).
+2. **User events** ([above](#user-events)). The application learns about permission changes, and about deactivations and removals, even for people with no session.
+3. **Short access tokens** (`signIn.accessTokenLifetime`, 15 minutes by default). Each refresh checks the person again.
+
+## The Integrations page
+
+Platform staff see every external product on one page (**Customers → Integrations**), with a link to each one's panels:
+- whether sign-in is on, the token lifetime, and whether back-channel logout is set;
+- the callback and user events;
+- service credentials and when they were last used;
+- its organizations' setup: ready, setting up or failed;
+- lifecycle events and logout tokens: waiting, given up, and when the last one was delivered.
+
+Products that need attention come first: a failed setup, events given up or waiting over an hour, or logout tokens given up.
 
 ## Checklist before going live
 
@@ -409,6 +426,7 @@ Nothing secret (passwords, two-factor settings) is ever included.
 - [ ] Service credentials (if used) ask only for the scopes needed, live on the server, and can be replaced without downtime.
 - [ ] People read from the platform are keyed by `subject`; user events (or a periodic full pass) catch group, role and removal changes.
 - [ ] User events, if taken, end a person's sessions on `user.deactivated` and `user.removed`, and unknown event types are answered `2xx`.
+- [ ] A back-channel logout address is registered; its handler verifies the logout token (signature, `iss`, `aud`, `exp`, `events`), ends that person's sessions and answers `200`.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
 - [ ] Every query is scoped to the organization; a test proves one organization can't read another's data.

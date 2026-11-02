@@ -24,6 +24,9 @@ import { OidcAdapter } from './adapter.js';
 import { signingKeys } from './keys.js';
 import { accountIdFor, checkAccount, claimsFor } from './accounts.js';
 
+/** Access tokens for applications last this long unless their sign-in settings say otherwise (seconds) */
+export const DEFAULT_ACCESS_TOKEN_LIFETIME = 15 * 60;
+
 export const SCOPES = ['openid', 'offline_access', 'email', 'profile', 'organization', 'roles'] as const;
 export const CLAIMS: Record<string, string[]> = {
   openid: ['sub'],
@@ -109,8 +112,17 @@ export async function createProvider({ readSession, endSession }: { readSession:
       long: { signed: true, secure, sameSite: 'lax', httpOnly: true },
       short: { signed: true, secure, sameSite: 'lax', httpOnly: true },
     },
+    // Each application's own access token lifetime (application_sign_ins.access_token_lifetime, 15 minutes unless set)
+    extraClientMetadata: {
+      properties: ['access_token_lifetime'],
+      validator: (_ctx, key, value) => {
+        if (key === 'access_token_lifetime' && value !== undefined && !(Number.isInteger(value) && (value as number) >= 60 && (value as number) <= 86_400)) {
+          throw new errors.InvalidClientMetadata('access_token_lifetime must be 60 to 86400 seconds');
+        }
+      },
+    },
     ttl: {
-      AccessToken: 60 * 60,
+      AccessToken: (_ctx, _token, client) => ((client as unknown as { access_token_lifetime?: number } | undefined)?.access_token_lifetime ?? DEFAULT_ACCESS_TOKEN_LIFETIME),
       AuthorizationCode: 60,
       IdToken: 60 * 60,
       Interaction: 10 * 60,
@@ -142,6 +154,8 @@ export async function createProvider({ readSession, endSession }: { readSession:
         useGrantedResource: async () => false,
       },
       revocation: { enabled: true },
+      // Advertised in discovery; the logout tokens are sent from an outbox (lib/oidc/logout.ts), not by the provider
+      backchannelLogout: { enabled: true },
       userinfo: { enabled: true },
       rpInitiatedLogout: {
         enabled: true,

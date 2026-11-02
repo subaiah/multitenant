@@ -83,7 +83,7 @@ export const callbackUrlSchema = z.string().max(2000).superRefine((v, ctx) => {
   if (problem) ctx.addIssue({ code: 'custom', message: problem });
 });
 /** Allowed hosts (and anything outside production) are sent to as given; others through the webhook guard, checked on every connection */
-const trustedCallback = (url: string) => config.nodeEnv !== 'production' || config.productCallbackAllowedHosts.includes(new URL(url).hostname.toLowerCase());
+export const trustedCallback = (url: string) => config.nodeEnv !== 'production' || config.productCallbackAllowedHosts.includes(new URL(url).hostname.toLowerCase());
 
 // ---------------------------------------------------------------------------
 // Queueing

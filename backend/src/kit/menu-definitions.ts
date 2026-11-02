@@ -25,6 +25,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       children: [
         { label: 'Tenants', path: '/platform/tenants', icon: 'Building2', permission: 'tenants:read' },
         { label: 'Applications', path: '/platform/applications', icon: 'Package', permission: 'applications:read' },
+        { label: 'Integrations', path: '/platform/integrations', icon: 'Plug', permission: 'app-registry:manage' },
         { label: 'Plans and billing', path: '/platform/billing', icon: 'CreditCard', permission: 'plans:read' },
       ],
     },

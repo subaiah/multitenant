@@ -35,6 +35,7 @@ const RoleEditor = lazy(() => import('./pages/RoleEditor'));
 const AccessReview = lazy(() => import('./pages/AccessReview'));
 const Organizations = lazy(() => import('./pages/Organizations'));
 const ApplicationsManagement = lazy(() => import('./pages/ApplicationsManagement'));
+const Integrations = lazy(() => import('./pages/Integrations'));
 const TenantEntitlements = lazy(() => import('./pages/TenantEntitlements'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const Users = lazy(() => import('./pages/Users'));
@@ -115,6 +116,11 @@ export default function App() {
               <Route path="/platform/applications" element={
                 <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
                   <ApplicationsManagement />
+                </PermissionGuard>
+              } />
+              <Route path="/platform/integrations" element={
+                <PermissionGuard permission="app-registry:manage" redirectTo="/unauthorized">
+                  <Integrations />
                 </PermissionGuard>
               } />
               <Route path="/platform/users" element={

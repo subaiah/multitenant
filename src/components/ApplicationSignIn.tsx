@@ -20,6 +20,8 @@ interface Settings {
   redirectUris: string[];
   postLogoutRedirectUris: string[];
   initiateLoginUri: string | null;
+  backchannelLogoutUri: string | null;
+  accessTokenLifetime: number;
 }
 interface SignInInfo {
   issuer: string;
@@ -73,6 +75,8 @@ function SettingsForm({ applicationId, info, onSaved }: { applicationId: string;
   const [redirects, setRedirects] = useState((s?.redirectUris ?? []).join('\n'));
   const [logoutRedirects, setLogoutRedirects] = useState((s?.postLogoutRedirectUris ?? []).join('\n'));
   const [loginUri, setLoginUri] = useState(s?.initiateLoginUri ?? '');
+  const [logoutUri, setLogoutUri] = useState(s?.backchannelLogoutUri ?? '');
+  const [lifetimeMinutes, setLifetimeMinutes] = useState(String(Math.round((s?.accessTokenLifetime ?? 900) / 60)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +87,7 @@ function SettingsForm({ applicationId, info, onSaved }: { applicationId: string;
     try {
       onSaved(await apiPut<SignInInfo>(`/applications/${applicationId}/sign-in`, {
         enabled, clientType, redirectUris: lines(redirects), postLogoutRedirectUris: lines(logoutRedirects), initiateLoginUri: loginUri.trim() || null,
+        backchannelLogoutUri: logoutUri.trim() || null, accessTokenLifetime: Math.round(Number(lifetimeMinutes) * 60),
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Saving failed');
@@ -154,6 +159,12 @@ function SettingsForm({ applicationId, info, onSaved }: { applicationId: string;
       </Field>
       <Field label="Open address (optional)" hint="Where the organization's Applications page sends people to open it: the application's page that starts signing in.">
         <input value={loginUri} onChange={(e) => setLoginUri(e.target.value)} className={`${inputClass} font-mono text-xs`} placeholder="https://crm.example.com/login" />
+      </Field>
+      <Field label="Back-channel logout address (optional)" hint="Where the platform sends a logout token when someone signs out everywhere, is deactivated or removed, or their organization is suspended or turns the application off. The application ends their sessions.">
+        <input value={logoutUri} onChange={(e) => setLogoutUri(e.target.value)} className={`${inputClass} font-mono text-xs`} placeholder="https://crm.example.com/auth/backchannel-logout" />
+      </Field>
+      <Field label="Access token lifetime (minutes)" hint="How long its access tokens last before it uses the refresh token (and the platform checks the person again). 1 to 1440; 15 unless changed.">
+        <input type="number" min={1} max={1440} value={lifetimeMinutes} onChange={(e) => setLifetimeMinutes(e.target.value)} className={`${inputClass} w-32`} />
       </Field>
 
       {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}

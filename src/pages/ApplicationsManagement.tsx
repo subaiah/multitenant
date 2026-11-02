@@ -1,5 +1,6 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Package, Plus, Edit2, Trash2, Key, Download, FileJson } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { ManifestImport } from '../components/ManifestImport';
@@ -38,7 +39,9 @@ export default function ApplicationsManagement() {
   const loading = list.loading;
   const canManage = useAuth().hasPermission('app-registry:manage');
   // The chosen application, read from the latest list (the first by default)
-  const [selectedId, setSelectedId] = useState<string | null | undefined>(undefined);
+  // ?id= opens that application (links from the Integrations page)
+  const [params] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null | undefined>(params.get('id') ?? undefined);
   const selectedApp = (selectedId === undefined ? applications[0] : applications.find((a) => a.id === selectedId)) ?? null;
   const setSelectedApp = (app: Application | null) => setSelectedId(app?.id ?? null);
   const permissions = useApi<{ permissions: Permission[] }>(selectedApp ? `/applications/${selectedApp.id}/permissions` : null).data?.permissions ?? [];
