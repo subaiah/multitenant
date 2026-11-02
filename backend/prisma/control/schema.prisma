@@ -291,6 +291,9 @@ model ApplicationRegistry {
   provisioningCallbackUrl String?  @map("provisioning_callback_url")
   /// Signs lifecycle events (encrypted, lib/secrets.ts)
   callbackSigningSecret   String?  @map("callback_signing_secret")
+  /// The secret before the last rotation, still signing alongside until it expires
+  previousCallbackSigningSecret   String?   @map("previous_callback_signing_secret")
+  previousCallbackSecretExpiresAt DateTime? @map("previous_callback_secret_expires_at")
   /// Whether it deletes an organization's data when told it left
   deletesDataOnDeprovision Boolean @default(false) @map("deletes_data_on_deprovision")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -419,6 +422,9 @@ model TenantApplication {
   provisioningStatus EntitlementProvisioning @default(NOT_REQUIRED) @map("provisioning_status")
   provisioningError  String?        @map("provisioning_error")
   provisionedAt      DateTime?      @map("provisioned_at")
+  /// Rises with each setup operation; a report for an older one is refused
+  provisioningGeneration  Int       @default(0) @map("provisioning_generation")
+  provisioningOperationId String?   @map("provisioning_operation_id")
   createdAt     DateTime            @default(now()) @map("created_at")
 
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -451,6 +457,9 @@ model ProductEvent {
   tenantId      String             @map("tenant_id")
   type          String
   payload       Json
+  /// The setup operation it belongs to (organization.entitled starts one)
+  operationId   String?            @map("operation_id")
+  generation    Int?
   status        ProductEventStatus @default(PENDING)
   attempts      Int                @default(0)
   nextAttemptAt DateTime           @default(now()) @map("next_attempt_at")

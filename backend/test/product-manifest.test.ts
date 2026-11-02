@@ -189,3 +189,67 @@ test("organizations that have it on see its pages in the sidebar, as far as thei
   assert.equal((await api('DELETE', `/tenant-applications/${on.json.id}`, { cookie: adminA })).status, 204);
   assert.equal(await sectionOf(adminA), undefined);
 });
+
+test('re-importing keeps sign-in off if platform staff turned it off', async () => {
+  const m = manifest();
+  const first = await importIt(m);
+  await api('PUT', `/applications/${first.json.application.id}/sign-in`, { cookie: platform, body: { enabled: false, clientType: 'CONFIDENTIAL', redirectUris: m.signIn.redirectUris } });
+  const again = await importIt({ ...m, version: '1.0.1' });
+  assert.equal(again.status, 200);
+  const { controlDb } = await db();
+  assert.equal((await controlDb.applicationSignIn.findUniqueOrThrow({ where: { applicationId: first.json.application.id } })).enabled, false);
+});
+
+test('switching client type must be confirmed', async () => {
+  const m = manifest();
+  const first = await importIt(m);
+  const toPublic = { ...m, signIn: { ...m.signIn, clientType: 'PUBLIC' } };
+  const refused = await importIt(toPublic);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.code, 'CLIENT_TYPE_CHANGE');
+  assert.match(refused.json.message, /removes its client secret/);
+  const ok = await api('POST', '/applications/manifest?confirmClientTypeChange=true', { cookie: platform, body: toPublic });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.deepEqual(ok.json.changes.clientType, ['CONFIDENTIAL', 'PUBLIC']);
+  const { controlDb } = await db();
+  const signIn = await controlDb.applicationSignIn.findUniqueOrThrow({ where: { applicationId: first.json.application.id } });
+  assert.equal(signIn.clientType, 'PUBLIC');
+  assert.equal(signIn.oidcClientSecret, null);
+});
+
+test('a dry run reports what would change, and saves nothing', async () => {
+  const m = manifest();
+  const dry = await api('POST', '/applications/manifest?dryRun=true', { cookie: platform, body: m });
+  assert.equal(dry.status, 200, JSON.stringify(dry.json));
+  assert.equal(dry.json.dryRun, true);
+  assert.equal(dry.json.created, true);
+  assert.equal(dry.json.clientSecret, undefined, 'no secrets from a dry run');
+  assert.deepEqual(dry.json.permissions.added.length, 2);
+  const { controlDb } = await db();
+  assert.equal(await controlDb.applicationRegistry.count({ where: { key: m.productId } }), 0, 'nothing saved');
+
+  await importIt(m);
+  const next = { ...m, version: '2.0.0', signIn: { ...m.signIn, redirectUris: [...m.signIn.redirectUris, 'https://forge.example.com/cb2'] } };
+  const plan = await api('POST', '/applications/manifest?dryRun=true', { cookie: platform, body: next });
+  assert.equal(plan.json.created, false);
+  assert.deepEqual(plan.json.changes.version, ['1.0.0', '2.0.0']);
+  assert.equal(plan.json.changes.redirectUris[1].length, 2);
+  assert.equal((await controlDb.applicationRegistry.findUniqueOrThrow({ where: { key: m.productId } })).version, '1.0.0', 'still unchanged');
+
+  // A real import records the changes in the audit log
+  await importIt(next);
+  const log = await api('GET', '/platform-audit?event=application.manifest_imported', { cookie: platform });
+  const entry = log.json.data.find((e: { resourceLabel: string; changes: Record<string, unknown> | null }) => e.changes && 'version' in e.changes && JSON.stringify(e.changes).includes('2.0.0'));
+  assert.ok(entry, 'changes audited');
+});
+
+test('two imports of the same new product at once: one creates it, the other updates it or is told to retry', async () => {
+  const m = manifest();
+  const results = await Promise.all([importIt(m), importIt(m), importIt(m)]);
+  const statuses = results.map((r) => r.status).sort();
+  assert.equal(statuses.filter((s) => s === 201).length, 1, JSON.stringify(statuses));
+  assert.ok(statuses.every((s) => [200, 201, 409].includes(s)), JSON.stringify(statuses));
+  for (const r of results.filter((x) => x.status === 409)) assert.equal(r.json.code, 'CONCURRENT_IMPORT');
+  const { controlDb } = await db();
+  assert.equal(await controlDb.applicationRegistry.count({ where: { key: m.productId } }), 1);
+});

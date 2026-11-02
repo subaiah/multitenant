@@ -15,6 +15,7 @@ import { audit } from '../lib/audit.js';
 
 const DENIED: Record<AccessProblem, string> = {
   NOT_ENTITLED: "Your organization doesn't have this application turned on. Ask an administrator to turn it on.",
+  NOT_READY: "This application is still being set up for your organization. Try again in a few minutes.",
   ORGANIZATION_UNAVAILABLE: "Your organization isn't available right now.",
   ACCOUNT_INACTIVE: 'Your account is not active.',
   APPLICATION_UNAVAILABLE: "This application isn't available for sign-in.",

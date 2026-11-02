@@ -156,6 +156,7 @@ Every setting is described in `backend/.env.example`. The ones a deployment must
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | A bot check on the sign-up form. Set them before opening sign-up to the public. |
 | `TRIAL_DAYS`, `CLOSE_GRACE_DAYS` | How long trials last before the organization becomes read-only, and how long a closed organization is kept before it's deleted. See *Trials and closing an organization*. |
 | `PREVIEW_FEATURES` | Off in production. It hides pages that show sample data: deployed applications and their resource use, the API gateway settings, the backup and encryption switches, and the platform's "coming soon" pages. |
+| `PRODUCT_CALLBACK_ALLOWED_HOSTS` | Hosts an external product's lifecycle callback may use without https or on an inside address, comma-separated (e.g. `appforge` for a container on the same Docker network). Empty by default. ([PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md#lifecycle-events)) |
 | `API_DOCS` | Off in production. The interactive API reference at `/api/docs`. |
 | `TENANT_POOL_MAX`, `TENANT_CLIENT_CACHE_MAX`, `POSTGRES_MAX_CONNECTIONS` | See *Database connections*. |
 

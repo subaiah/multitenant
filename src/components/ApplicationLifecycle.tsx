@@ -15,6 +15,7 @@ import { Badge, Card, DataView, formatDateTime, formatRelative, humanize, inputC
 interface Lifecycle {
   callbackUrl: string | null;
   hasSecret: boolean;
+  previousSecretValidUntil: string | null;
   deletesDataOnDeprovision: boolean;
   organizations: { tenant: { id: string; name: string; slug: string }; state: string; provisioningStatus: string; provisioningError: string | null; provisionedAt: string | null }[];
   events: {
@@ -131,9 +132,10 @@ function SettingsForm({ path, data, onSecret, onSaved }: { path: string; data: L
     }
   };
   const rotate = async () => {
-    if (!confirm('Replace the signing secret? Events signed with the current one stop verifying at once.')) return;
+    if (!confirm('Replace the signing secret? For 24 hours, events are signed with both the old and the new one, so the application can switch over.')) return;
     try {
       onSecret((await apiPost<{ signingSecret: string }>(`${path}/secret`)).signingSecret);
+      onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Replacing the secret failed');
     }
@@ -148,6 +150,9 @@ function SettingsForm({ path, data, onSecret, onSaved }: { path: string; data: L
         <input type="checkbox" checked={deletes} onChange={(e) => setDeletes(e.target.checked)} className="rounded border-slate-300" />
         The application deletes an organization's data when it leaves
       </label>
+      {data.previousSecretValidUntil && (
+        <p className="text-xs text-slate-500">Events are also signed with the previous secret until {formatDateTime(data.previousSecretValidUntil)}.</p>
+      )}
       {told !== null && told > 0 && <p role="status" className="text-sm text-slate-600 dark:text-slate-300">{told} organization{told === 1 ? '' : 's'} that already had it on {told === 1 ? 'is' : 'are'} being told now.</p>}
       {error && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">

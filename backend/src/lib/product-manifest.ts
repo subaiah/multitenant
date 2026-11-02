@@ -80,9 +80,28 @@ export interface ImportResult {
   organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   menuItems: number;
+  /** What changed in the catalogue entry and its sign-in, { field: [before, after] } (audited) */
+  changes: Record<string, [unknown, unknown]>;
+  /** A dry run: what would happen; nothing was saved and no secrets were made */
+  dryRun?: true;
 }
 
-export async function importManifest(input: unknown): Promise<ImportResult> {
+export interface ImportOptions {
+  /** Check and report only */
+  dryRun?: boolean;
+  /** Switching between CONFIDENTIAL and PUBLIC clients must be asked for explicitly */
+  confirmClientTypeChange?: boolean;
+}
+
+class DryRun extends Error {
+  constructor(readonly result: unknown) {
+    super('dry run');
+  }
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+export async function importManifest(input: unknown, options: ImportOptions = {}): Promise<ImportResult> {
   const problems = manifestProblems(input);
   if (problems) throw new AppError(`The manifest has problems:\n${problems.join('\n')}`, 400, true, 'INVALID_MANIFEST');
   const m = manifestSchema.parse(input);
@@ -94,76 +113,116 @@ export async function importManifest(input: unknown): Promise<ImportResult> {
   });
   if (taken.length) throw new AppError(`Already used by another application: ${taken.map((t) => t.name).join(', ')}`, 409);
 
-  const result = await controlDb.$transaction(async (tx) => {
-    const existing = await tx.applicationRegistry.findUnique({ where: { key: m.productId }, include: { signIn: true, permissions: true } });
-    // The manifest says where lifecycle events go; without provisioning, nowhere
-    const callbackSecret = m.provisioning && !existing?.callbackSigningSecret ? newCallbackSecret() : undefined;
-    const fields = {
-      name: m.name, description: m.description ?? null, version: m.version, baseUrl: m.baseUrl.replace(/\/+$/, ''), manifestImportedAt: new Date(),
-      provisioningCallbackUrl: m.provisioning?.callbackUrl ?? null,
-      deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
-      ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
-    };
-    const app = existing
-      ? await tx.applicationRegistry.update({ where: { id: existing.id }, data: fields })
-      : await tx.applicationRegistry.create({ data: { key: m.productId, status: 'ACTIVE', ...fields } });
-
-    // Sign-in: the same credentials across imports; a secret only when a confidential client has none
-    const before = existing?.signIn;
-    const confidential = m.signIn.clientType === 'CONFIDENTIAL';
-    const secret = confidential && !before?.oidcClientSecret ? newClientSecret() : undefined;
-    const signInFields = {
-      enabled: true,
-      clientType: m.signIn.clientType,
-      redirectUris: [...new Set(m.signIn.redirectUris)],
-      postLogoutRedirectUris: [...new Set(m.signIn.postLogoutRedirectUris ?? [])],
-      initiateLoginUri: m.signIn.openPath ? `${fields.baseUrl}${m.signIn.openPath}` : null,
-      ...(secret && { oidcClientSecret: secret, secretCreatedAt: new Date() }),
-      ...(!confidential && { oidcClientSecret: null, secretCreatedAt: null }),
-    };
-    const signIn = await tx.applicationSignIn.upsert({
-      where: { applicationId: app.id },
-      create: { applicationId: app.id, clientId: newClientId(), ...signInFields },
-      update: signInFields,
-    });
-
-    // Permissions: add new, refresh descriptions; report the rest
-    const had = new Map((existing?.permissions ?? []).map((p) => [p.name, p]));
-    const added: string[] = [];
-    const updated: string[] = [];
-    for (const p of m.permissions) {
-      const [resource, action] = p.name.split(':');
-      const old = had.get(p.name);
-      if (!old) {
-        await tx.permission.create({ data: { applicationId: app.id, name: p.name, description: p.description, resource, action } });
-        added.push(p.name);
-      } else if (old.description !== p.description) {
-        await tx.permission.update({ where: { id: old.id }, data: { description: p.description } });
-        updated.push(p.name);
+  let result;
+  try {
+    result = await controlDb.$transaction(async (tx) => {
+      const existing = await tx.applicationRegistry.findUnique({ where: { key: m.productId }, include: { signIn: true, permissions: true } });
+      // Switching client type changes how the application authenticates (and drops or makes a secret)
+      if (existing?.signIn && existing.signIn.clientType !== m.signIn.clientType && !options.confirmClientTypeChange) {
+        throw new AppError(
+          `This switches ${existing.name} from a ${existing.signIn.clientType} to a ${m.signIn.clientType} client${m.signIn.clientType === 'PUBLIC' ? ', which removes its client secret' : ', which gives it a new client secret'}. Import again with confirmClientTypeChange to go ahead.`,
+          409, true, 'CLIENT_TYPE_CHANGE',
+        );
       }
-    }
-    const listed = new Set(m.permissions.map((p) => p.name));
-    const notInManifest = [...had.keys()].filter((n) => !listed.has(n)).sort();
+      // The manifest says where lifecycle events go; without provisioning, nowhere
+      const callbackSecret = m.provisioning && !existing?.callbackSigningSecret ? newCallbackSecret() : undefined;
+      const fields = {
+        name: m.name, description: m.description ?? null, version: m.version, baseUrl: m.baseUrl.replace(/\/+$/, ''), manifestImportedAt: new Date(),
+        provisioningCallbackUrl: m.provisioning?.callbackUrl ?? null,
+        deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
+        ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
+      };
+      const app = existing
+        ? await tx.applicationRegistry.update({ where: { id: existing.id }, data: fields })
+        : await tx.applicationRegistry.create({ data: { key: m.productId, status: 'ACTIVE', ...fields } });
 
-    // Menu: replaced
-    await tx.applicationMenuItem.deleteMany({ where: { applicationId: app.id } });
-    if (m.menu.length) {
-      await tx.applicationMenuItem.createMany({
-        data: m.menu.map((item, order) => ({ applicationId: app.id, label: item.label, path: item.path, icon: item.icon ?? null, permission: item.permission ?? null, order })),
+      // Sign-in: the same credentials across imports; a secret only when a confidential client has none
+      const before = existing?.signIn;
+      const confidential = m.signIn.clientType === 'CONFIDENTIAL';
+      const secret = confidential && !before?.oidcClientSecret ? newClientSecret() : undefined;
+      const signInFields = {
+        // A first import turns sign-in on; after that, platform staff's choice stands
+        enabled: before ? before.enabled : true,
+        clientType: m.signIn.clientType,
+        redirectUris: [...new Set(m.signIn.redirectUris)],
+        postLogoutRedirectUris: [...new Set(m.signIn.postLogoutRedirectUris ?? [])],
+        initiateLoginUri: m.signIn.openPath ? `${fields.baseUrl}${m.signIn.openPath}` : null,
+        ...(secret && { oidcClientSecret: secret, secretCreatedAt: new Date() }),
+        ...(!confidential && { oidcClientSecret: null, secretCreatedAt: null }),
+      };
+      const signIn = await tx.applicationSignIn.upsert({
+        where: { applicationId: app.id },
+        create: { applicationId: app.id, clientId: newClientId(), ...signInFields },
+        update: signInFields,
       });
-    }
 
-    return {
-      application: { id: app.id, key: app.key, name: app.name, version: app.version },
-      created: !existing,
-      clientId: signIn.clientId,
-      ...(secret && { clientSecret: secret }),
-      ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
-      hadCallback: !!existing?.provisioningCallbackUrl,
-      permissions: { added, updated, notInManifest },
-      menuItems: m.menu.length,
-    };
-  });
+      // Permissions: add new, refresh descriptions; report the rest
+      const had = new Map((existing?.permissions ?? []).map((p) => [p.name, p]));
+      const added: string[] = [];
+      const updated: string[] = [];
+      for (const p of m.permissions) {
+        const [resource, action] = p.name.split(':');
+        const old = had.get(p.name);
+        if (!old) {
+          await tx.permission.create({ data: { applicationId: app.id, name: p.name, description: p.description, resource, action } });
+          added.push(p.name);
+        } else if (old.description !== p.description) {
+          await tx.permission.update({ where: { id: old.id }, data: { description: p.description } });
+          updated.push(p.name);
+        }
+      }
+      const listed = new Set(m.permissions.map((p) => p.name));
+      const notInManifest = [...had.keys()].filter((n) => !listed.has(n)).sort();
+
+      // Menu: replaced
+      await tx.applicationMenuItem.deleteMany({ where: { applicationId: app.id } });
+      if (m.menu.length) {
+        await tx.applicationMenuItem.createMany({
+          data: m.menu.map((item, order) => ({ applicationId: app.id, label: item.label, path: item.path, icon: item.icon ?? null, permission: item.permission ?? null, order })),
+        });
+      }
+
+      // What changed, for the audit log and the dry run (never secrets)
+      const was = {
+        name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null,
+        callbackUrl: existing?.provisioningCallbackUrl ?? null, deletesDataOnDeprovision: existing?.deletesDataOnDeprovision ?? false,
+        clientType: before?.clientType ?? null, redirectUris: before?.redirectUris ?? [], postLogoutRedirectUris: before?.postLogoutRedirectUris ?? [],
+        openUrl: before?.initiateLoginUri ?? null, signInEnabled: before?.enabled ?? null,
+      };
+      const now = {
+        name: app.name, version: app.version, baseUrl: app.baseUrl, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision,
+        clientType: signIn.clientType, redirectUris: signIn.redirectUris, postLogoutRedirectUris: signIn.postLogoutRedirectUris, openUrl: signIn.initiateLoginUri, signInEnabled: signIn.enabled,
+      };
+      const changes = Object.fromEntries(
+        (Object.keys(now) as (keyof typeof now)[]).filter((k) => !same(was[k], now[k])).map((k) => [k, [was[k], now[k]] as [unknown, unknown]]),
+      );
+
+      const outcome = {
+        application: { id: app.id, key: app.key, name: app.name, version: app.version },
+        created: !existing,
+        changes,
+        clientId: signIn.clientId,
+        ...(secret && { clientSecret: secret }),
+        ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
+        hadCallback: !!existing?.provisioningCallbackUrl,
+        permissions: { added, updated, notInManifest },
+        menuItems: m.menu.length,
+      };
+      // A dry run: everything checked and worked out, then rolled back
+      if (options.dryRun) throw new DryRun(outcome);
+      return outcome;
+    });
+  } catch (err) {
+    if (err instanceof DryRun) {
+      const { clientSecret: _s, callbackSigningSecret: _c, hadCallback: _h, ...plan } = err.result as ImportResult & { hadCallback: boolean };
+      return { ...plan, ...(plan.created && { clientId: '(made on import)', application: { ...plan.application, id: '(made on import)' } }), dryRun: true };
+    }
+    // Two imports of the same new product at once: one wins
+    if ((err as { code?: string }).code === 'P2002') {
+      throw new AppError('Another import of this product ran at the same time. Import again to apply this one.', 409, true, 'CONCURRENT_IMPORT');
+    }
+    throw err;
+  }
   forgetApplicationPermissions();
   // Organizations that have it on and weren't told yet are told now
   const { hadCallback, ...rest } = result;

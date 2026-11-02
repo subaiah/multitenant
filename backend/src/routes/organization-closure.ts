@@ -22,7 +22,7 @@ import { signedInCodeRateLimit } from '../lib/rate-limits.js';
 import { verifyPassword } from '../utils/auth.js';
 import { isTenantAdmin } from '../utils/authorization.js';
 import { endBillingFor } from '../lib/billing/subscriptions.js';
-import { organizationStatusChanged } from '../lib/product-lifecycle.js';
+import { kickLifecycleEvents, organizationStatusChanged } from '../lib/product-lifecycle.js';
 
 export const closureRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/closure', {
@@ -61,11 +61,14 @@ export const closureRoutes: FastifyPluginAsync = async (fastify) => {
     const closedBy = user.name ? `${user.name} (${user.email})` : user.email;
     // Admins to tell, read while the organization can still be read
     const admins = await tenantAdmins(tenant.id);
-    await controlDb.tenant.update({
-      where: { id: tenant.id },
-      data: { status: 'SUSPENDED', statusBeforeClose: tenant.status, closedAt: now, closedBy, deleteAfter },
+    await controlDb.$transaction(async (tx) => {
+      await tx.tenant.update({
+        where: { id: tenant.id },
+        data: { status: 'SUSPENDED', statusBeforeClose: tenant.status, closedAt: now, closedBy, deleteAfter },
+      });
+      await organizationStatusChanged(tx, tenant.id, tenant.status, 'SUSPENDED');
     });
-    await organizationStatusChanged(tenant.id, tenant.status, 'SUSPENDED');
+    kickLifecycleEvents();
     // No more renewals; what's paid for runs to the end of its period
     await endBillingFor(tenant.id, 'period_end');
     await audit(request, 'tenant.closed', {

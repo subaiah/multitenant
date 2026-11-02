@@ -292,17 +292,19 @@ async function deprovisionLocked(tenantId: string, actorId?: string): Promise<vo
     await (await import('./billing/subscriptions.js')).endBillingFor(tenantId, 'now');
     // Its data exports, files and records
     await removeTenantExports(tenantId);
-    // Its external products are told to clean up, before its entitlements go (lib/product-lifecycle.ts)
-    await (await import('./product-lifecycle.js')).organizationDeleting(tenantId);
-    await controlDb.$transaction([
-      controlDb.supportSession.deleteMany({ where: { tenantId } }),
-      controlDb.signupRequest.deleteMany({ where: { tenantId } }),
-      controlDb.tenantApplication.deleteMany({ where: { tenantId } }),
-      controlDb.tenantUsage.deleteMany({ where: { tenantId } }),
-      controlDb.webhookWork.deleteMany({ where: { tenantId } }),
-      controlDb.databaseConfig.deleteMany({ where: { tenantId } }),
-      controlDb.tenant.delete({ where: { id: tenantId } }),
-    ]);
+    // Its external products are told to clean up, in the transaction that removes its entitlements (lib/product-lifecycle.ts)
+    const lifecycle = await import('./product-lifecycle.js');
+    await controlDb.$transaction(async (tx) => {
+      await lifecycle.organizationDeleting(tx, tenantId);
+      await tx.supportSession.deleteMany({ where: { tenantId } });
+      await tx.signupRequest.deleteMany({ where: { tenantId } });
+      await tx.tenantApplication.deleteMany({ where: { tenantId } });
+      await tx.tenantUsage.deleteMany({ where: { tenantId } });
+      await tx.webhookWork.deleteMany({ where: { tenantId } });
+      await tx.databaseConfig.deleteMany({ where: { tenantId } });
+      await tx.tenant.delete({ where: { id: tenantId } });
+    });
+    lifecycle.kickLifecycleEvents();
     await logPlatformActivity({ tenantId, userId: actorId, action: 'deleted tenant', target: `${tenant.name} (${tenant.slug})`, type: 'CONFIG' });
     await recordAudit({ actor: await platformActor(actorId) }, 'tenant.deleted', { tenantId, resource: { type: 'tenant', id: tenantId, label: tenant.slug }, details: { name: tenant.name } }).catch(() => {});
   } catch (err) {

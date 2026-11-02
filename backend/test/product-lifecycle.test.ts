@@ -86,8 +86,8 @@ const launchpadEntry = async (applicationId: string) =>
   (await api('GET', '/tenant-applications/launchpad', { cookie: adminA })).json.applications.find((a: { id: string }) => a.id === applicationId);
 const hasSidebarSection = async (productId: string) =>
   (await api('GET', '/menu-items/portal/TENANT', { cookie: adminA })).json.menuItems.some((i: { path: string }) => i.path === `#app-${productId}`);
-const report = (p: { clientId: string; clientSecret: string }, tenantId: string, body: unknown, secret = p.clientSecret) =>
-  api('POST', `/product-api/organizations/${tenantId}/provisioning`, {
+const report = (p: { clientId: string; clientSecret: string }, operationId: string, body: unknown, secret = p.clientSecret) =>
+  api('POST', `/product-api/operations/${operationId}/result`, {
     headers: { authorization: `Basic ${Buffer.from(`${p.clientId}:${secret}`).toString('base64')}` },
     body,
   });
@@ -99,6 +99,10 @@ test('turned on: organization.entitled arrives signed; a 2xx answer means set up
   await turnOn(p.id);
   const [e] = await eventually('entitled', () => (eventsFor(p.productId).length ? eventsFor(p.productId) : undefined));
   assert.equal(e.json.type, 'organization.entitled');
+  assert.equal(e.json.schemaVersion, 1);
+  assert.match(e.json.data.operation.id, /^op_/);
+  assert.equal(e.json.data.operation.generation, 1);
+  assert.equal(e.json.data.application.id, p.id);
   assert.equal(e.json.data.organization.slug, A.slug);
   assert.equal(e.json.data.entitlement.state, 'ENABLED');
   assert.equal(e.headers['user-agent'], 'Multitenant-Lifecycle/1');
@@ -120,27 +124,44 @@ test('202 then a report: Open and the sidebar wait until the product says it is 
   answer = 202;
   const p = await importProduct();
   await turnOn(p.id);
-  await eventually('entitled', () => eventsFor(p.productId)[0]);
+  const entitled = await eventually('entitled', () => eventsFor(p.productId)[0]);
+  const op = entitled.json.data.operation as { id: string; generation: number };
   await sleep(300);
   assert.equal(await setup(p.id), 'PENDING');
+  // Sign-in waits too (fail closed)
+  const { checkAccount } = await import('../src/lib/oidc/accounts.js');
+  const { controlDb } = await db();
+  const admin = await A.db.user.findFirstOrThrow({ where: { email: A.adminEmail, tenantId: A.tenantId } });
+  const clientId = (await controlDb.applicationSignIn.findUniqueOrThrow({ where: { applicationId: p.id } })).clientId;
+  assert.deepEqual(await checkAccount(`${A.tenantId}.${admin.id}`, clientId), { problem: 'NOT_READY' });
   const waiting = await launchpadEntry(p.id);
   assert.equal(waiting.setup, 'PENDING');
   assert.equal(waiting.openUrl, null);
   assert.equal(await hasSidebarSection(p.productId), false);
 
-  // Only the product itself can report
-  assert.equal((await report(p, A.tenantId, { status: 'READY' }, 'wrong')).status, 401);
-  assert.equal((await api('POST', `/product-api/organizations/${A.tenantId}/provisioning`, { body: { status: 'READY' } })).status, 401);
-  assert.equal((await report(p, '00000000-0000-4000-8000-000000000000', { status: 'READY' })).status, 404);
+  // Only the product itself can report, on its own current operation
+  assert.equal((await report(p, op.id, { generation: 1, status: 'READY' }, 'wrong')).status, 401);
+  assert.equal((await api('POST', `/product-api/operations/${op.id}/result`, { body: { generation: 1, status: 'READY' } })).status, 401);
+  assert.equal((await report(p, 'op_nothing', { generation: 1, status: 'READY' })).status, 404);
+  const other = await importProduct();
+  assert.equal((await report(other, op.id, { generation: 1, status: 'READY' })).status, 404, "another product's operation");
+  const wrongGeneration = await report(p, op.id, { generation: 2, status: 'READY' });
+  assert.equal(wrongGeneration.status, 409);
+  assert.equal(wrongGeneration.json.code, 'STALE_OPERATION');
 
-  // It failed, then it worked
-  assert.equal((await report(p, A.tenantId, { status: 'FAILED', message: 'Quota exceeded' })).status, 204);
+  // It failed, then it worked; repeating a result is harmless; a finished setup can't fail
+  assert.equal((await report(p, op.id, { generation: 1, status: 'FAILED', message: 'Quota exceeded' })).status, 204);
   const failed = await launchpadEntry(p.id);
   assert.equal(failed.setup, 'FAILED');
   assert.equal(failed.setupError, 'Quota exceeded');
-  assert.equal((await report(p, A.tenantId, { status: 'READY' })).status, 204);
+  assert.equal((await report(p, op.id, { generation: 1, status: 'READY' })).status, 204);
+  assert.equal((await report(p, op.id, { generation: 1, status: 'READY' })).status, 204, 'the same result again');
+  const late = await report(p, op.id, { generation: 1, status: 'FAILED' });
+  assert.equal(late.status, 409);
+  assert.equal(late.json.code, 'INVALID_TRANSITION');
   assert.equal((await launchpadEntry(p.id)).setup, 'READY');
   assert.equal(await hasSidebarSection(p.productId), true);
+  assert.equal(await checkAccount(`${A.tenantId}.${admin.id}`, clientId).then((r) => 'problem' in r), false, 'sign-in works once ready');
   answer = 200;
 });
 
@@ -157,8 +178,14 @@ test('changes, suspension and resumption arrive in order; removing it tells the 
 
   const all = await eventually('five events', () => (eventsFor(p.productId).length >= 5 ? eventsFor(p.productId) : undefined));
   assert.deepEqual(all.map((e) => e.json.type), [
-    'organization.entitled', 'organization.entitlement_changed', 'organization.suspended', 'organization.resumed', 'organization.deprovisioned',
+    'organization.entitled', 'organization.entitlement_changed', 'organization.suspended', 'organization.resumed', 'organization.deprovisioning_requested',
   ]);
+  // Everything after entitled belongs to its operation; cleaning up starts a new one
+  const op = all[0].json.data.operation;
+  assert.deepEqual(all[1].json.data.operation, op);
+  assert.deepEqual(all[3].json.data.operation, op);
+  assert.equal(all[4].json.data.operation.generation, op.generation + 1);
+  assert.notEqual(all[4].json.data.operation.id, op.id);
   assert.equal(all[1].json.data.entitlement.state, 'TRIAL');
   assert.equal(all[2].json.data.organization.suspended, true);
   assert.equal(all[4].json.data.reason, 'entitlement_removed');
@@ -229,8 +256,60 @@ test('deleting an organization tells its products to clean up', async () => {
   const { deprovisionTenant } = await import('../src/lib/provisioning.js');
   await deprovisionTenant(C.tenantId);
   const [e] = await eventually('deprovisioned', () => eventsFor(p.productId, C.tenantId)[0] && eventsFor(p.productId, C.tenantId));
-  assert.equal(e.json.type, 'organization.deprovisioned');
+  assert.equal(e.json.type, 'organization.deprovisioning_requested');
   assert.equal(e.json.data.reason, 'organization_deleted');
   assert.equal(e.json.data.organization.slug, C.slug);
   assert.equal(e.json.data.deleteData, true);
 });
+
+test("a newer setup replaces an older one: the older one's result no longer counts", async () => {
+  answer = 202;
+  const p = await importProduct();
+  const entitlementId = await turnOn(p.id);
+  const first = (await eventually('first', () => eventsFor(p.productId)[0])).json.data.operation;
+  // Turned off and on again: a second setup operation
+  await api('PATCH', `/tenant-applications/${entitlementId}`, { cookie: adminA, body: { state: 'DISABLED' } });
+  await api('PATCH', `/tenant-applications/${entitlementId}`, { cookie: adminA, body: { state: 'ENABLED' } });
+  const all = await eventually('three', () => (eventsFor(p.productId).length >= 3 ? eventsFor(p.productId) : undefined));
+  const second = all[2].json.data.operation;
+  assert.equal(all[2].json.type, 'organization.entitled');
+  assert.equal(second.generation, first.generation + 1);
+
+  const late = await report(p, first.id, { generation: first.generation, status: 'READY' });
+  assert.equal(late.status, 409);
+  assert.equal(late.json.code, 'STALE_OPERATION');
+  assert.equal(await setup(p.id), 'PENDING', 'the newer setup still waits');
+  assert.equal((await report(p, second.id, { generation: second.generation, status: 'READY' })).status, 204);
+  assert.equal(await setup(p.id), 'READY');
+  answer = 200;
+});
+
+test('a new signing secret: the old one keeps signing alongside for a day', async () => {
+  answer = 200;
+  const p = await importProduct();
+  const rotated = await api('POST', `/applications/${p.id}/lifecycle/secret`, { cookie: platform });
+  assert.equal(rotated.status, 200);
+  assert.ok(new Date(rotated.json.previousSecretValidUntil).getTime() > Date.now() + 23 * 3_600_000);
+  await turnOn(p.id);
+  const [e] = await eventually('event', () => eventsFor(p.productId)[0] && eventsFor(p.productId));
+  const sigs = String(e.headers['webhook-signature']).split(' ');
+  assert.equal(sigs.length, 2);
+  const id = e.headers['webhook-id'] as string;
+  const ts = e.headers['webhook-timestamp'] as string;
+  const verifies = (secret: string) => sigs.includes(`v1,${createHmac('sha256', Buffer.from(secret.replace(/^whsec_/, ''), 'base64')).update(`${id}.${ts}.${e.body}`).digest('base64')}`);
+  assert.ok(verifies(rotated.json.signingSecret), 'the new secret');
+  assert.ok(verifies(p.signingSecret!), 'the old secret, during the changeover');
+});
+
+test('callback addresses in production: https and no inside addresses, unless the host is allowed', async () => {
+  const { callbackUrlProblem } = await import('../src/lib/product-lifecycle.js');
+  const prod = { production: true, allowedHosts: ['appforge'] };
+  assert.equal(callbackUrlProblem('https://appforge.example.com/events', prod), null);
+  assert.equal(callbackUrlProblem('http://appforge:3000/events', prod), null, 'an allowed host');
+  for (const bad of ['http://appforge.example.com/events', 'https://localhost/events', 'https://10.0.0.5/events', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://db.internal/x', 'https://u:p@appforge.example.com/', 'https://appforge.example.com/#x', 'ftp://appforge.example.com/']) {
+    assert.ok(callbackUrlProblem(bad, prod), bad);
+  }
+  // Outside production (development, tests), any http(s) address
+  assert.equal(callbackUrlProblem('http://127.0.0.1:9/x', { production: false, allowedHosts: [] }), null);
+});
+

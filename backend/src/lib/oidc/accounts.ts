@@ -23,7 +23,7 @@ export function parseAccountId(sub: string): { tenantId: string; userId: string 
   return { tenantId: sub.slice(0, i), userId: sub.slice(i + 1) };
 }
 
-export type AccessProblem = 'NOT_ENTITLED' | 'ORGANIZATION_UNAVAILABLE' | 'ACCOUNT_INACTIVE' | 'APPLICATION_UNAVAILABLE';
+export type AccessProblem = 'NOT_ENTITLED' | 'NOT_READY' | 'ORGANIZATION_UNAVAILABLE' | 'ACCOUNT_INACTIVE' | 'APPLICATION_UNAVAILABLE';
 
 /** The application a client belongs to, if it may sign people in */
 export async function applicationForClient(clientId: string) {
@@ -34,13 +34,18 @@ export async function applicationForClient(clientId: string) {
   return signIn?.enabled && signIn.application.status === 'ACTIVE' ? signIn.application : null;
 }
 
-/** Whether the organization has the application turned on right now */
-export async function entitled(tenantId: string, applicationId: string, now = new Date()): Promise<boolean> {
+/**
+ * Whether the organization may use the application right now: turned on
+ * (ENABLED or TRIAL, within its dates) and, if the application takes
+ * lifecycle events, set up for it (lib/product-lifecycle.ts)
+ */
+export async function entitlementProblem(tenantId: string, applicationId: string, now = new Date()): Promise<'NOT_ENTITLED' | 'NOT_READY' | null> {
   const e = await controlDb.tenantApplication.findUnique({
     where: { tenantId_applicationId: { tenantId, applicationId } },
-    select: { state: true, validFrom: true, validTo: true },
+    select: { state: true, validFrom: true, validTo: true, provisioningStatus: true },
   });
-  return !!e && ['ENABLED', 'TRIAL'].includes(e.state) && e.validFrom <= now && (!e.validTo || e.validTo > now);
+  if (!e || !['ENABLED', 'TRIAL'].includes(e.state) || e.validFrom > now || (e.validTo && e.validTo <= now)) return 'NOT_ENTITLED';
+  return ['READY', 'NOT_REQUIRED'].includes(e.provisioningStatus) ? null : 'NOT_READY';
 }
 
 interface AccountRecord {
@@ -74,7 +79,8 @@ export async function checkAccount(
   });
   if (!user || user.status !== 'ACTIVE') return { problem: 'ACCOUNT_INACTIVE' };
   if (issuedAt !== undefined && user.sessionsValidAfter && issuedAt < user.sessionsValidAfter.getTime()) return { problem: 'ACCOUNT_INACTIVE' };
-  if (!(await entitled(tenant.id, app.id))) return { problem: 'NOT_ENTITLED' };
+  const notAllowed = await entitlementProblem(tenant.id, app.id);
+  if (notAllowed) return { problem: notAllowed };
   return { account: { tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name }, user }, applicationId: app.id, applicationName: app.name };
 }
 

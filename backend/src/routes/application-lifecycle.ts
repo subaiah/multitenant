@@ -6,9 +6,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
+import { decryptSecret, secretContext } from '../lib/secrets.js';
 import { audit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
-import { callbackChanged, callbackUrlSchema, newCallbackSecret, retryLifecycleEvent } from '../lib/product-lifecycle.js';
+import { ROTATION_OVERLAP_MS, callbackChanged, callbackUrlSchema, newCallbackSecret, retryLifecycleEvent } from '../lib/product-lifecycle.js';
 
 const settingsSchema = z.object({
   callbackUrl: callbackUrlSchema.nullable(),
@@ -41,6 +42,7 @@ export const applicationLifecycleRoutes: FastifyPluginAsync = async (fastify) =>
     return {
       callbackUrl: app.provisioningCallbackUrl,
       hasSecret: !!app.callbackSigningSecret,
+      previousSecretValidUntil: app.previousCallbackSecretExpiresAt && app.previousCallbackSecretExpiresAt > new Date() ? app.previousCallbackSecretExpiresAt : null,
       deletesDataOnDeprovision: app.deletesDataOnDeprovision,
       organizations: entitlements.map((e) => ({
         tenant: e.tenant, state: e.state, provisioningStatus: e.provisioningStatus, provisioningError: e.provisioningError, provisionedAt: e.provisionedAt,
@@ -75,14 +77,24 @@ export const applicationLifecycleRoutes: FastifyPluginAsync = async (fastify) =>
 
   fastify.post('/:id/lifecycle/secret', {
     config: { permission: 'app-registry:manage' },
-    schema: { tags: ['applications'], summary: "Replace the secret an application's lifecycle events are signed with (returned once)", params },
+    schema: { tags: ['applications'], summary: "Replace the secret an application's lifecycle events are signed with (returned once; the old one keeps signing alongside for 24 hours)", params },
   }, async (request) => {
     const app = await findApp((request.params as { id: string }).id);
     if (!app.provisioningCallbackUrl) throw new AppError('Set a callback address first', 400);
     const secret = newCallbackSecret();
-    await controlDb.applicationRegistry.update({ where: { id: app.id }, data: { callbackSigningSecret: secret } });
-    await audit(request, 'application.lifecycle_updated', { resource: { type: 'application', id: app.id, label: app.name }, details: { newSigningSecret: true } });
-    return { signingSecret: secret };
+    // The old secret keeps signing alongside, so the application can switch over without missing events
+    const previousExpiresAt = new Date(Date.now() + ROTATION_OVERLAP_MS);
+    await controlDb.applicationRegistry.update({
+      where: { id: app.id },
+      // Decrypted, so it's stored encrypted for its own column (secrets are bound to their column)
+      data: {
+        callbackSigningSecret: secret,
+        previousCallbackSigningSecret: app.callbackSigningSecret ? decryptSecret(app.callbackSigningSecret, secretContext('callbackSigningSecret')) : null,
+        previousCallbackSecretExpiresAt: app.callbackSigningSecret ? previousExpiresAt : null,
+      },
+    });
+    await audit(request, 'application.lifecycle_updated', { resource: { type: 'application', id: app.id, label: app.name }, details: { newSigningSecret: true, previousSecretValidUntil: previousExpiresAt.toISOString() } });
+    return { signingSecret: secret, previousSecretValidUntil: app.callbackSigningSecret ? previousExpiresAt : null };
   });
 
   fastify.post('/:id/lifecycle/events/:eventId/retry', {
