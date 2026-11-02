@@ -100,13 +100,12 @@ export default function ApplicationsManagement() {
   const handleCreatePermission = async () => {
     if (!selectedApp) return;
     try {
-      await apiPost(`/applications/${selectedApp.id}/permissions`, permissionData);
+      await apiPost(`/applications/${selectedApp.id}/permissions`, { name: permissionData.name.trim(), description: permissionData.description || undefined });
       setShowPermissionModal(false);
       setPermissionData({ name: '', description: '', resource: '', action: 'read' });
       fetchPermissions(selectedApp.id);
     } catch (error) {
-      console.error('Failed to create permission:', error);
-      alert('Failed to create permission');
+      alert(error instanceof Error ? error.message : 'Failed to create permission');
     }
   };
 
@@ -486,37 +485,12 @@ export default function ApplicationsManagement() {
                   value={permissionData.name}
                   onChange={(e) => setPermissionData({ ...permissionData, name: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white font-mono"
-                  placeholder={`${selectedApp.key}.resource.action`}
+                  placeholder={`${selectedApp.key}.deals:approve`}
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Resource
-                </label>
-                <input
-                  type="text"
-                  value={permissionData.resource}
-                  onChange={(e) => setPermissionData({ ...permissionData, resource: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                  placeholder="e.g., users, projects, settings"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Action
-                </label>
-                <select
-                  value={permissionData.action}
-                  onChange={(e) => setPermissionData({ ...permissionData, action: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                >
-                  <option value="read">Read</option>
-                  <option value="write">Write</option>
-                  <option value="create">Create</option>
-                  <option value="update">Update</option>
-                  <option value="delete">Delete</option>
-                  <option value="admin">Admin</option>
-                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  <span className="font-mono">resource:action</span>, with the resource starting <span className="font-mono">{selectedApp.key}</span>
+                  {' '}(<span className="font-mono">{selectedApp.key}:admin</span>, <span className="font-mono">{selectedApp.key}.deals:approve</span>). Organizations that turn this application on can put it in their roles.
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -543,7 +517,7 @@ export default function ApplicationsManagement() {
               </button>
               <button
                 onClick={handleCreatePermission}
-                disabled={!permissionData.name || !permissionData.resource}
+                disabled={!permissionData.name.trim()}
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create

@@ -193,6 +193,12 @@ export async function getEnhancedUserPermissions(
   // 1. Get user type default permissions
   const userTypePermissions = getDefaultPermissions(userType as UserType);
   userTypePermissions.forEach(perm => addPermission(perm, 'userType'));
+  // An organization's administrators also hold the permissions of the
+  // applications it has turned on (lib/application-permissions.ts)
+  if (userType === 'TENANT_ADMIN' && tenantId) {
+    const { entitledApplicationPermissions } = await import('../lib/application-permissions.js');
+    for (const p of await entitledApplicationPermissions(tenantId)) addPermission(p.name, 'userType');
+  }
 
   // Platform users: their platform roles. They never get tenant roles; inside a
   // tenant they work through a support session (middleware/authorize.ts).

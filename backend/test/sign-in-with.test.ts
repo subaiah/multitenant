@@ -417,3 +417,64 @@ test("the organization's applications: those turned on now, with where to open t
   assert.equal(entry.state, 'TRIAL');
   assert.equal(entry.openUrl, `https://app.example/login?iss=${encodeURIComponent(`${baseUrl()}/oidc`)}`);
 });
+
+test("an application's permissions: namespaced, grantable while it's on, and sent when signing in", async () => {
+  const app = await makeApp('perm');
+  const { controlDb } = await db();
+  const key = (await controlDb.applicationRegistry.findUniqueOrThrow({ where: { id: app.id } })).key;
+  const declare = (name: string) => api('POST', `/applications/${app.id}/permissions`, { cookie: platform, body: { name, description: `Can ${name}` } });
+
+  // Names must belong to the application
+  for (const bad of ['users:export', 'other.deals:approve', `${key}.Deals:approve`, `${key}:*`, `${key}`]) {
+    assert.equal((await declare(bad)).status, 400, bad);
+  }
+  const approve = `${key}.deals:approve`;
+  const made = await declare(approve);
+  assert.equal(made.status, 201, JSON.stringify(made.json));
+  assert.equal(made.json.resource, `${key}.deals`);
+  assert.equal(made.json.action, 'approve');
+  assert.equal((await declare(`${key}:admin`)).status, 201);
+
+  // Not offered while the organization doesn't have the application on
+  const offered = async () => JSON.stringify((await api('GET', '/roles/catalog', { cookie: adminA })).json).includes(approve);
+  assert.equal(await offered(), false);
+  const roleName = `Deal approvers ${randomBytes(2).toString('hex')}`;
+  assert.equal((await api('POST', '/roles', { cookie: adminA, body: { name: roleName, permissions: [approve] } })).status, 400);
+
+  // Turned on (through the API, as an organization admin does): offered, and the admin can grant it
+  const on = await api('POST', '/tenant-applications', { cookie: adminA, body: { applicationId: app.id, state: 'ENABLED' } });
+  assert.equal(on.status, 201, JSON.stringify(on.json));
+  assert.equal(await offered(), true);
+  const role = await api('POST', '/roles', { cookie: adminA, body: { name: roleName, permissions: [approve] } });
+  assert.equal(role.status, 201, JSON.stringify(role.json));
+  const memberId = await userId(A, A.userEmail);
+  const assigned = await api('POST', '/roles/assign', { cookie: adminA, body: { roleId: role.json.id, principalType: 'USER', userId: memberId } });
+  assert.equal(assigned.status, 201, JSON.stringify(assigned.json));
+
+  // The member signs in to the application: the permission is in the claim, the other isn't
+  const browser = new Browser((await loginSession(A.slug, A.userEmail)).cookie);
+  const res = await signIn(browser, app.clientId);
+  const tokens = await token({ grant_type: 'authorization_code', code: res.location!.searchParams.get('code')!, redirect_uri: REDIRECT, code_verifier: res.verifier }, { id: app.clientId, secret: app.secret! });
+  const info = (await (await fetch(discovery.userinfo_endpoint, { headers: { authorization: `Bearer ${tokens.json.access_token}` } })).json()) as Record<string, any>;
+  assert.deepEqual(info.permissions, [approve]);
+  assert.ok(info.roles.includes(roleName));
+
+  // The organization's admin holds them all
+  const adminBrowser = new Browser(adminA);
+  const r2 = await signIn(adminBrowser, app.clientId);
+  const t2 = await token({ grant_type: 'authorization_code', code: r2.location!.searchParams.get('code')!, redirect_uri: REDIRECT, code_verifier: r2.verifier }, { id: app.clientId, secret: app.secret! });
+  const adminInfo = (await (await fetch(discovery.userinfo_endpoint, { headers: { authorization: `Bearer ${t2.json.access_token}` } })).json()) as Record<string, any>;
+  assert.deepEqual(adminInfo.permissions.sort(), [`${key}:admin`, approve].sort());
+
+  // Turned off: no longer offered, but a role that has it can still be edited
+  assert.equal((await api('DELETE', `/tenant-applications/${on.json.id}`, { cookie: adminA })).status, 204);
+  assert.equal(await offered(), false);
+  const renamed = await api('PATCH', `/roles/${role.json.id}`, { cookie: adminA, body: { description: 'Approve big deals', permissions: [approve] } });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.json));
+  // ... but it can't be added to another role
+  assert.equal((await api('POST', '/roles', { cookie: adminA, body: { name: `${roleName} 2`, permissions: [approve] } })).status, 400);
+
+  // Another organization never sees them
+  assert.ok(!JSON.stringify((await api('GET', '/roles/catalog', { cookie: adminB })).json).includes(approve));
+});
+

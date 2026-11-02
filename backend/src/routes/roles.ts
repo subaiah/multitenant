@@ -1,6 +1,7 @@
 import { AUTHENTICATED, requireCanGrant, requirePermission } from '../middleware/authorize.js';
 import { assignmentState, rolePermissionNames } from '../lib/access.js';
 import { PERMISSIONS, PERMISSION_INFO, RESOURCE_INFO, isTenantGrantable } from '../utils/permissions.js';
+import { entitledApplicationPermissions } from '../lib/application-permissions.js';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
@@ -39,10 +40,13 @@ const memberCount = (n: number) => `${n} ${n === 1 ? 'member' : 'members'}`;
  * Check and resolve the permissions for a role: catalog names only, nothing
  * platform-level, and only what the editor holds. Returns the names.
  */
-async function validRolePermissions(request: FastifyRequest, requested: string[]) {
+async function validRolePermissions(request: FastifyRequest, requested: string[], existing: string[] = []) {
   const names = [...new Set(requested)];
-  const catalog = new Set<string>(PERMISSIONS);
-  const unknown = names.filter((p) => !catalog.has(p));
+  const catalog = await roleCatalog(request);
+  // A permission already on the role may stay even if it's no longer offered
+  // (its application was turned off): it does nothing until it's on again
+  const kept = new Set(existing.filter((p) => !catalog.has(p)));
+  const unknown = names.filter((p) => !catalog.has(p) && !kept.has(p));
   if (unknown.length > 0) {
     throw new AppError(`Unknown permissions: ${unknown.join(', ')}`, 400);
   }
@@ -50,8 +54,14 @@ async function validRolePermissions(request: FastifyRequest, requested: string[]
   if (refused.length > 0) {
     throw new AppError(`These permissions can't be part of a tenant role: ${refused.join(', ')}`, 400);
   }
-  await requireCanGrant(request, names, 'build a role with these permissions');
+  await requireCanGrant(request, names.filter((p) => !kept.has(p)), 'build a role with these permissions');
   return names;
+}
+
+/** What this organization's roles may contain: the kit's and product's, and its applications' */
+async function roleCatalog(request: FastifyRequest): Promise<Set<string>> {
+  const apps = request.tenant ? await entitledApplicationPermissions(request.tenant.id) : [];
+  return new Set<string>([...PERMISSIONS, ...apps.map((p) => p.name)]);
 }
 
 async function requireUniqueRoleName(db: TenantDb, tenantId: string, name: string) {
@@ -130,14 +140,29 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     // Names and descriptions only; also used to explain your own access
     config: { permission: AUTHENTICATED },
     schema: { tags: ['roles'], summary: 'Permissions available to tenant roles' },
-  }, async () => {
-    const groups = new Map<string, { resource: string; label: string; description: string; permissions: { name: string; action: string; description: string }[] }>();
+  }, async (request) => {
+    type Group = { resource: string; label: string; description: string; application?: { id: string; name: string }; permissions: { name: string; action: string; description: string }[] };
+    const groups = new Map<string, Group>();
     for (const name of PERMISSIONS) {
       if (!isTenantGrantable(name)) continue;
       const [resource, action] = name.split(':');
       const info = RESOURCE_INFO[resource] ?? { label: resource, description: '' };
       if (!groups.has(resource)) groups.set(resource, { resource, ...info, permissions: [] });
       groups.get(resource)!.permissions.push({ name, action, description: PERMISSION_INFO[name] ?? `${action} ${resource}` });
+    }
+    // The applications this organization has turned on (lib/application-permissions.ts)
+    for (const p of request.tenant ? await entitledApplicationPermissions(request.tenant.id) : []) {
+      if (!groups.has(p.resource)) {
+        const thing = p.resource.includes('.') ? p.resource.slice(p.resource.indexOf('.') + 1) : null;
+        groups.set(p.resource, {
+          resource: p.resource,
+          label: thing ? `${p.application.name}: ${thing}` : p.application.name,
+          description: `Permissions in ${p.application.name}`,
+          application: { id: p.application.id, name: p.application.name },
+          permissions: [],
+        });
+      }
+      groups.get(p.resource)!.permissions.push({ name: p.name, action: p.action, description: p.description ?? `${p.action} ${p.resource}` });
     }
     return { resources: [...groups.values()] };
   });
@@ -231,11 +256,12 @@ export const roleRoutes: FastifyPluginAsync = async (fastify) => {
     let added: string[] = [];
     let removed: string[] = [];
     if (data.permissions) {
-      permissions = await validRolePermissions(request, data.permissions);
-      // Changing a role changes everyone who holds it, so the editor must
-      // also cover what it grants today
       const before = await rolePermissionNames(request.db, id);
-      await requireCanGrant(request, before, 'change this role');
+      permissions = await validRolePermissions(request, data.permissions, before);
+      // Changing a role changes everyone who holds it, so the editor must
+      // also cover what it grants today (what's still offered)
+      const offered = await roleCatalog(request);
+      await requireCanGrant(request, before.filter((p) => offered.has(p)), 'change this role');
       const after = new Set(permissions);
       added = [...after].filter((p) => !before.includes(p));
       removed = before.filter((p) => !after.has(p));
