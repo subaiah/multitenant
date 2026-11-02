@@ -97,6 +97,9 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
+      # The tests also use the TypeScript client (clients/typescript)
+      - run: npm ci --no-audit --no-fund
+        working-directory: clients/typescript
       - run: npm run prisma:generate
       - name: Set up the tenant database server (roles and shared tenant database)
         run: >-
