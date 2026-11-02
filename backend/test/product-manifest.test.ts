@@ -173,9 +173,10 @@ test("organizations that have it on see its pages in the sidebar, as far as thei
     ['Home', 'https://forge.example.com/home', true],
     ['Builder', 'https://forge.example.com/apps', true],
   ]);
-  // Right after Dashboard
-  const menu = (await api('GET', '/menu-items/portal/TENANT', { cookie: adminA })).json.menuItems;
-  assert.equal(menu[1].path, `#app-${m.productId}`);
+  // First, or right after Dashboard (the test database may have no kit menu)
+  const menu: { path: string }[] = (await api('GET', '/menu-items/portal/TENANT', { cookie: adminA })).json.menuItems;
+  const before = menu.slice(0, menu.findIndex((i) => i.path === `#app-${m.productId}`));
+  assert.ok(before.length <= 1 && before.every((i) => !i.path.startsWith('#')), JSON.stringify(before));
 
   // A member without the permission: only the open page
   const member = (await loginSession(A.slug, A.userEmail)).cookie;
