@@ -36,14 +36,27 @@ const platform = createProductClient({
   tokenUrl: 'https://app.example.com/api/oidc/token',
   clientId: process.env.MULTITENANT_CLIENT_ID!,      // mts_…
   clientSecret: process.env.MULTITENANT_CLIENT_SECRET!,
-  scopes: ['lifecycle.report'],
+  scopes: ['organizations.read', 'members.read', 'lifecycle.report'],
 });
 
-// After answering organization.entitled with 202, once the organization is set up
+// While setting an organization up: its people, a page at a time
+const organizationId = event.data.organization.id;
+for (let page = 1; ; page++) {
+  const { data } = await platform.GET('/product-integrations/organizations/{organizationId}/members', {
+    params: { path: { organizationId }, query: { page, limit: 100, status: 'ACTIVE' } },
+  });
+  for (const m of data!.members) await upsertUser(m.subject, m.email, m.permissions);
+  if (page >= data!.pagination.pages) break;
+}
+
+// Then report that it's set up
 await platform.POST('/product-integrations/operations/{operationId}/result', {
   params: { path: { operationId: event.data.operation.id } },
   body: { generation: event.data.operation.generation, status: 'READY' },
 });
+
+// Catching up on lifecycle events it missed (keep nextAfter between runs)
+const { data: events } = await platform.GET('/product-integrations/events', { params: { query: { after: savedPosition } } });
 ```
 
 ## Using it

@@ -16,7 +16,7 @@ curl -H "Authorization: Bearer mtk_…" https://app.example.com/api/v1/users?sta
 | Roles | `GET /roles`, `GET /roles/assignments`, `POST /roles/assign`, `DELETE /roles/assignments/{id}` |
 | Audit log | `GET /audit` |
 | Events | Webhooks: the `WebhookEvent` payload |
-| For external products | `GET /products/me`, `POST /product-integrations/operations/{operationId}/result`. These are called with a service access token instead of an API key ([PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md#calling-the-platform-as-the-application)). |
+| For external products | `GET /products/me`; under `/product-integrations`: `organizations`, `organizations/{organizationId}`, its `members` and `groups`, `events`, and `POST operations/{operationId}/result`. These are called with a service access token instead of an API key ([PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md#calling-the-platform-as-the-application)). |
 
 The full description, with every parameter, body and answer, is the OpenAPI 3.1 document:
 
