@@ -478,3 +478,130 @@ test("an application's permissions: namespaced, grantable while it's on, and sen
   assert.ok(!JSON.stringify((await api('GET', '/roles/catalog', { cookie: adminB })).json).includes(approve));
 });
 
+
+// --- Token lifetimes and back-channel logout (lib/oidc/logout.ts) -------------
+// Last in the file: these end people's sessions
+
+test("access tokens last as long as the application's settings say: 15 minutes unless changed", async () => {
+  assert.equal((discovery as any).backchannel_logout_supported, true);
+  const browser = new Browser((await loginSession(A.slug, A.userEmail)).cookie);
+  for (const [settings, expected] of [[{}, 900], [{ accessTokenLifetime: 300 }, 300]] as const) {
+    const app = await makeApp('ttl', settings);
+    await entitle(A.tenantId, app.id);
+    const ok = await signIn(browser, app.clientId);
+    const tokens = await token({ grant_type: 'authorization_code', code: ok.location!.searchParams.get('code')!, redirect_uri: REDIRECT, code_verifier: ok.verifier }, { id: app.clientId, secret: app.secret! });
+    assert.equal(tokens.status, 200, JSON.stringify(tokens.json));
+    assert.equal(tokens.json.expires_in, expected);
+  }
+  const bad = await api('PUT', `/applications/${(await makeApp('ttl-bad')).id}/sign-in`, {
+    cookie: platform, body: { enabled: true, clientType: 'CONFIDENTIAL', redirectUris: [REDIRECT], accessTokenLifetime: 30 },
+  });
+  assert.equal(bad.status, 400, 'at least a minute');
+});
+
+test('back-channel logout: signing out everywhere, deactivation and turning the application off end the sessions in the applications', async () => {
+  const { createServer } = await import('node:http');
+  const got: { app: string; body: URLSearchParams; contentType: string }[] = [];
+  let failNext = 0;
+  const receiver = createServer((req, res) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => {
+      if (failNext > 0) {
+        failNext--;
+        res.writeHead(500).end();
+        return;
+      }
+      got.push({ app: req.url!.slice(1), body: new URLSearchParams(b), contentType: req.headers['content-type'] ?? '' });
+      res.writeHead(200).end();
+    });
+  });
+  await new Promise<void>((r) => receiver.listen(0, '127.0.0.1', r));
+  const port = (receiver.address() as { port: number }).port;
+  const { controlDb } = await db();
+  const { sendDueLogouts } = await import('../src/lib/oidc/logout.js');
+  const waitFor = async (n: number) => {
+    for (let i = 0; i < 100 && got.length < n; i++) await new Promise((r) => setTimeout(r, 100));
+  };
+  const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
+  try {
+    const told = await makeApp('bcl', { backchannelLogoutUri: `http://127.0.0.1:${port}/told` });
+    const quiet = await makeApp('bcl-quiet');
+    for (const app of [told, quiet]) await entitle(A.tenantId, app.id);
+    const full = 'openid email profile organization roles offline_access';
+    const signInBoth = async (cookie: string) => {
+      const browser = new Browser(cookie);
+      const refresh: Record<string, string> = {};
+      for (const app of [told, quiet]) {
+        const ok = await signIn(browser, app.clientId, { scope: full, prompt: 'consent' });
+        const t = await token({ grant_type: 'authorization_code', code: ok.location!.searchParams.get('code')!, redirect_uri: REDIRECT, code_verifier: ok.verifier }, { id: app.clientId, secret: app.secret! });
+        assert.ok(t.json.refresh_token, JSON.stringify(t.json));
+        refresh[app.clientId] = t.json.refresh_token;
+      }
+      return refresh;
+    };
+    const refreshes = async (app: { clientId: string; secret?: string }, rt: string) => (await token({ grant_type: 'refresh_token', refresh_token: rt }, { id: app.clientId, secret: app.secret! })).status;
+
+    // 1. Signing out everywhere: a logout token to the application that asks, and nothing the provider issued keeps working
+    const member = await loginSession(A.slug, A.userEmail);
+    const memberId = await userId(A, A.userEmail);
+    const rt = await signInBoth(member.cookie);
+    assert.equal((await api('POST', '/bff/auth/revoke-all', { cookie: member.cookie })).status, 200);
+    await waitFor(1);
+    assert.equal(got.length, 1, 'only the application with a back-channel logout address');
+    assert.equal(got[0].app, 'told');
+    assert.equal(got[0].contentType, 'application/x-www-form-urlencoded');
+    const { payload, protectedHeader } = await jwtVerify(got[0].body.get('logout_token')!, jwks, { issuer: `${baseUrl()}/oidc`, audience: told.clientId, typ: 'logout+jwt' });
+    assert.equal(protectedHeader.alg, 'RS256');
+    assert.equal(payload.sub, `${A.tenantId}.${memberId}`);
+    assert.deepEqual(payload.events, { 'http://schemas.openid.net/event/backchannel-logout': {} });
+    assert.ok(payload.jti && payload.iat && payload.exp! - payload.iat! === 120);
+    assert.equal(payload.nonce, undefined, 'a logout token never has a nonce');
+    for (const app of [told, quiet]) assert.equal(await refreshes(app, rt[app.clientId]), 400, 'refresh tokens are gone, in every application');
+    assert.equal((await controlDb.oidcLogoutDelivery.findFirstOrThrow({ where: { clientId: told.clientId, accountId: payload.sub } })).status, 'DELIVERED');
+
+    // 2. Deactivated by an administrator; the application is down at first, so it's retried
+    const manager = await loginSession(A.slug, A.managerEmail);
+    const managerId = await userId(A, A.managerEmail);
+    await signInBoth(manager.cookie);
+    failNext = 1;
+    assert.equal((await api('PATCH', `/users/${managerId}`, { cookie: adminA, body: { status: 'INACTIVE' } })).status, 200);
+    let row = null;
+    for (let i = 0; i < 100 && !row?.attempts; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      row = await controlDb.oidcLogoutDelivery.findFirst({ where: { clientId: told.clientId, accountId: `${A.tenantId}.${managerId}` } });
+    }
+    assert.deepEqual([row?.reason, row?.status, row?.attempts, row?.lastStatus], ['deactivated', 'PENDING', 1, 500], 'tried, answered 500, waiting to retry');
+    await controlDb.oidcLogoutDelivery.update({ where: { id: row!.id }, data: { nextAttemptAt: new Date() } });
+    await sendDueLogouts();
+    assert.equal((await controlDb.oidcLogoutDelivery.findUniqueOrThrow({ where: { id: row!.id } })).status, 'DELIVERED');
+    assert.equal(got.at(-1)!.app, 'told');
+    assert.equal((await jwtVerify(got.at(-1)!.body.get('logout_token')!, jwks, { audience: told.clientId })).payload.sub, `${A.tenantId}.${managerId}`);
+    await api('PATCH', `/users/${managerId}`, { cookie: adminA, body: { status: 'ACTIVE' } });
+
+    // 3. The organization turns the application off: everyone who signed in to it, and only to it
+    const admin = await loginSession(A.slug, A.adminEmail);
+    const adminId = await userId(A, A.adminEmail);
+    const adminRt = await signInBoth(admin.cookie);
+    const before = got.length;
+    const entitlement = await controlDb.tenantApplication.findUniqueOrThrow({ where: { tenantId_applicationId: { tenantId: A.tenantId, applicationId: told.id } } });
+    assert.equal((await api('PATCH', `/tenant-applications/${entitlement.id}`, { cookie: admin.cookie, body: { state: 'DISABLED' } })).status, 200);
+    await waitFor(before + 1);
+    const subs = await Promise.all(got.slice(before).map(async (g) => (await jwtVerify(g.body.get('logout_token')!, jwks, { audience: told.clientId })).payload.sub));
+    assert.ok(subs.includes(`${A.tenantId}.${adminId}`), JSON.stringify(subs));
+    const reasons = await controlDb.oidcLogoutDelivery.findMany({ where: { clientId: told.clientId, accountId: `${A.tenantId}.${adminId}` }, select: { reason: true } });
+    assert.deepEqual(reasons.map((r) => r.reason), ['application_turned_off']);
+    assert.equal(await refreshes(quiet, adminRt[quiet.clientId]), 200, 'the other application keeps working');
+
+    // The Integrations page counts them
+    const overview = await api('GET', '/applications/integrations', { cookie: platform });
+    assert.equal(overview.status, 200);
+    const row2 = overview.json.applications.find((a: any) => a.id === told.id);
+    assert.equal(row2.signIn.backchannelLogout, true);
+    assert.equal(row2.logouts.failed, 0);
+    assert.ok(row2.logouts.lastDeliveredAt);
+    assert.equal((await api('GET', '/applications/integrations', { cookie: adminA })).status, 403, 'platform staff only');
+  } finally {
+    receiver.close();
+  }
+});

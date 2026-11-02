@@ -14,6 +14,7 @@ import { latestMigration, tenantsBehind } from './lib/tenant-migrations.js';
 import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
+import { applicationIntegrationRoutes } from './routes/application-integrations.js';
 import { applicationSignInRoutes } from './routes/application-sign-in.js';
 import { applicationManifestRoutes } from './routes/application-manifest.js';
 import { applicationLifecycleRoutes } from './routes/application-lifecycle.js';
@@ -277,6 +278,7 @@ async function registerRoutes() {
     await protectedRoutes.register(platformScoped(applicationManifestRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationLifecycleRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationServiceCredentialRoutes), { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationIntegrationRoutes), { prefix: '/applications' });
 
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });

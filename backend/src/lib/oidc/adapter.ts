@@ -38,6 +38,7 @@ export async function clientMetadata(clientId: string): Promise<Record<string, u
     response_types: ['code'],
     redirect_uris: signIn.redirectUris,
     post_logout_redirect_uris: signIn.postLogoutRedirectUris,
+    access_token_lifetime: signIn.accessTokenLifetime,
   };
 }
 

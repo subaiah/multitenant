@@ -308,6 +308,7 @@ model ApplicationRegistry {
   productEvents      ProductEvent[]
   serviceCredentials ProductServiceCredential[]
   memberStates       ProductMemberState[]
+  logoutDeliveries   OidcLogoutDelivery[]
 
   @@index([status])
   @@map("application_registries")
@@ -330,6 +331,10 @@ model ApplicationSignIn {
   postLogoutRedirectUris String[]             @default([]) @map("post_logout_redirect_uris")
   /// Where the catalogue sends people to open the application (initiate_login_uri)
   initiateLoginUri       String?              @map("initiate_login_uri")
+  /// Where to send a logout token when the platform ends a person's sessions (OpenID Connect Back-Channel Logout; lib/oidc/logout.ts)
+  backchannelLogoutUri   String?              @map("backchannel_logout_uri")
+  /// How long its access tokens last, in seconds
+  accessTokenLifetime    Int                  @default(900) @map("access_token_lifetime")
   createdAt              DateTime             @default(now()) @map("created_at")
   updatedAt              DateTime             @updatedAt @map("updated_at")
 
@@ -995,4 +1000,28 @@ model ProductMemberState {
   @@id([applicationId, tenantId, userId])
   @@index([tenantId])
   @@map("product_member_states")
+}
+
+/// Logout tokens to send (lib/oidc/logout.ts): an outbox, retried with backoff
+model OidcLogoutDelivery {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  clientId      String              @map("client_id")
+  /// The person: <tenant id>.<user id>
+  accountId     String              @map("account_id")
+  reason        String
+  status        ProductEventStatus  @default(PENDING)
+  attempts      Int                 @default(0)
+  nextAttemptAt DateTime            @default(now()) @map("next_attempt_at")
+  claimedAt     DateTime?           @map("claimed_at")
+  lastStatus    Int?                @map("last_status")
+  lastError     String?             @map("last_error")
+  deliveredAt   DateTime?           @map("delivered_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([applicationId, createdAt])
+  @@map("oidc_logout_deliveries")
 }

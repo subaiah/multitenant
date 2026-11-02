@@ -310,7 +310,7 @@ export async function audit(
 /** Record an entry outside a request (background jobs, scripts). Throws for an unknown event or missing tenant. */
 export async function recordAudit(ctx: AuditContext, event: string, input: AuditInput = {}): Promise<{ chain: string; seq: number; hash: string }> {
   // Whatever reacts to entries (notifications) registers its hooks when loaded
-  extensionsLoaded ??= Promise.all([import('./notifications.js'), import('./webhooks.js'), import('./product-user-events.js')]);
+  extensionsLoaded ??= Promise.all([import('./notifications.js'), import('./webhooks.js'), import('./product-user-events.js'), import('./oidc/logout.js')]);
   await extensionsLoaded;
   const definition = auditCatalog()[event];
   if (!definition) throw new Error(`Unknown audit event "${event}": add it to src/kit/audit-events.ts or the product's auditEvents`);
