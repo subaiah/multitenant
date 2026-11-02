@@ -161,6 +161,10 @@ const envSchema = z.object({
   // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
   // allows private ones and plain http (development and tests only)
   WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+  // Hosts an external product's lifecycle callback may use in production
+  // without https or on an inside address (a product on the same network,
+  // e.g. "appforge"), comma-separated (lib/product-lifecycle.ts)
+  PRODUCT_CALLBACK_ALLOWED_HOSTS: z.string().default(''),
 
   // Background jobs (lib/jobs.ts): notifications, data exports, audit
   // archiving, usage snapshots, trials and closures, rate-limit cleanup. On by
@@ -368,6 +372,7 @@ export const config = {
     graceDays: env.BILLING_GRACE_DAYS,
   },
   webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
+  productCallbackAllowedHosts: env.PRODUCT_CALLBACK_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,
   sentry: {

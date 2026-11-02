@@ -50,6 +50,8 @@ x-api-env: &api-env
   CUSTOM_DOMAIN_TARGET: ${CUSTOM_DOMAIN_TARGET:-}
   API_DOCS: ${API_DOCS:-false}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # External products on the same network (docs/PRODUCT_INTEGRATION.md): hosts their lifecycle callbacks may use without https
+  PRODUCT_CALLBACK_ALLOWED_HOSTS: ${PRODUCT_CALLBACK_ALLOWED_HOSTS:-}
   # Billing (optional, docs/BILLING.md): Razorpay for INR, Stripe for other currencies
   RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
   RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}

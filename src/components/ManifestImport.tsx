@@ -19,6 +19,40 @@ interface ImportResult {
   organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   menuItems: number;
+  changes: Record<string, [unknown, unknown]>;
+  dryRun?: true;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Name', version: 'Version', baseUrl: 'Address', callbackUrl: 'Lifecycle callback', deletesDataOnDeprovision: 'Deletes data when an organization leaves',
+  clientType: 'Client type', redirectUris: 'Redirect URIs', postLogoutRedirectUris: 'After sign-out', openUrl: 'Open address', signInEnabled: 'Sign-in on',
+};
+const show = (v: unknown) => (v === null || v === undefined || (Array.isArray(v) && !v.length) ? '—' : Array.isArray(v) ? v.join(', ') : String(v));
+
+/** What an import would do (a dry run) */
+function Plan({ plan }: { plan: ImportResult }) {
+  const p = plan.permissions;
+  const fields = Object.entries(plan.changes);
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-slate-700 dark:text-slate-200">
+        {plan.created ? `Adds ${plan.application.name} to the catalogue, with sign-in on.` : `Updates ${plan.application.name}.`} Nothing has been saved yet.
+      </p>
+      {fields.length > 0 && (
+        <dl className="divide-y divide-slate-100 dark:divide-slate-700 rounded-md border border-slate-200 dark:border-slate-600">
+          {fields.map(([k, [from, to]]) => (
+            <div key={k} className="px-3 py-2">
+              <dt className="text-xs text-slate-500">{FIELD_LABELS[k] ?? k}</dt>
+              <dd className="font-mono text-xs break-all text-slate-800 dark:text-slate-100">{plan.created ? show(to) : <>{show(from)} → {show(to)}</>}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <p className="text-slate-600 dark:text-slate-300">
+        Permissions: {p.added.length} added, {p.updated.length} updated{p.notInManifest.length ? `, ${p.notInManifest.length} no longer listed (kept)` : ''}. Menu entries: {plan.menuItems}.
+      </p>
+    </div>
+  );
 }
 
 export function ManifestImport({ onClose, onImported }: { onClose: () => void; onImported: (applicationId: string) => void }) {
@@ -26,13 +60,21 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
   const [problems, setProblems] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [plan, setPlan] = useState<ImportResult | null>(null);
+  // The import would switch client type: asked to confirm
+  const [typeChange, setTypeChange] = useState<string | null>(null);
 
+  // A different manifest: the last check or confirmation no longer applies
+  const change = (value: string) => {
+    setText(value);
+    setPlan(null);
+    setTypeChange(null);
+  };
   const readFile = async (file: File | undefined) => {
-    if (file) setText(await file.text());
+    if (file) change(await file.text());
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const send = async ({ dryRun = false, confirm = false } = {}) => {
     setProblems(null);
     let manifest: unknown;
     try {
@@ -43,16 +85,27 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
     }
     setBusy(true);
     try {
-      const r = await apiPost<ImportResult>('/applications/manifest', manifest);
+      const query = new URLSearchParams({ ...(dryRun && { dryRun: 'true' }), ...(confirm && { confirmClientTypeChange: 'true' }) });
+      const r = await apiPost<ImportResult>(`/applications/manifest${query.size ? `?${query}` : ''}`, manifest);
+      if (r.dryRun) {
+        setPlan(r);
+        return;
+      }
       setResult(r);
       await invalidateApi('/applications', '/tenant-applications');
       onImported(r.application.id);
     } catch (err) {
-      const message = err instanceof ApiError || err instanceof Error ? err.message : 'Importing failed';
-      setProblems(message.split('\n').filter(Boolean));
+      const body = err instanceof ApiError ? (err.body as { code?: string } | undefined) : undefined;
+      const message = err instanceof Error ? err.message : 'Importing failed';
+      if (body?.code === 'CLIENT_TYPE_CHANGE') setTypeChange(message);
+      else setProblems(message.split('\n').filter(Boolean));
     } finally {
       setBusy(false);
     }
+  };
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void send({ confirm: !!typeChange });
   };
 
   if (result) {
@@ -102,9 +155,15 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         <input type="file" accept="application/json,.json" onChange={(e) => void readFile(e.target.files?.[0])} className="block w-full text-sm text-slate-600 dark:text-slate-300" />
       </Field>
       <Field label="Or paste it">
-        <textarea rows={10} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
+        <textarea rows={10} value={text} onChange={(e) => change(e.target.value)} spellCheck={false}
           className={`${inputClass} font-mono text-xs`} placeholder={'{\n  "manifestVersion": 1,\n  "productId": "appforge",\n  …\n}'} />
       </Field>
+      {plan && <Plan plan={plan} />}
+      {typeChange && (
+        <div role="alert" className="text-sm p-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200">
+          {typeChange.replace(' Import again with confirmClientTypeChange to go ahead.', '')} Import to go ahead.
+        </div>
+      )}
       {problems && (
         <div role="alert" className="text-sm text-red-700 dark:text-red-300 p-3 rounded-md border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10">
           <ul className="space-y-0.5">{problems.map((m, i) => <li key={i} className="break-words">{m}</li>)}</ul>
@@ -112,7 +171,10 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
       )}
       <div className="flex justify-end gap-2">
         <button type="button" className={secondaryButtonClass} onClick={onClose}>Cancel</button>
-        <button type="submit" className={primaryButtonClass} disabled={busy || !text.trim()}><FileJson size={15} aria-hidden /> Import</button>
+        <button type="button" className={secondaryButtonClass} disabled={busy || !text.trim()} onClick={() => void send({ dryRun: true })}>Check</button>
+        <button type="submit" className={primaryButtonClass} disabled={busy || !text.trim()}>
+          <FileJson size={15} aria-hidden /> {typeChange ? 'Switch client type and import' : 'Import'}
+        </button>
       </div>
     </Dialog>
   );

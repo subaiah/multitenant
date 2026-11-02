@@ -16,7 +16,7 @@ import { audit, diff } from '../lib/audit.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { sendInvitation } from '../lib/invitations.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
-import { organizationStatusChanged } from '../lib/product-lifecycle.js';
+import { kickLifecycleEvents, organizationStatusChanged } from '../lib/product-lifecycle.js';
 
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 
@@ -208,11 +208,15 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     const tenant = await controlDb.tenant.findUnique({ where: { id } });
     if (!tenant) throw new AppError('Tenant not found', 404);
     if (!tenant.closedAt) throw new AppError('This organization was not closed', 409);
-    const restored = await controlDb.tenant.update({
-      where: { id },
-      data: { status: tenant.statusBeforeClose ?? 'ACTIVE', closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null },
+    const restored = await controlDb.$transaction(async (tx) => {
+      const r = await tx.tenant.update({
+        where: { id },
+        data: { status: tenant.statusBeforeClose ?? 'ACTIVE', closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null },
+      });
+      await organizationStatusChanged(tx, id, tenant.status, r.status);
+      return r;
     });
-    await organizationStatusChanged(id, tenant.status, restored.status);
+    kickLifecycleEvents();
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'restored closed tenant', target: tenant.slug, type: 'CONFIG' });
     await audit(request, 'tenant.restored', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { name: tenant.name, status: restored.status } });
     return restored;
@@ -388,12 +392,13 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     if (data.trialEndsAt !== undefined || extra.trialEndsAt) Object.assign(extra, { trialReminderSentAt: null, trialEndedNotifiedAt: null });
     // Any status but suspended cancels a pending closure (it would otherwise be deleted)
     if (data.status && data.status !== 'SUSPENDED' && before.closedAt) Object.assign(extra, { closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null });
-    const tenant = await controlDb.tenant.update({
-      where: { id },
-      data: { ...data, ...extra },
+    // Suspended or resumed: its external products are told, in the same transaction (lib/product-lifecycle.ts)
+    const tenant = await controlDb.$transaction(async (tx) => {
+      const updated = await tx.tenant.update({ where: { id }, data: { ...data, ...extra } });
+      await organizationStatusChanged(tx, id, before.status, updated.status);
+      return updated;
     });
-    // Suspended or resumed: its external products are told (lib/product-lifecycle.ts)
-    await organizationStatusChanged(id, before.status, tenant.status);
+    kickLifecycleEvents();
 
     // In the tenant's own log once it has one; the platform log before that
     const entry = { tenantId: id, userId: request.user.userId, action: 'updated tenant', target: tenant.name, type: 'CONFIG' as const, metadata: data };

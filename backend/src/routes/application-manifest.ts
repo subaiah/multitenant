@@ -11,13 +11,17 @@ export const applicationManifestRoutes: FastifyPluginAsync = async (fastify) => 
     config: { permission: 'app-registry:manage' },
     schema: {
       tags: ['applications'],
-      summary: "Create or update an external product from its manifest (sign-in credentials are returned once, when made)",
+      summary: "Create or update an external product from its manifest (sign-in credentials are returned once, when made). ?dryRun=true checks and reports without saving; switching client type needs ?confirmClientTypeChange=true",
       body: { type: 'object' },
+      querystring: { type: 'object', properties: { dryRun: { type: 'boolean' }, confirmClientTypeChange: { type: 'boolean' } } },
     },
   }, async (request, reply) => {
-    const result = await importManifest(request.body);
+    const query = request.query as { dryRun?: boolean; confirmClientTypeChange?: boolean };
+    const result = await importManifest(request.body, { dryRun: query.dryRun, confirmClientTypeChange: query.confirmClientTypeChange });
+    if (result.dryRun) return reply.status(200).send(result);
     await audit(request, 'application.manifest_imported', {
       resource: { type: 'application', id: result.application.id, label: result.application.name },
+      changes: result.changes,
       details: {
         created: result.created,
         version: result.application.version,

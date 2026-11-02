@@ -49,7 +49,7 @@ There are two ways to build on the platform:
 
 8. **Must** keep each organization's data apart, and scope every query by `tenant_id`. The platform keeps organizations apart in its own databases, but it can't see inside the application. Isolation there is the application's responsibility, and a leak between organizations is the worst failure it can have.
 9. **Should** keep personal data (names, email addresses) as a cache of the platform's, refreshed at sign-in, rather than as a copy edited separately.
-10. **Should** be ready to delete an organization's data when the organization leaves: `organization.deprovisioned` announces it ([Lifecycle events](#lifecycle-events)).
+10. **Should** be ready to delete an organization's data when the organization leaves: `organization.deprovisioning_requested` announces it ([Lifecycle events](#lifecycle-events)).
 
 ### Calling the platform and receiving events
 
@@ -111,8 +111,8 @@ Importing **creates the application if its `productId` is new, and updates it ot
 | `signIn.redirectUris` | Yes | 1–10 exact addresses, `https://` or `http://localhost`, without a `#fragment`. |
 | `signIn.postLogoutRedirectUris` | No | Up to 10, same rules. |
 | `signIn.openPath` | No | A path starting with `/`, e.g. `/login`: the page that starts signing in. **Open** goes to `baseUrl + openPath` (OpenID's `initiate_login_uri`, with `?iss=`). |
-| `provisioning.callbackUrl` | No | Where [lifecycle events](#lifecycle-events) go: an `http(s)` address without credentials or a `#fragment`. It may be on the same network as the platform, since platform staff register it. Without `provisioning`, organizations need no setup and no events are sent. |
-| `provisioning.deletesDataOnDeprovision` | No | Whether the application deletes an organization's data when told it left (default `false`). Sent with `organization.deprovisioned` and shown to platform staff. |
+| `provisioning.callbackUrl` | No | Where [lifecycle events](#lifecycle-events) go: an `http(s)` address without credentials or a `#fragment`. In production it must be `https` and not an inside address (loopback, private, link-local, cloud metadata), unless its host is listed in the platform's `PRODUCT_CALLBACK_ALLOWED_HOSTS` (an application on the same network, e.g. `appforge`). Without `provisioning`, organizations need no setup and no events are sent. |
+| `provisioning.deletesDataOnDeprovision` | No | Whether the application deletes an organization's data when told it left (default `false`). Sent with `organization.deprovisioning_requested` and shown to platform staff. |
 | `permissions` | No | Up to 100. Each has a `name` (see rule 5) and a `description` of up to 200 characters, shown in the role editor. Names are unique across the platform. |
 | `menu` | No | Up to 20 entries. Each has a `label` (up to 40 characters), a `path` starting with `/` (relative to `baseUrl`), an optional `icon`, and an optional `permission`, which must be one of the manifest's own permissions. Unknown icons show a generic one. |
 
@@ -122,7 +122,8 @@ Importing **creates the application if its `productId` is new, and updates it ot
 - **Sign-in:**
   - The first import creates the client and returns the **client ID and, for confidential clients, the secret, once**.
   - Later imports update the addresses and keep the same credentials. Replacing the secret is a separate action on the sign-in panel.
-  - Importing turns sign-in on.
+  - The first import turns sign-in on. Later imports leave it as platform staff set it, so a re-import never turns back on an application they turned off.
+  - Switching between `CONFIDENTIAL` and `PUBLIC` must be confirmed (`?confirmClientTypeChange=true`, or the dialog asks), because it removes the client secret or makes a new one.
 - **Permissions:**
   - New names are added and existing ones get the new description.
   - Permissions that are no longer in the manifest are **not removed**: organizations' roles may still contain them. The import lists them, and platform staff remove them on the Applications page once no role uses them.
@@ -133,7 +134,11 @@ Importing **creates the application if its `productId` is new, and updates it ot
   - Organizations that already had the application on are sent `organization.entitled` then.
 - **Response:** says what was created, updated, and left alone.
 
-Each import is recorded in the platform's audit log.
+Each import is recorded in the platform's audit log, with what changed: name, version, address, client type, redirect and sign-out addresses, open address, callback address. Secrets are never logged.
+
+**Checking first:** `?dryRun=true` (the dialog's **Check** button) validates the manifest and reports what an import would change, without saving anything or making secrets.
+
+Two imports of the same new product at the same time: one creates it, and the other updates it or answers `409 CONCURRENT_IMPORT` (import again).
 
 ### Menu entries in the tenant portal
 
@@ -153,9 +158,15 @@ They're sent only if the application has a callback address: the manifest's `pro
 | `organization.entitlement_changed` | The entitlement changes while it exists: TRIAL ↔ ENABLED, a new end date, or DISABLED. | Apply the change: e.g. trial limits, or read-only while DISABLED. |
 | `organization.suspended` | Platform staff suspend the organization, or its admins close it. Sign-in and token refresh already stop. | Stop background work for it. Keep its data. |
 | `organization.resumed` | It's active again. | Resume. |
-| `organization.deprovisioned` | The organization turns the application off for good (removes the entitlement), or the organization is deleted. | Delete its data if `deleteData` is true; otherwise keep it as the application's policy says. |
+| `organization.deprovisioning_requested` | The organization turns the application off for good (removes the entitlement), or the organization is deleted. | Delete its data if `deleteData` is true; otherwise keep it as the application's policy says. |
 
 An entitlement that simply passes its end date sends nothing; `validTo` was in the earlier events.
+
+### Operations
+
+Setting an organization up is an **operation**. `organization.entitled` starts one, with a new `operation.id` and a `generation` one higher than the last. The events that follow (`entitlement_changed`, `suspended`, `resumed`) carry the same operation. `organization.deprovisioning_requested` starts a new operation for the clean-up.
+
+If an organization turns the application off and on again before the first setup finished, the second `organization.entitled` has a higher generation. The application **should** drop work for an older generation. The platform refuses a result for an older operation (below), so a late answer can't mark the newer setup as done.
 
 ### What's sent
 
@@ -166,20 +177,25 @@ A `POST` with a JSON body, signed like [webhooks](API_ACCESS.md#checking-it-came
   "id": "evt_9mZ2cQ4kLx7pT1vB",
   "type": "organization.entitled",
   "timestamp": "2026-11-03T09:12:44.512Z",
+  "schemaVersion": 1,
   "data": {
-    "application": { "key": "appforge" },
+    "application": { "id": "9d3e…", "key": "appforge" },
     "organization": { "id": "5b0f…", "slug": "acme-corp", "name": "Acme Corporation", "suspended": false },
-    "entitlement": { "state": "ENABLED", "validFrom": "2026-11-03T09:12:44.000Z", "validTo": null }
+    "entitlement": { "state": "ENABLED", "validFrom": "2026-11-03T09:12:44.000Z", "validTo": null },
+    "operation": { "id": "op_Qm4xT7c2LpZ9vW1b", "generation": 1 }
   }
 }
 ```
 
-`organization.deprovisioned` has `"entitlement": null`. It also has `"reason"` (`entitlement_removed` or `organization_deleted`) and `"deleteData"`.
+`organization.deprovisioning_requested` has `"entitlement": null`. It also has `"reason"` (`entitlement_removed` or `organization_deleted`) and `"deleteData"`. `schemaVersion` changes only when a field changes meaning; new fields can appear at any time, so the application **must** ignore fields it doesn't know.
 
 The application **must**:
-- check the signature;
+- check the signature. During a [rotation](#rotating-the-signing-secret), `webhook-signature` holds two signatures separated by a space, and one matching is enough;
+- refuse a `webhook-timestamp` more than 5 minutes from its own clock, so a captured request can't be replayed later;
 - handle the same `id` twice, because retries resend it;
 - answer within 10 seconds.
+
+Standard Webhooks libraries (e.g. `standardwebhooks` for Node) do the first three.
 
 ### Answering, and setting the organization up
 
@@ -189,20 +205,31 @@ The application **must**:
 | `202` | Accepted, finishing later. For `organization.entitled`, the organization stays `PENDING` until the application reports back (below). |
 | Anything else, a redirect, or nothing within 10 seconds | Failed. Retried after 30 seconds, 2 minutes, 10 minutes, 30 minutes, 2 hours, 6 hours and 24 hours, then given up. For `organization.entitled`, the organization is then `FAILED`. |
 
-While an organization is `PENDING` or `FAILED`, its Applications page shows "being set up" (or that setup didn't finish) instead of **Open**, and the application's sidebar section is hidden. Sign-in itself still works, so the application decides what a person sees before their organization is ready.
+While an organization is `PENDING` or `FAILED`:
+- its Applications page shows "being set up", or that setup didn't finish, instead of **Open**;
+- the application's sidebar section is hidden;
+- **signing in to the application is refused**, with "still being set up" (fail closed).
 
-To report back after a `202`, the application calls the platform with its sign-in client ID and secret (HTTP Basic; confidential clients only):
+To report back after a `202`, the application calls the platform with its sign-in client ID and secret (HTTP Basic; confidential clients only), naming the operation from the event:
 
 ```
-POST /api/product-api/organizations/<organization id>/provisioning
+POST /api/product-api/operations/<operation id>/result
 Authorization: Basic base64(<client id>:<client secret>)
 Content-Type: application/json
 
-{ "status": "READY" }                        → 204
-{ "status": "FAILED", "message": "Quota exceeded" }   → 204
+{ "generation": 1, "status": "READY" }                                → 204
+{ "generation": 1, "status": "FAILED", "message": "Quota exceeded" }  → 204
 ```
 
-It can report again at any time, e.g. `READY` after fixing a failure.
+| Answer | Why |
+| --- | --- |
+| `204` | Recorded. The same result again is also `204`, so retrying a report is safe. |
+| `401` | Wrong client ID or secret. |
+| `404` | No such operation for this application. Another application's operations are not found. |
+| `409 STALE_OPERATION` | A newer operation replaced this one, or the generation doesn't match. Drop this work. |
+| `409 INVALID_TRANSITION` | The operation already finished `READY`. A later failure is the application's to handle, not a setup result. |
+
+After `FAILED`, it can report `READY` once the problem is fixed.
 
 ### Order and retries
 
@@ -212,6 +239,12 @@ The **Lifecycle events** panel shows:
 - each organization's setup status;
 - the last 50 events, with the application's answers;
 - **Retry now** for an event that's waiting or was given up.
+
+Retries are spread by ±20%, so after an outage events don't all arrive at once. An error on the platform's side (for example a secret that can't be decrypted) counts as a failed attempt too, and shows on the panel.
+
+### Rotating the signing secret
+
+**New signing secret** on the panel makes a new secret, shown once. For the next 24 hours, events are signed with both the new and the old secret. That way the application can switch to the new one without missing or rejecting events. After 24 hours only the new one signs.
 
 ## Planned
 
