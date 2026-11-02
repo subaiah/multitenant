@@ -9,6 +9,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from '../lib/application-permissions.js';
+import { CATALOGUE_FIELDS, PLATFORM_FIELDS, isPlatformCaller } from '../lib/application-fields.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -69,17 +70,17 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       ],
     };
     
+    // Explicit fields (lib/application-fields.ts): how many organizations use it is for platform staff only
+    const platformCaller = isPlatformCaller(request.user);
     const [applications, total] = await Promise.all([
       controlDb.applicationRegistry.findMany({
         where,
         skip,
         take: paging.limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          _count: {
-            select: { permissions: true, tenantApplications: true },
-          },
-        },
+        select: platformCaller
+          ? { ...PLATFORM_FIELDS, _count: { select: { permissions: true, tenantApplications: true } } }
+          : { ...CATALOGUE_FIELDS, _count: { select: { permissions: true } } },
       }),
       controlDb.applicationRegistry.count({ where }),
     ]);
@@ -112,22 +113,21 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const application = await controlDb.applicationRegistry.findUnique({
-      where: { id },
-      include: {
-        permissions: true,
-        tenantApplications: {
-          include: {
-            tenant: {
-              select: { id: true, name: true, slug: true },
-            },
+    // Which organizations have it is for platform staff only (lib/application-fields.ts)
+    const application = isPlatformCaller(request.user)
+      ? await controlDb.applicationRegistry.findUnique({
+          where: { id },
+          select: {
+            ...PLATFORM_FIELDS,
+            permissions: true,
+            tenantApplications: { include: { tenant: { select: { id: true, name: true, slug: true } } } },
+            _count: { select: { permissions: true, tenantApplications: true } },
           },
-        },
-        _count: {
-          select: { permissions: true, tenantApplications: true },
-        },
-      },
-    });
+        })
+      : await controlDb.applicationRegistry.findUnique({
+          where: { id },
+          select: { ...CATALOGUE_FIELDS, permissions: true, _count: { select: { permissions: true } } },
+        });
     
     if (!application) {
       throw new AppError('Application not found', 404);
@@ -174,6 +174,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         ...data,
       },
+      select: PLATFORM_FIELDS,
     });
     
     // Log activity
@@ -224,6 +225,7 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const application = await controlDb.applicationRegistry.update({
       where: { id },
       data,
+      select: PLATFORM_FIELDS,
     });
     
     // Log activity
