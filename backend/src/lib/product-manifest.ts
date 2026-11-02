@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { controlDb } from './prisma.js';
 import { allowedUri, newClientId, newClientSecret } from './oidc/uris.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from './application-permissions.js';
+import { userEventsChanged } from './product-user-events.js';
 import { AppError } from '../middleware/error-handler.js';
 import { callbackChanged, callbackUrlSchema, newCallbackSecret } from './product-lifecycle.js';
 
@@ -32,7 +33,7 @@ export const manifestSchema = z
       postLogoutRedirectUris: z.array(uri).max(10).optional(),
       openPath: relativePath.optional(),
     }),
-    provisioning: z.object({ callbackUrl: callbackUrlSchema, deletesDataOnDeprovision: z.boolean().default(false) }).optional(),
+    provisioning: z.object({ callbackUrl: callbackUrlSchema, deletesDataOnDeprovision: z.boolean().default(false), userEvents: z.boolean().default(false) }).optional(),
     permissions: z.array(z.object({ name: z.string().max(100), description: z.string().trim().min(1).max(200) })).max(100).default([]),
     menu: z
       .array(z.object({
@@ -130,6 +131,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         name: m.name, description: m.description ?? null, version: m.version, baseUrl: m.baseUrl.replace(/\/+$/, ''), manifestImportedAt: new Date(),
         provisioningCallbackUrl: m.provisioning?.callbackUrl ?? null,
         deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
+        userEvents: m.provisioning?.userEvents ?? false,
         ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
       };
       const app = existing
@@ -185,12 +187,12 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
       // What changed, for the audit log and the dry run (never secrets)
       const was = {
         name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null,
-        callbackUrl: existing?.provisioningCallbackUrl ?? null, deletesDataOnDeprovision: existing?.deletesDataOnDeprovision ?? false,
+        callbackUrl: existing?.provisioningCallbackUrl ?? null, deletesDataOnDeprovision: existing?.deletesDataOnDeprovision ?? false, userEvents: existing?.userEvents ?? false,
         clientType: before?.clientType ?? null, redirectUris: before?.redirectUris ?? [], postLogoutRedirectUris: before?.postLogoutRedirectUris ?? [],
         openUrl: before?.initiateLoginUri ?? null, signInEnabled: before?.enabled ?? null,
       };
       const now = {
-        name: app.name, version: app.version, baseUrl: app.baseUrl, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision,
+        name: app.name, version: app.version, baseUrl: app.baseUrl, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision, userEvents: fields.userEvents,
         clientType: signIn.clientType, redirectUris: signIn.redirectUris, postLogoutRedirectUris: signIn.postLogoutRedirectUris, openUrl: signIn.initiateLoginUri, signInEnabled: signIn.enabled,
       };
       const changes = Object.fromEntries(
@@ -205,6 +207,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         ...(secret && { clientSecret: secret }),
         ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
         hadCallback: !!existing?.provisioningCallbackUrl,
+        hadUserEvents: existing?.userEvents ?? false,
         permissions: { added, updated, notInManifest },
         menuItems: m.menu.length,
       };
@@ -214,7 +217,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
     });
   } catch (err) {
     if (err instanceof DryRun) {
-      const { clientSecret: _s, callbackSigningSecret: _c, hadCallback: _h, ...plan } = err.result as ImportResult & { hadCallback: boolean };
+      const { clientSecret: _s, callbackSigningSecret: _c, hadCallback: _h, hadUserEvents: _u, ...plan } = err.result as ImportResult & { hadCallback: boolean; hadUserEvents: boolean };
       return { ...plan, ...(plan.created && { clientId: '(made on import)', application: { ...plan.application, id: '(made on import)' } }), dryRun: true };
     }
     // Two imports of the same new product at once: one wins
@@ -225,8 +228,9 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
   }
   forgetApplicationPermissions();
   // Organizations that have it on and weren't told yet are told now
-  const { hadCallback, ...rest } = result;
+  const { hadCallback, hadUserEvents, ...rest } = result;
   const told = await callbackChanged(result.application.id, hadCallback, !!m.provisioning);
+  await userEventsChanged(result.application.id, hadUserEvents, m.provisioning?.userEvents ?? false);
   return { ...rest, ...(told && { organizationsTold: told }) };
 }
 
@@ -252,7 +256,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       ...(app.signIn?.postLogoutRedirectUris.length && { postLogoutRedirectUris: app.signIn.postLogoutRedirectUris }),
       ...(openPath && { openPath }),
     },
-    ...(app.provisioningCallbackUrl && { provisioning: { callbackUrl: app.provisioningCallbackUrl, deletesDataOnDeprovision: app.deletesDataOnDeprovision } }),
+    ...(app.provisioningCallbackUrl && { provisioning: { callbackUrl: app.provisioningCallbackUrl, deletesDataOnDeprovision: app.deletesDataOnDeprovision, userEvents: app.userEvents } }),
     permissions: app.permissions.map((p) => ({ name: p.name, description: p.description ?? p.name })),
     menu: app.menuItems.map((i) => ({ label: i.label, path: i.path, ...(i.icon && { icon: i.icon }), ...(i.permission && { permission: i.permission }) })),
   };

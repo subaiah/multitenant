@@ -9,11 +9,13 @@ import { controlDb } from '../lib/prisma.js';
 import { decryptSecret, secretContext } from '../lib/secrets.js';
 import { audit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
+import { userEventsChanged } from '../lib/product-user-events.js';
 import { ROTATION_OVERLAP_MS, callbackChanged, callbackUrlSchema, newCallbackSecret, retryLifecycleEvent } from '../lib/product-lifecycle.js';
 
 const settingsSchema = z.object({
   callbackUrl: callbackUrlSchema.nullable(),
   deletesDataOnDeprovision: z.boolean().default(false),
+  userEvents: z.boolean().default(false),
 });
 
 const params = { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } } as const;
@@ -44,6 +46,7 @@ export const applicationLifecycleRoutes: FastifyPluginAsync = async (fastify) =>
       hasSecret: !!app.callbackSigningSecret,
       previousSecretValidUntil: app.previousCallbackSecretExpiresAt && app.previousCallbackSecretExpiresAt > new Date() ? app.previousCallbackSecretExpiresAt : null,
       deletesDataOnDeprovision: app.deletesDataOnDeprovision,
+      userEvents: app.userEvents,
       organizations: entitlements.map((e) => ({
         tenant: e.tenant, state: e.state, provisioningStatus: e.provisioningStatus, provisioningError: e.provisioningError, provisionedAt: e.provisionedAt,
       })),
@@ -62,17 +65,20 @@ export const applicationLifecycleRoutes: FastifyPluginAsync = async (fastify) =>
     const app = await findApp((request.params as { id: string }).id);
     const data = settingsSchema.parse(request.body);
     const secret = data.callbackUrl && !app.callbackSigningSecret ? newCallbackSecret() : undefined;
+    // User events go to the callback too: none without one
+    const userEvents = data.userEvents && !!data.callbackUrl;
     await controlDb.applicationRegistry.update({
       where: { id: app.id },
-      data: { provisioningCallbackUrl: data.callbackUrl, deletesDataOnDeprovision: data.deletesDataOnDeprovision, ...(secret && { callbackSigningSecret: secret }) },
+      data: { provisioningCallbackUrl: data.callbackUrl, deletesDataOnDeprovision: data.deletesDataOnDeprovision, userEvents, ...(secret && { callbackSigningSecret: secret }) },
     });
     const told = await callbackChanged(app.id, !!app.provisioningCallbackUrl, !!data.callbackUrl);
+    await userEventsChanged(app.id, app.userEvents, userEvents);
     await audit(request, 'application.lifecycle_updated', {
       resource: { type: 'application', id: app.id, label: app.name },
-      changes: { callbackUrl: [app.provisioningCallbackUrl, data.callbackUrl], deletesDataOnDeprovision: [app.deletesDataOnDeprovision, data.deletesDataOnDeprovision] },
+      changes: { callbackUrl: [app.provisioningCallbackUrl, data.callbackUrl], deletesDataOnDeprovision: [app.deletesDataOnDeprovision, data.deletesDataOnDeprovision], userEvents: [app.userEvents, userEvents] },
       details: { organizationsTold: told, ...(secret && { newSigningSecret: true }) },
     });
-    return { callbackUrl: data.callbackUrl, deletesDataOnDeprovision: data.deletesDataOnDeprovision, organizationsTold: told, ...(secret && { signingSecret: secret }) };
+    return { callbackUrl: data.callbackUrl, deletesDataOnDeprovision: data.deletesDataOnDeprovision, userEvents, organizationsTold: told, ...(secret && { signingSecret: secret }) };
   });
 
   fastify.post('/:id/lifecycle/secret', {

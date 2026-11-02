@@ -148,6 +148,26 @@ export async function queueLifecycleEvent(tx: Tx, type: LifecycleEvent, entitlem
   return true;
 }
 
+/**
+ * Queue any other event for a product and organization (user events,
+ * lib/product-user-events.ts), with the same envelope. Call inside the
+ * transaction that decided it.
+ */
+export async function queueProductEvent(
+  tx: Pick<typeof controlDb, 'productEvent'>,
+  e: { applicationId: string; applicationKey: string; tenantId: string; type: string; data: Record<string, unknown> },
+): Promise<void> {
+  const publicId = `evt_${randomBytes(12).toString('base64url')}`;
+  const payload = {
+    id: publicId,
+    type: e.type,
+    timestamp: new Date().toISOString(),
+    schemaVersion: SCHEMA_VERSION,
+    data: { application: { id: e.applicationId, key: e.applicationKey }, ...e.data },
+  };
+  await tx.productEvent.create({ data: { publicId, applicationId: e.applicationId, tenantId: e.tenantId, type: e.type, payload } });
+}
+
 /** What changing an entitlement means for the product (create: before is null; delete: after is null) */
 export async function entitlementChanged(tx: Tx, before: Entitlement | null, after: Entitlement | null): Promise<boolean> {
   if (!after) return before ? queueLifecycleEvent(tx, 'organization.deprovisioning_requested', before, { reason: 'entitlement_removed' }) : false;

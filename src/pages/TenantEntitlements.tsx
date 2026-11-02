@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar } from 'lucide-react';
+import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
@@ -11,6 +11,23 @@ interface Application {
   description?: string;
   version: string;
   status: string;
+  /** What its server can learn about the organization's people (backend lib/application-fields.ts) */
+  dataAccess?: { peopleAndGroups: boolean; toldWhenPeopleChange: boolean };
+}
+
+/** What an application's server can learn about the organization's people, in plain words */
+function DataAccessNote({ access, before = false }: { access?: Application['dataAccess']; before?: boolean }) {
+  if (!access || (!access.peopleAndGroups && !access.toldWhenPeopleChange)) return null;
+  const parts = [
+    access.peopleAndGroups && 'read your people and groups: names, email addresses, groups, roles, and which of its own permissions each person has',
+    access.toldWhenPeopleChange && 'be told when someone is added, changed, deactivated or removed, or their permissions for it change',
+  ].filter(Boolean) as string[];
+  return (
+    <p className="flex items-start gap-1.5 mt-2 text-xs text-slate-600 dark:text-slate-300">
+      <Eye size={14} className="mt-0.5 shrink-0 text-slate-400" aria-hidden />
+      <span>{before ? 'Once turned on, its server can ' : 'Its server can '}{parts.join(', and ')}.</span>
+    </p>
+  );
 }
 
 interface TenantApplication {
@@ -164,6 +181,7 @@ export default function TenantEntitlements() {
                             {entitlement.application.description}
                           </p>
                         )}
+                        <DataAccessNote access={entitlement.application.dataAccess} />
                         <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />
@@ -241,6 +259,7 @@ export default function TenantEntitlements() {
                     </option>
                   ))}
                 </select>
+                <DataAccessNote access={availableApps.find((a) => a.id === selectedAppId)?.dataAccess} before />
                 {getAvailableApps().length === 0 && (
                   <p className="text-sm text-amber-600 dark:text-amber-400 mt-2">
                     No applications available to add

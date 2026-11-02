@@ -296,6 +296,8 @@ model ApplicationRegistry {
   previousCallbackSecretExpiresAt DateTime? @map("previous_callback_secret_expires_at")
   /// Whether it deletes an organization's data when told it left
   deletesDataOnDeprovision Boolean @default(false) @map("deletes_data_on_deprovision")
+  /// Also tell it when people in an organization change (lib/product-user-events.ts)
+  userEvents       Boolean @default(false) @map("user_events")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -305,6 +307,7 @@ model ApplicationRegistry {
   menuItems          ApplicationMenuItem[]
   productEvents      ProductEvent[]
   serviceCredentials ProductServiceCredential[]
+  memberStates       ProductMemberState[]
 
   @@index([status])
   @@map("application_registries")
@@ -970,4 +973,26 @@ model WebhookWork {
 
   @@index([dueAt])
   @@map("webhook_work")
+}
+
+/// What a product was last told about each person in an organization
+/// (lib/product-user-events.ts): enough to tell what changed, no plain
+/// personal data (email and name are kept as keyed hashes)
+model ProductMemberState {
+  applicationId   String   @map("application_id")
+  tenantId        String   @map("tenant_id")
+  userId          String   @map("user_id")
+  status          String
+  userType        String   @map("user_type")
+  emailHash       String   @map("email_hash")
+  nameHash        String   @map("name_hash")
+  /// The product's own permissions the person holds (names, sorted)
+  permissions     String[] @default([])
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  application     ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([applicationId, tenantId, userId])
+  @@index([tenantId])
+  @@map("product_member_states")
 }

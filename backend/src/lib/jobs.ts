@@ -16,6 +16,7 @@ import { startRateLimitCleanup, stopRateLimitCleanup } from './rate-limit-store.
 import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
 import { controlDb } from './prisma.js';
 import { runExport } from './data-export.js';
+import { startUserEventSweep, stopUserEventSweep } from './product-user-events.js';
 import { reportError } from './error-reporting.js';
 import { purgeExpiredOidcPayloads } from './oidc/adapter.js';
 import { lifecycleEventsSettled, startLifecycleEvents, stopLifecycleEvents } from './product-lifecycle.js';
@@ -82,6 +83,7 @@ export async function startJobs(log: JobLogger) {
   startWebhooks(failed);
   startOidcCleanup((msg) => log.warn(msg));
   startLifecycleEvents(failed);
+  startUserEventSweep(failed);
   log.info('Background jobs started');
 }
 
@@ -93,6 +95,7 @@ export async function stopJobs() {
   stopTenantLifecycle();
   stopWebhooks();
   stopLifecycleEvents();
+  stopUserEventSweep();
   if (oidcTimer) clearInterval(oidcTimer);
   oidcTimer = undefined;
   if (exportTimer) clearInterval(exportTimer);

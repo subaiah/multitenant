@@ -30,6 +30,8 @@ There are two ways to build on the platform:
 | **Lifecycle events**: an organization turned it on, was suspended or resumed, or left | Available | [Lifecycle events](#lifecycle-events) |
 | **Service credentials** to call API v1 as the application, for the organizations that have it on | Available | [Calling the platform as the application](#calling-the-platform-as-the-application) |
 | **Organizations, people and groups** in API v1, and the application's **event history** | Available | [Reading organizations and people](#reading-organizations-and-people) |
+| **User events**: someone was added, changed, deactivated, reactivated or removed, or their permissions for the application changed | Available (opt-in) | [User events](#user-events) |
+| **What organizations see**: each organization's administrators see what the application's server can learn about their people | Available | [What organizations see](#what-organizations-see) |
 
 ## Rules
 
@@ -80,7 +82,8 @@ Importing **creates the application if its `productId` is new, and updates it ot
   "baseUrl": "https://appforge.example.com",
   "provisioning": {
     "callbackUrl": "https://appforge.example.com/platform/events",
-    "deletesDataOnDeprovision": true
+    "deletesDataOnDeprovision": true,
+    "userEvents": true
   },
   "signIn": {
     "clientType": "CONFIDENTIAL",
@@ -114,6 +117,7 @@ Importing **creates the application if its `productId` is new, and updates it ot
 | `signIn.openPath` | No | A path starting with `/`, e.g. `/login`: the page that starts signing in. **Open** goes to `baseUrl + openPath` (OpenID's `initiate_login_uri`, with `?iss=`). |
 | `provisioning.callbackUrl` | No | Where [lifecycle events](#lifecycle-events) go: an `http(s)` address without credentials or a `#fragment`. In production it must be `https` and not an inside address (loopback, private, link-local, cloud metadata), unless its host is listed in the platform's `PRODUCT_CALLBACK_ALLOWED_HOSTS` (an application on the same network, e.g. `appforge`). Without `provisioning`, organizations need no setup and no events are sent. |
 | `provisioning.deletesDataOnDeprovision` | No | Whether the application deletes an organization's data when told it left (default `false`). Sent with `organization.deprovisioning_requested` and shown to platform staff. |
+| `provisioning.userEvents` | No | Also send [user events](#user-events) when people change (default `false`). Organizations' administrators see this. |
 | `permissions` | No | Up to 100. Each has a `name` (see rule 5) and a `description` of up to 200 characters, shown in the role editor. Names are unique across the platform. |
 | `menu` | No | Up to 20 entries. Each has a `label` (up to 40 characters), a `path` starting with `/` (relative to `baseUrl`), an optional `icon`, and an optional `permission`, which must be one of the manifest's own permissions. Unknown icons show a generic one. |
 
@@ -248,6 +252,37 @@ Retries are spread by ±20%, so after an outage events don't all arrive at once.
 
 **New signing secret** on the panel makes a new secret, shown once. For the next 24 hours, events are signed with both the new and the old secret. That way the application can switch to the new one without missing or rejecting events. After 24 hours only the new one signs.
 
+## User events
+
+With `provisioning.userEvents` (or **Also tell it when people change** on the Lifecycle events panel), the application is also told when people change in an organization that has it turned on. This lets it end access at once, without waiting for the person to sign in again. The events go to the same callback, signed and in the same order as lifecycle events, and show up in the event history.
+
+| Event | When | `data` beyond `application` and `organization` |
+| --- | --- | --- |
+| `user.added` | Someone joined (invited, or signed in with single sign-on the first time) | `user`, `permissions` |
+| `user.updated` | Their email, name or type changed, or they accepted their invitation (`changes` includes `status`) | `user`, `changes` (e.g. `["name"]`) |
+| `user.deactivated` | Their account was deactivated: **end their sessions** | `user` |
+| `user.reactivated` | Their account was reactivated | `user`, `permissions` |
+| `user.removed` | They were removed from the organization: **end their sessions** and drop or anonymize what you keep about them | `user` (`id` and `subject` only) |
+| `user.permissions_changed` | The application's own permissions they hold changed | `user`, `permissions` (now), `added`, `removed` |
+
+`user` is `{ id, subject, email, name, userType, status }`, as in [Reading organizations and people](#reading-organizations-and-people). `permissions` are only the application's own.
+
+How changes are found:
+- **By comparing, not guessing.** After any change to people, groups, roles or delegations in an organization, each person is compared with what the application was last told. So editing or deleting a role, deactivating a group, or adding someone to a group all come out as the right `user.permissions_changed` events, for exactly the people affected. A burst of changes is gathered for a moment and sent as one pass.
+- **Every hour, everyone is compared again.** This catches what changes with time, such as an assignment or delegation that expired, or anything that happened while the platform was down.
+- **Nothing on the first pass.** When an organization turns the application on, or the application starts asking for user events, everyone is recorded without sending anything. The application reads the members through the API while setting the organization up.
+- **No plain personal data is kept to do this.** The platform keeps keyed hashes of email and name, plus type, status and the application's permission names.
+
+Answer with any `2xx`. An application that doesn't recognize an event type should still answer `2xx`. Don't let an unknown event stall the organization's queue.
+
+## What organizations see
+
+On **Application Entitlements**, an organization's administrators see, for each application they have on and in the **Add Application** dialog before turning one on, what its server can learn about their people:
+- **read your people and groups**, when it has a live service credential with `members.read`;
+- **be told when someone changes**, when it takes user events.
+
+Ask only for what you use: these show up in plain words.
+
 ## Calling the platform as the application
 
 The application's server calls [API v1](API_V1.md) as itself with **service credentials**: OAuth 2.0 client credentials, separate from its sign-in client. Platform staff make them in the **Service credentials** panel on the Applications page.
@@ -356,7 +391,7 @@ Use the list to **reconcile** with what the events said, for example after the a
 
 Nothing secret (passwords, two-factor settings) is ever included.
 
-`updatedSince` finds people whose **account** changed (name, email, type, status). It doesn't see group or role changes, or people removed, so run a full pass now and then. User events will cover those (see [Planned](#planned)).
+`updatedSince` finds people whose **account** changed (name, email, type, status). It doesn't see group or role changes, or people removed: take [user events](#user-events) for those, or run a full pass now and then.
 
 **Events** come back exactly as they were sent (`payload`), with how delivery went. The answer has:
 - `nextAfter`: pass it as `after` for the next page. It's given on the last page too, so keep it and poll from it to catch any event the application missed;
@@ -366,14 +401,14 @@ Nothing secret (passwords, two-factor settings) is ever included.
 
 - **Revocation:**
   - OpenID Connect Back-Channel Logout, so the platform tells the application to end a person's sessions;
-  - user events (`user.deactivated`, `user.updated`, `user.removed`, `user.permissions_changed`);
   - a configurable access token lifetime.
 
 ## Checklist before going live
 
 - [ ] The manifest is in the application's repository, imported, and the client secret is stored on the application's server.
 - [ ] Service credentials (if used) ask only for the scopes needed, live on the server, and can be replaced without downtime.
-- [ ] People read from the platform are keyed by `subject`; a periodic full pass catches group, role and removal changes.
+- [ ] People read from the platform are keyed by `subject`; user events (or a periodic full pass) catch group, role and removal changes.
+- [ ] User events, if taken, end a person's sessions on `user.deactivated` and `user.removed`, and unknown event types are answered `2xx`.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
 - [ ] Every query is scoped to the organization; a test proves one organization can't read another's data.
