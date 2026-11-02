@@ -1,7 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
-import { CATALOGUE_FIELDS } from '../lib/application-fields.js';
+import { CATALOGUE_FIELDS, dataAccessOf } from '../lib/application-fields.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
@@ -125,8 +125,10 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       controlDb.tenantApplication.count({ where }),
     ]);
     
+    // What each can learn about the organization's people (lib/application-fields.ts)
+    const access = await dataAccessOf(tenantApplications.map((t) => t.applicationId));
     return {
-      tenantApplications,
+      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId) } })),
       pagination: {
         page: paging.page,
         limit: paging.limit,

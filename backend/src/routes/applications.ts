@@ -9,7 +9,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit, diff } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from '../lib/application-permissions.js';
-import { CATALOGUE_FIELDS, PLATFORM_FIELDS, isPlatformCaller } from '../lib/application-fields.js';
+import { CATALOGUE_FIELDS, PLATFORM_FIELDS, dataAccessOf, isPlatformCaller } from '../lib/application-fields.js';
 
 const createApplicationSchema = z.object({
   key: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/),
@@ -85,8 +85,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       controlDb.applicationRegistry.count({ where }),
     ]);
     
+    // What each can learn about the organization's people (lib/application-fields.ts)
+    const access = await dataAccessOf(applications.map((a) => a.id));
     return {
-      applications,
+      applications: applications.map((a) => ({ ...a, dataAccess: access.get(a.id) })),
       pagination: {
         page: paging.page,
         limit: paging.limit,

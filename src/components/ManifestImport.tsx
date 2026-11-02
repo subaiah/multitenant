@@ -24,7 +24,7 @@ interface ImportResult {
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  name: 'Name', version: 'Version', baseUrl: 'Address', callbackUrl: 'Lifecycle callback', deletesDataOnDeprovision: 'Deletes data when an organization leaves',
+  name: 'Name', version: 'Version', baseUrl: 'Address', callbackUrl: 'Lifecycle callback', deletesDataOnDeprovision: 'Deletes data when an organization leaves', userEvents: 'Told when people change',
   clientType: 'Client type', redirectUris: 'Redirect URIs', postLogoutRedirectUris: 'After sign-out', openUrl: 'Open address', signInEnabled: 'Sign-in on',
 };
 const show = (v: unknown) => (v === null || v === undefined || (Array.isArray(v) && !v.length) ? '—' : Array.isArray(v) ? v.join(', ') : String(v));

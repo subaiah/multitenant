@@ -17,6 +17,7 @@ interface Lifecycle {
   hasSecret: boolean;
   previousSecretValidUntil: string | null;
   deletesDataOnDeprovision: boolean;
+  userEvents: boolean;
   organizations: { tenant: { id: string; name: string; slug: string }; state: string; provisioningStatus: string; provisioningError: string | null; provisionedAt: string | null }[];
   events: {
     id: string; publicId: string; type: string; status: string; attempts: number; nextAttemptAt: string;
@@ -112,6 +113,7 @@ const setupLabel = (s: string) => (s === 'NOT_REQUIRED' ? 'No setup' : humanize(
 function SettingsForm({ path, data, onSecret, onSaved }: { path: string; data: Lifecycle; onSecret: (s: string) => void; onSaved: () => void }) {
   const [url, setUrl] = useState(data.callbackUrl ?? '');
   const [deletes, setDeletes] = useState(data.deletesDataOnDeprovision);
+  const [userEvents, setUserEvents] = useState(data.userEvents);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [told, setTold] = useState<number | null>(null);
@@ -121,7 +123,7 @@ function SettingsForm({ path, data, onSecret, onSaved }: { path: string; data: L
     setBusy(true);
     setError(null);
     try {
-      const r = await apiPut<{ signingSecret?: string; organizationsTold: number }>(path, { callbackUrl: url.trim() || null, deletesDataOnDeprovision: deletes });
+      const r = await apiPut<{ signingSecret?: string; organizationsTold: number }>(path, { callbackUrl: url.trim() || null, deletesDataOnDeprovision: deletes, userEvents });
       if (r.signingSecret) onSecret(r.signingSecret);
       setTold(r.organizationsTold);
       onSaved();
@@ -149,6 +151,13 @@ function SettingsForm({ path, data, onSecret, onSaved }: { path: string; data: L
       <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
         <input type="checkbox" checked={deletes} onChange={(e) => setDeletes(e.target.checked)} className="rounded border-slate-300" />
         The application deletes an organization's data when it leaves
+      </label>
+      <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+        <input type="checkbox" checked={userEvents && !!url.trim()} disabled={!url.trim()} onChange={(e) => setUserEvents(e.target.checked)} className="mt-0.5 rounded border-slate-300" />
+        <span>
+          Also tell it when people change
+          <span className="block text-xs text-slate-500">User events: someone added, changed, deactivated, reactivated or removed, or the application's permissions they hold changed. Organizations' administrators see this.</span>
+        </span>
       </label>
       {data.previousSecretValidUntil && (
         <p className="text-xs text-slate-500">Events are also signed with the previous secret until {formatDateTime(data.previousSecretValidUntil)}.</p>

@@ -29,8 +29,11 @@ process.env.EXPORT_DIR ??= join(tmpdir(), 'multitenant-test-exports');
 export const PASSWORD = 'correct-horse-battery';
 // A port the OS says is free (a fixed range could hit a dev server already
 // running, and the health check would then talk to the wrong database)
-const PORT = await freePort();
-const BASE = `http://127.0.0.1:${PORT}`;
+// running, and the health check would then talk to the wrong database). It
+// can still be taken by another test file's server before ours listens:
+// startServer then moves to another one.
+let PORT = await freePort();
+let BASE = `http://127.0.0.1:${PORT}`;
 const run = randomUUID().slice(0, 8);
 
 export type Strategy = 'SHARED_TABLES' | 'SCHEMA_PER_TENANT' | 'DATABASE_PER_TENANT';
@@ -156,20 +159,31 @@ async function freePort(): Promise<number> {
   });
 }
 
+class PortTaken extends Error {}
+
 async function spawnServer(port: number, env: Record<string, string>): Promise<ChildProcess> {
+  // Says which server answers /health, so we never take another test file's
+  // server on the same port for ours
+  const instance = randomUUID();
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     // Exports are built when asked for; no server polls for waiting ones
     // unless a test says so (operations.test.ts), so tests see what they started
-    env: { ...process.env, EXPORT_POLL_MS: '0', ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
-    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, EXPORT_POLL_MS: '0', ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error', INSTANCE_ID: instance },
+    // The server's output goes to stderr: the test runner reads each test
+    // file's stdout for its own messages, and a log line written into the
+    // middle of one breaks it ("Unable to deserialize cloned data")
+    stdio: ['ignore', 2, 'inherit'],
   });
   let exited = false;
   child.once('exit', () => (exited = true));
+  let foreign = false;
   for (let i = 0; i < 100; i++) {
-    // Our server must be the one answering
-    if (exited) throw new Error('server exited during startup');
+    if (exited) throw foreign ? new PortTaken(`port ${port} is another server's`) : new Error('server exited during startup');
     try {
-      if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) return child;
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      // Our server must be the one answering
+      if (res.ok && res.headers.get('x-instance-id') === instance) return child;
+      if (res.ok) foreign = true;
     } catch {
       /* not up yet */
     }
@@ -180,7 +194,19 @@ async function spawnServer(port: number, env: Record<string, string>): Promise<C
 }
 
 export async function startServer() {
-  server = await spawnServer(PORT, {});
+  for (let attempt = 1; ; attempt++) {
+    try {
+      server = await spawnServer(PORT, {});
+      return;
+    } catch (err) {
+      if (!(err instanceof PortTaken) || attempt >= 3) throw err;
+      // Another test file's server got the port first: another one, and anything pointed at the old address follows
+      const old = BASE;
+      PORT = await freePort();
+      BASE = `http://127.0.0.1:${PORT}`;
+      if (process.env.BFF_URL === old) process.env.BFF_URL = BASE;
+    }
+  }
 }
 
 /**
@@ -189,8 +215,17 @@ export async function startServer() {
  * before the test file ends.
  */
 export async function startExtraServer(env: Record<string, string>) {
-  const port = await freePort();
-  const child = await spawnServer(port, env);
+  let port = await freePort();
+  let child: ChildProcess;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      child = await spawnServer(port, env);
+      break;
+    } catch (err) {
+      if (!(err instanceof PortTaken) || attempt >= 3) throw err;
+      port = await freePort();
+    }
+  }
   const base = `http://127.0.0.1:${port}`;
   return {
     base,

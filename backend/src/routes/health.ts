@@ -33,7 +33,11 @@ async function databases() {
 export const healthRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/', {
     schema: { tags: ['health'], summary: 'Liveness: the API is running (no database access)' },
-  }, async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  }, async (_request, reply) => {
+    // INSTANCE_ID (when set, e.g. by the tests): which server answered, in a header so the body stays as little as it is
+    if (process.env.INSTANCE_ID) reply.header('x-instance-id', process.env.INSTANCE_ID);
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  });
 
   fastify.get('/ready', {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
