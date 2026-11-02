@@ -4,27 +4,16 @@
  * credentials. The client secret is shown once, when it's made or replaced;
  * it's stored encrypted (lib/secrets.ts).
  */
-import crypto from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { audit, diff } from '../lib/audit.js';
 import { issuer } from '../lib/oidc/provider.js';
+import { allowedUri, newClientId, newClientSecret as newSecret } from '../lib/oidc/uris.js';
 
 const MAX_URIS = 10;
 
-/** https, or http on this machine (for developing the application) */
-function allowedUri(value: string): boolean {
-  try {
-    const u = new URL(value);
-    if (u.hash || u.username || u.password) return false;
-    if (u.protocol === 'https:') return true;
-    return u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
-  } catch {
-    return false;
-  }
-}
 const uri = z.string().max(2000).refine(allowedUri, 'Use an https:// address (or http://localhost while developing), without a #fragment');
 
 const settingsSchema = z.object({
@@ -35,8 +24,6 @@ const settingsSchema = z.object({
   initiateLoginUri: z.union([z.literal(''), z.null(), z.string().max(2000).refine((v) => allowedUri(v), 'Use an https:// address (or http://localhost while developing)')]).optional(),
 });
 
-const newClientId = () => `mtc_${crypto.randomBytes(16).toString('base64url')}`;
-const newSecret = () => crypto.randomBytes(32).toString('base64url');
 
 const view = (s: Awaited<ReturnType<typeof controlDb.applicationSignIn.findUnique>>) =>
   s && {

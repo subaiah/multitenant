@@ -11,6 +11,8 @@ export interface MenuItem {
   permission: string | null;
   order: number;
   isActive: boolean;
+  /** A page in an external product (its full address): opens in a new tab */
+  external?: boolean;
   children?: MenuItem[];
 }
 

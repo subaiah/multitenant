@@ -1,7 +1,9 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useState } from 'react';
-import { Package, Plus, Edit2, Trash2, Key, CheckCircle, XCircle } from 'lucide-react';
-import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { Package, Plus, Edit2, Trash2, Key, Download, FileJson } from 'lucide-react';
+import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api-client';
+import { ManifestImport } from '../components/ManifestImport';
+import { secondaryButtonClass } from '../components/ui';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
 import ApplicationSignIn from '../components/ApplicationSignIn';
@@ -39,6 +41,15 @@ export default function ApplicationsManagement() {
   const setSelectedApp = (app: Application | null) => setSelectedId(app?.id ?? null);
   const permissions = useApi<{ permissions: Permission[] }>(selectedApp ? `/applications/${selectedApp.id}/permissions` : null).data?.permissions ?? [];
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // The selected application's settings as a manifest file (docs/PRODUCT_INTEGRATION.md)
+  const downloadManifest = async (app: Application) => {
+    const manifest = await apiGet(`/applications/${app.id}/manifest`);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(manifest, null, 2) + '\n'], { type: 'application/json' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${app.key}.manifest.json` });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -143,12 +154,27 @@ export default function ApplicationsManagement() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Applications</h1>
-        <p className="text-slate-600 dark:text-slate-400 mt-1">
-          Manage applications and their permissions
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Applications</h1>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
+            The applications organizations can turn on, sign in to and give access in
+          </p>
+        </div>
+        {canManage && (
+          <div className="flex flex-wrap gap-2">
+            {selectedApp && (
+              <button type="button" className={secondaryButtonClass} onClick={() => void downloadManifest(selectedApp)}>
+                <Download size={15} aria-hidden /> Download manifest
+              </button>
+            )}
+            <button type="button" className={secondaryButtonClass} onClick={() => setImporting(true)}>
+              <FileJson size={15} aria-hidden /> Import manifest
+            </button>
+          </div>
+        )}
       </div>
+      {importing && <ManifestImport onClose={() => setImporting(false)} onImported={(id) => setSelectedId(id)} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Applications List */}
