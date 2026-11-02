@@ -29,6 +29,7 @@ There are two ways to build on the platform:
 | **Organizations turn it on** (entitlements) and open it from the Applications page | Available | [SIGN_IN_WITH.md](SIGN_IN_WITH.md) |
 | **Lifecycle events**: an organization turned it on, was suspended or resumed, or left | Available | [Lifecycle events](#lifecycle-events) |
 | **Service credentials** to call API v1 as the application, for the organizations that have it on | Available | [Calling the platform as the application](#calling-the-platform-as-the-application) |
+| **Organizations, people and groups** in API v1, and the application's **event history** | Available | [Reading organizations and people](#reading-organizations-and-people) |
 
 ## Rules
 
@@ -262,8 +263,8 @@ An application can have several credentials at once.
 
 | Scope | Allows |
 | --- | --- |
-| `organizations.read` | Seeing the organizations that have the application on, and their setup status (coming next) |
-| `members.read` | Seeing the people and groups in those organizations (coming next) |
+| `organizations.read` | Seeing the organizations that have the application, their setup status, and the application's lifecycle events |
+| `members.read` | Seeing the people and groups in those organizations, while they have it on |
 | `lifecycle.report` | [Reporting setup results](#answering-and-setting-the-organization-up) |
 
 ### Getting a token
@@ -312,6 +313,9 @@ With the TypeScript client, `createProductClient` gets tokens and renews them a 
 | `401` | `INVALID_TOKEN`, `TOKEN_EXPIRED`, `CREDENTIAL_REVOKED` | Get a new token (or a new credential) |
 | `403` | `INSUFFICIENT_SCOPE` | Ask for the scope, and have it on the credential |
 | `403` | `APPLICATION_INACTIVE` | Platform staff took the application offline |
+| `403` | `NOT_ENTITLED` | The organization doesn't have the application on now (people and groups only) |
+| `404` | `NOT_FOUND` | No organization with that id has the application (another application's organizations are not found either) |
+| `409` | `ORGANIZATION_NOT_READY` | The organization is still being created |
 
 ### Replacing a credential
 
@@ -321,11 +325,45 @@ With the TypeScript client, `createProductClient` gets tokens and renews them a 
 
 Both work in between, so there's no downtime. A leaked secret: revoke the credential right away.
 
+## Reading organizations and people
+
+All under `/api/v1/product-integrations`, with a service token. Lists are paged with `page` and `limit` (at most 100) and answer `{ <items>, pagination: { page, limit, total, pages } }`.
+
+| Route | Scope | What |
+| --- | --- | --- |
+| `GET /organizations` | `organizations.read` | The organizations with an entitlement to the application, **in any state**, oldest first. Filters: `active`, `setupStatus`, `search`. |
+| `GET /organizations/{id}` | `organizations.read` | One of them (`404` for any other organization) |
+| `GET /organizations/{id}/members` | `members.read` | Its people, oldest first. Filters: `status`, `groupId`, `updatedSince`, `search`. |
+| `GET /organizations/{id}/groups` | `members.read` | Its groups, by name, with how many people are in each now |
+| `GET /events` | `organizations.read` | The application's own lifecycle events, oldest first, from a cursor |
+
+**An organization** carries:
+- `entitlement`: its state and dates, and `active` (turned on now);
+- `setup`: the status, error and current operation, as the lifecycle events left them;
+- `suspended`;
+- `available`: whether its people can sign in to the application now (turned on, not suspended, set up).
+
+Use the list to **reconcile** with what the events said, for example after the application was down.
+
+**People and groups** can be read only while the organization has the application turned on (`403 NOT_ENTITLED` otherwise), whether or not setup is finished: setting an organization up usually needs them.
+
+**A person** carries:
+- `subject`: the `sub` they sign in with (`<organization id>.<user id>`). Key them by it, not by email;
+- `email`, `name`, `userType`, `status`;
+- `groups`: the active groups they're in now;
+- `roles`;
+- `permissions`: **only the application's own permissions** that they hold now, as in the `permissions` claim at sign-in. Administrators hold them all. People who aren't `ACTIVE` hold none.
+
+Nothing secret (passwords, two-factor settings) is ever included.
+
+`updatedSince` finds people whose **account** changed (name, email, type, status). It doesn't see group or role changes, or people removed, so run a full pass now and then. User events will cover those (see [Planned](#planned)).
+
+**Events** come back exactly as they were sent (`payload`), with how delivery went. The answer has:
+- `nextAfter`: pass it as `after` for the next page. It's given on the last page too, so keep it and poll from it to catch any event the application missed;
+- `hasMore`.
+
 ## Planned
 
-- **Organizations and members in API v1:**
-  - the organizations that have the application on, with their setup status (`organizations.read`);
-  - their people and groups, paginated (`members.read`).
 - **Revocation:**
   - OpenID Connect Back-Channel Logout, so the platform tells the application to end a person's sessions;
   - user events (`user.deactivated`, `user.updated`, `user.removed`, `user.permissions_changed`);
@@ -335,6 +373,7 @@ Both work in between, so there's no downtime. A leaked secret: revoke the creden
 
 - [ ] The manifest is in the application's repository, imported, and the client secret is stored on the application's server.
 - [ ] Service credentials (if used) ask only for the scopes needed, live on the server, and can be replaced without downtime.
+- [ ] People read from the platform are keyed by `subject`; a periodic full pass catches group, role and removal changes.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
 - [ ] Every query is scoped to the organization; a test proves one organization can't read another's data.

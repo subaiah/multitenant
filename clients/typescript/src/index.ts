@@ -27,6 +27,10 @@ export type AuditEntry = Schemas['AuditEntry'];
 export type WebhookEvent = Schemas['WebhookEvent'];
 export type ApiError = Schemas['Error'];
 export type ProductIdentity = Schemas['ProductIdentity'];
+export type ProductOrganization = Schemas['ProductOrganization'];
+export type ProductMember = Schemas['ProductMember'];
+export type ProductGroup = Schemas['ProductGroup'];
+export type ProductEvent = Schemas['ProductEvent'];
 
 export interface Options extends Omit<ClientOptions, 'baseUrl'> {
   /** The API's v1 address, e.g. https://app.example.com/api/v1 */

@@ -229,6 +229,54 @@ SCHEMAS.ProductIdentity = obj({
   scopes: arrayOf({ type: 'string' }),
 });
 
+const SETUP_STATUSES = ['NOT_REQUIRED', 'PENDING', 'READY', 'FAILED'];
+
+SCHEMAS.ProductOrganization = obj({
+  id: uuid, slug: { type: 'string' }, name: { type: 'string' },
+  suspended: { type: 'boolean' },
+  entitlement: obj({
+    state: { type: 'string', enum: ['ENABLED', 'TRIAL', 'DISABLED'] }, validFrom: dateTime, validTo: nullable(dateTime),
+    active: { type: 'boolean', description: 'ENABLED or TRIAL, within its dates' },
+  }),
+  setup: obj({
+    status: { type: 'string', enum: SETUP_STATUSES }, error: nullable({ type: 'string' }), completedAt: nullable(dateTime),
+    operation: nullable(obj({ id: { type: 'string' }, generation: { type: 'integer' } }) as Schema & { type: string }),
+  }),
+  available: { type: 'boolean', description: 'Whether its people can sign in to the product now: turned on, not suspended, and set up' },
+  createdAt: dateTime,
+}, undefined, { description: 'An organization with an entitlement to the product (in any state)' });
+
+SCHEMAS.ProductMember = obj({
+  id: uuid,
+  subject: { type: 'string', description: 'The `sub` the person signs in to the product with: <organization id>.<user id>' },
+  email: { type: 'string', format: 'email' }, name: { type: 'string' },
+  userType: { type: 'string', enum: USER_TYPES }, status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
+  groups: arrayOf(obj({ id: uuid, name: { type: 'string' } })),
+  roles: arrayOf({ type: 'string' }),
+  permissions: arrayOf({ type: 'string', description: 'This product’s own permissions the person holds now (empty unless ACTIVE)' }),
+  lastLoginAt: nullable(dateTime), createdAt: dateTime, updatedAt: dateTime,
+});
+
+SCHEMAS.ProductGroup = obj({
+  id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
+  memberCount: { type: 'integer', description: 'People in it now' }, createdAt: dateTime, updatedAt: dateTime,
+});
+
+SCHEMAS.ProductEvent = obj({
+  id: { type: 'string', description: 'evt_…, the webhook-id it is sent with' },
+  type: { type: 'string' },
+  organizationId: uuid,
+  operation: nullable(obj({ id: { type: 'string' }, generation: { type: 'integer' } }) as Schema & { type: string }),
+  delivery: obj({
+    status: { type: 'string', enum: ['PENDING', 'DELIVERED', 'FAILED'] }, attempts: { type: 'integer' },
+    lastStatus: nullable({ type: 'integer' }), lastError: nullable({ type: 'string' }), deliveredAt: nullable(dateTime),
+  }),
+  createdAt: dateTime,
+  payload: { type: 'object', description: 'The event body exactly as it is sent to the callback' },
+});
+
+const productPage = { page: { type: 'integer', minimum: 1, default: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 } };
+
 export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
   { method: 'GET', path: '/products/me', operationId: 'getProductIdentity', tag: 'Products', summary: 'The product and credential the token belongs to, and its scopes', scope: null,
     responses: { 200: ref('ProductIdentity') } },
@@ -240,14 +288,53 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       message: { type: 'string', maxLength: 500, description: 'Why it failed (shown to platform staff and the organization)' },
     }, ['generation', 'status']),
     responses: { 204: null } },
+  { method: 'GET', path: '/product-integrations/organizations', operationId: 'listProductOrganizations', tag: 'Products',
+    summary: 'The organizations with an entitlement to the product (in any state), with their setup, oldest first', scope: 'organizations.read',
+    query: {
+      ...productPage,
+      active: { type: 'boolean', description: 'Only those that have it turned on now (true) or not (false)' },
+      setupStatus: { type: 'string', enum: SETUP_STATUSES },
+      search: { type: 'string', description: 'In name and slug' },
+    },
+    responses: { 200: listOf('organizations', 'ProductOrganization') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId', operationId: 'getProductOrganization', tag: 'Products',
+    summary: 'One organization with an entitlement to the product', scope: 'organizations.read', responses: { 200: ref('ProductOrganization') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/members', operationId: 'listProductMembers', tag: 'Products',
+    summary: 'An organization’s people, oldest first, with their groups, roles and the product’s permissions they hold. Only while it has the product turned on (NOT_ENTITLED otherwise).',
+    scope: 'members.read',
+    query: {
+      ...productPage,
+      status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
+      groupId: { ...uuid, description: 'Only people in this group now' },
+      updatedSince: { ...dateTime, description: 'Only people whose account changed since (not group or role changes)' },
+      search: { type: 'string', description: 'In email and name' },
+    },
+    responses: { 200: listOf('members', 'ProductMember') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/groups', operationId: 'listProductGroups', tag: 'Products',
+    summary: 'An organization’s groups, by name. Only while it has the product turned on.', scope: 'members.read',
+    query: { ...productPage, status: { type: 'string', enum: ACTIVE_INACTIVE } },
+    responses: { 200: listOf('groups', 'ProductGroup') } },
+  { method: 'GET', path: '/product-integrations/events', operationId: 'listProductEvents', tag: 'Products',
+    summary: 'The product’s lifecycle events, oldest first: to catch up on any it missed', scope: 'organizations.read',
+    query: {
+      after: { type: 'integer', minimum: 0, description: 'Events after this position (the previous page’s nextAfter); omit to start from the first' },
+      limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 },
+      organizationId: uuid,
+      type: { type: 'string', description: 'e.g. organization.entitled' },
+    },
+    responses: { 200: obj({
+      data: arrayOf(ref('ProductEvent')),
+      nextAfter: { type: 'integer', description: 'Where to continue from (also on the last page: poll with it for new events)' },
+      hasMore: { type: 'boolean' },
+    }) } },
 ];
 
 const productErrors: Record<string, string> = {
   400: 'The request is not valid',
   401: 'No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)',
-  403: 'The token lacks the scope (INSUFFICIENT_SCOPE), or the product is not active (APPLICATION_INACTIVE)',
+  403: 'The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)',
   404: "Not found (another product's things are not found either)",
-  409: 'A stale operation (STALE_OPERATION) or a result that no longer applies (INVALID_TRANSITION)',
+  409: 'A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)',
   429: 'Too many requests',
 };
 
@@ -291,7 +378,8 @@ export function openApiDocument(serverUrl = '/api/v1') {
   }
   for (const e of PRODUCT_ENDPOINTS) {
     const p = openApiPath(e.path);
-    const params = [...e.path.matchAll(/:(\w+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: 'string' } }));
+    const params = [...e.path.matchAll(/:(\w+)/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: name === 'organizationId' ? uuid : { type: 'string' } }));
+    const query = Object.entries(e.query ?? {}).map(([name, schema]) => ({ name, in: 'query', required: false, schema }));
     const responses: Record<string, unknown> = {};
     for (const [status, schema] of Object.entries(e.responses)) {
       responses[status] = schema ? { description: 'OK', content: { 'application/json': { schema } } } : { description: 'Done (no content)' };
@@ -307,7 +395,7 @@ export function openApiDocument(serverUrl = '/api/v1') {
       description: e.scope ? `For external products, with a service access token that has the \`${e.scope}\` scope.` : 'For external products, with any valid service access token.',
       security: [{ productToken: e.scope ? [e.scope] : [] }],
       'x-scope': e.scope,
-      ...(params.length ? { parameters: params } : {}),
+      ...(params.length || query.length ? { parameters: [...params, ...query] } : {}),
       ...(e.body ? { requestBody: { required: true, content: { 'application/json': { schema: e.body } } } } : {}),
       responses,
     };
