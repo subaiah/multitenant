@@ -405,7 +405,8 @@ async function productSections(tenantId: string, granted: Set<string>) {
       status: 'ACTIVE',
       baseUrl: { not: null },
       menuItems: { some: {} },
-      tenantApplications: { some: { tenantId, state: { in: ['ENABLED', 'TRIAL'] }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } },
+      // Once it has set the organization up (lib/product-lifecycle.ts)
+      tenantApplications: { some: { tenantId, state: { in: ['ENABLED', 'TRIAL'] }, provisioningStatus: { in: ['READY', 'NOT_REQUIRED'] }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } },
     },
     include: { menuItems: { orderBy: { order: 'asc' } } },
     orderBy: { name: 'asc' },

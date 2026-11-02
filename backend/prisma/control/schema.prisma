@@ -287,6 +287,12 @@ model ApplicationRegistry {
   baseUrl            String?   @map("base_url")
   /// When its manifest was last imported
   manifestImportedAt DateTime? @map("manifest_imported_at")
+  /// Where lifecycle events go (lib/product-lifecycle.ts); none: organizations need no setup
+  provisioningCallbackUrl String?  @map("provisioning_callback_url")
+  /// Signs lifecycle events (encrypted, lib/secrets.ts)
+  callbackSigningSecret   String?  @map("callback_signing_secret")
+  /// Whether it deletes an organization's data when told it left
+  deletesDataOnDeprovision Boolean @default(false) @map("deletes_data_on_deprovision")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -294,6 +300,7 @@ model ApplicationRegistry {
   permissions        Permission[]
   signIn             ApplicationSignIn?
   menuItems          ApplicationMenuItem[]
+  productEvents      ProductEvent[]
 
   @@index([status])
   @@map("application_registries")
@@ -408,6 +415,10 @@ model TenantApplication {
   state         String              @default("ENABLED") // ENABLED, DISABLED, TRIAL
   validFrom     DateTime            @default(now()) @map("valid_from")
   validTo       DateTime?           @map("valid_to")
+  /// Whether the application has set the organization up (lib/product-lifecycle.ts)
+  provisioningStatus EntitlementProvisioning @default(NOT_REQUIRED) @map("provisioning_status")
+  provisioningError  String?        @map("provisioning_error")
+  provisionedAt      DateTime?      @map("provisioned_at")
   createdAt     DateTime            @default(now()) @map("created_at")
 
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -417,6 +428,49 @@ model TenantApplication {
   @@index([applicationId])
   @@index([state])
   @@map("tenant_applications")
+}
+
+enum EntitlementProvisioning {
+  NOT_REQUIRED // the application takes no lifecycle events
+  PENDING      // told, not set up yet
+  READY
+  FAILED
+}
+
+// Lifecycle events for external products (lib/product-lifecycle.ts,
+// docs/PRODUCT_INTEGRATION.md): an outbox, sent signed and in order per
+// product and organization, retried with backoff
+model ProductEvent {
+  id            String             @id @default(uuid())
+  /// Orders events per product and organization
+  seq           Int                @unique @default(autoincrement())
+  /// The event's id as the product sees it (webhook-id), evt_…
+  publicId      String             @unique @map("public_id")
+  applicationId String             @map("application_id")
+  /// No foreign key: an organization's last event outlives it
+  tenantId      String             @map("tenant_id")
+  type          String
+  payload       Json
+  status        ProductEventStatus @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime           @default(now()) @map("next_attempt_at")
+  claimedAt     DateTime?          @map("claimed_at")
+  lastStatus    Int?               @map("last_status")
+  lastError     String?            @map("last_error")
+  deliveredAt   DateTime?          @map("delivered_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([applicationId, tenantId, seq])
+  @@map("product_events")
+}
+
+enum ProductEventStatus {
+  PENDING
+  DELIVERED
+  FAILED
 }
 
 // A platform user's time-limited access into a tenant

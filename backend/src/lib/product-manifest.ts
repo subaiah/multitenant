@@ -10,6 +10,7 @@ import { controlDb } from './prisma.js';
 import { allowedUri, newClientId, newClientSecret } from './oidc/uris.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from './application-permissions.js';
 import { AppError } from '../middleware/error-handler.js';
+import { callbackChanged, callbackUrlSchema, newCallbackSecret } from './product-lifecycle.js';
 
 const uri = z.string().max(2000).refine(allowedUri, 'Use an https:// address (or http://localhost while developing), without a #fragment');
 const relativePath = z.string().max(500).regex(/^\/(?!\/)[^\s#]*$/, 'A path starting with / (no #fragment)');
@@ -31,6 +32,7 @@ export const manifestSchema = z
       postLogoutRedirectUris: z.array(uri).max(10).optional(),
       openPath: relativePath.optional(),
     }),
+    provisioning: z.object({ callbackUrl: callbackUrlSchema, deletesDataOnDeprovision: z.boolean().default(false) }).optional(),
     permissions: z.array(z.object({ name: z.string().max(100), description: z.string().trim().min(1).max(200) })).max(100).default([]),
     menu: z
       .array(z.object({
@@ -72,6 +74,10 @@ export interface ImportResult {
   clientId: string;
   /** Only when it was just made (first import, or switched to a confidential client) */
   clientSecret?: string;
+  /** Signs lifecycle events; only when it was just made (callback address set for the first time) */
+  callbackSigningSecret?: string;
+  /** Organizations told now (organization.entitled), when a callback address was just added */
+  organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   menuItems: number;
 }
@@ -90,7 +96,14 @@ export async function importManifest(input: unknown): Promise<ImportResult> {
 
   const result = await controlDb.$transaction(async (tx) => {
     const existing = await tx.applicationRegistry.findUnique({ where: { key: m.productId }, include: { signIn: true, permissions: true } });
-    const fields = { name: m.name, description: m.description ?? null, version: m.version, baseUrl: m.baseUrl.replace(/\/+$/, ''), manifestImportedAt: new Date() };
+    // The manifest says where lifecycle events go; without provisioning, nowhere
+    const callbackSecret = m.provisioning && !existing?.callbackSigningSecret ? newCallbackSecret() : undefined;
+    const fields = {
+      name: m.name, description: m.description ?? null, version: m.version, baseUrl: m.baseUrl.replace(/\/+$/, ''), manifestImportedAt: new Date(),
+      provisioningCallbackUrl: m.provisioning?.callbackUrl ?? null,
+      deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
+      ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
+    };
     const app = existing
       ? await tx.applicationRegistry.update({ where: { id: existing.id }, data: fields })
       : await tx.applicationRegistry.create({ data: { key: m.productId, status: 'ACTIVE', ...fields } });
@@ -145,12 +158,17 @@ export async function importManifest(input: unknown): Promise<ImportResult> {
       created: !existing,
       clientId: signIn.clientId,
       ...(secret && { clientSecret: secret }),
+      ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
+      hadCallback: !!existing?.provisioningCallbackUrl,
       permissions: { added, updated, notInManifest },
       menuItems: m.menu.length,
     };
   });
   forgetApplicationPermissions();
-  return result;
+  // Organizations that have it on and weren't told yet are told now
+  const { hadCallback, ...rest } = result;
+  const told = await callbackChanged(result.application.id, hadCallback, !!m.provisioning);
+  return { ...rest, ...(told && { organizationsTold: told }) };
 }
 
 /** An application's current settings as a manifest (to start one, or compare) */
@@ -175,6 +193,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       ...(app.signIn?.postLogoutRedirectUris.length && { postLogoutRedirectUris: app.signIn.postLogoutRedirectUris }),
       ...(openPath && { openPath }),
     },
+    ...(app.provisioningCallbackUrl && { provisioning: { callbackUrl: app.provisioningCallbackUrl, deletesDataOnDeprovision: app.deletesDataOnDeprovision } }),
     permissions: app.permissions.map((p) => ({ name: p.name, description: p.description ?? p.name })),
     menu: app.menuItems.map((i) => ({ label: i.label, path: i.path, ...(i.icon && { icon: i.icon }), ...(i.permission && { permission: i.permission }) })),
   };
