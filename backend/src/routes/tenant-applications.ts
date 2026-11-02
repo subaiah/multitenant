@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
+import { CATALOGUE_FIELDS } from '../lib/application-fields.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
@@ -156,11 +157,8 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantApplication = await controlDb.tenantApplication.findFirst({
       where: { id, tenantId },
       include: {
-        application: {
-          include: {
-            permissions: true,
-          },
-        },
+        // Explicit fields (lib/application-fields.ts)
+        application: { select: { ...CATALOGUE_FIELDS, permissions: true } },
       },
     });
     
