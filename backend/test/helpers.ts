@@ -182,9 +182,8 @@ async function spawnServer(port: number, env: Record<string, string>): Promise<C
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
       // Our server must be the one answering
-      const body = res.ok ? ((await res.json()) as { instance?: string }) : null;
-      if (body?.instance === instance) return child;
-      if (body) foreign = true;
+      if (res.ok && res.headers.get('x-instance-id') === instance) return child;
+      if (res.ok) foreign = true;
     } catch {
       /* not up yet */
     }
