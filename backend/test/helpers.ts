@@ -161,7 +161,10 @@ async function spawnServer(port: number, env: Record<string, string>): Promise<C
     // Exports are built when asked for; no server polls for waiting ones
     // unless a test says so (operations.test.ts), so tests see what they started
     env: { ...process.env, EXPORT_POLL_MS: '0', ...env, PORT: String(port), HOST: '127.0.0.1', LOG_LEVEL: 'error' },
-    stdio: ['ignore', 'inherit', 'inherit'],
+    // The server's output goes to stderr: the test runner reads each test
+    // file's stdout for its own messages, and a log line written into the
+    // middle of one breaks it ("Unable to deserialize cloned data")
+    stdio: ['ignore', 2, 'inherit'],
   });
   let exited = false;
   child.once('exit', () => (exited = true));
