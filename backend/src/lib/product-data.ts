@@ -139,7 +139,8 @@ export async function listProductMembers(applicationId: string, tenantId: string
     db.user.count({ where }),
     controlDb.permission.findMany({ where: { applicationId }, select: { name: true }, orderBy: { name: 'asc' } }),
   ]);
-  const names = declared.map((p) => p.name);
+  // Sorted here, not by the database, so the order doesn't depend on its collation
+  const names = declared.map((p) => p.name).sort();
   const members = await mapLimited(users, 8, async (u) => {
     // Only people who can sign in hold anything
     let roles: string[] = [];

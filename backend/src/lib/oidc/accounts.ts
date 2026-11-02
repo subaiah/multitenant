@@ -98,7 +98,8 @@ export async function claimsFor(sub: string, record: AccountRecord, applicationI
     const declared = await controlDb.permission.findMany({ where: { applicationId }, select: { name: true }, orderBy: { name: 'asc' } });
     Object.assign(claims, {
       roles: [...new Set([...data.sources.directRoles, ...data.sources.groupRoles])].sort(),
-      permissions: declared.map((p) => p.name).filter((p) => permissionMatches(data.permissions, p)),
+      // Sorted here, not by the database, so the order doesn't depend on its collation
+      permissions: declared.map((p) => p.name).filter((p) => permissionMatches(data.permissions, p)).sort(),
     });
   }
   return claims;
