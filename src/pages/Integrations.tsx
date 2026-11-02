@@ -28,7 +28,7 @@ interface Integration {
 export default function Integrations() {
   const info = useApi<{ applications: Integration[] }>('/applications/integrations');
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       <PageHeader title="Integrations" description="Every external product: how it's connected, how its organizations' setup stands, and whether events and logouts are getting through." />
       <DataView {...info}>
         {({ applications }) => {
