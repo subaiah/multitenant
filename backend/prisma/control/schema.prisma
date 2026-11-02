@@ -304,6 +304,7 @@ model ApplicationRegistry {
   signIn             ApplicationSignIn?
   menuItems          ApplicationMenuItem[]
   productEvents      ProductEvent[]
+  serviceCredentials ProductServiceCredential[]
 
   @@index([status])
   @@map("application_registries")
@@ -351,6 +352,30 @@ model ApplicationMenuItem {
 
   @@index([applicationId])
   @@map("application_menu_items")
+}
+
+// An external product's credentials for calling API v1 itself, for the
+// organizations that have it on (lib/product-service.ts): OAuth client
+// credentials, separate from its sign-in client. Several at once, so one can
+// be replaced without downtime; revoked ones stop working at once.
+model ProductServiceCredential {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  name          String
+  /// The OAuth client_id (mts_…)
+  clientId      String              @unique @map("client_id")
+  /// Encrypted (lib/secrets.ts)
+  serviceClientSecret String        @map("client_secret")
+  scopes        String[]            @default([])
+  createdBy     String?             @map("created_by")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  lastUsedAt    DateTime?           @map("last_used_at")
+  revokedAt     DateTime?           @map("revoked_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("product_service_credentials")
 }
 
 enum OidcClientType {

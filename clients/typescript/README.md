@@ -24,6 +24,28 @@ Requests use [openapi-fetch](https://openapi-ts.dev/openapi-fetch/). A call neve
 
 To check webhook deliveries, use the `WebhookEvent` type with a [Standard Webhooks](https://www.standardwebhooks.com/) library (see `docs/API_ACCESS.md`).
 
+## For an external product
+
+An external product (docs/PRODUCT_INTEGRATION.md) calls as itself, with a service credential from the platform's Applications page instead of an API key. `createProductClient` gets the access tokens and renews them before they expire. Use it on the product's server only:
+
+```ts
+import { createProductClient } from '@multitenant/api-client';
+
+const platform = createProductClient({
+  baseUrl: 'https://app.example.com/api/v1',
+  tokenUrl: 'https://app.example.com/api/oidc/token',
+  clientId: process.env.MULTITENANT_CLIENT_ID!,      // mts_…
+  clientSecret: process.env.MULTITENANT_CLIENT_SECRET!,
+  scopes: ['lifecycle.report'],
+});
+
+// After answering organization.entitled with 202, once the organization is set up
+await platform.POST('/product-integrations/operations/{operationId}/result', {
+  params: { path: { operationId: event.data.operation.id } },
+  body: { generation: event.data.operation.generation, status: 'READY' },
+});
+```
+
 ## Using it
 
 It isn't published to a registry. Either:

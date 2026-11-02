@@ -10,7 +10,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { api, db, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp, type PlatformSeed, type TenantSeed } from './helpers.js';
+import { api, baseUrl, db, loginSession, seedPlatformUsers, seedTenant, startServer, stopServerAndCleanUp, type PlatformSeed, type TenantSeed } from './helpers.js';
 
 let A: TenantSeed;
 let P: PlatformSeed;
@@ -86,11 +86,22 @@ const launchpadEntry = async (applicationId: string) =>
   (await api('GET', '/tenant-applications/launchpad', { cookie: adminA })).json.applications.find((a: { id: string }) => a.id === applicationId);
 const hasSidebarSection = async (productId: string) =>
   (await api('GET', '/menu-items/portal/TENANT', { cookie: adminA })).json.menuItems.some((i: { path: string }) => i.path === `#app-${productId}`);
-const report = (p: { clientId: string; clientSecret: string }, operationId: string, body: unknown, secret = p.clientSecret) =>
-  api('POST', `/product-api/operations/${operationId}/result`, {
-    headers: { authorization: `Basic ${Buffer.from(`${p.clientId}:${secret}`).toString('base64')}` },
-    body,
-  });
+// The product reports with a service access token (lib/product-service.ts)
+const serviceTokens = new Map<string, string>();
+async function serviceToken(applicationId: string) {
+  if (!serviceTokens.has(applicationId)) {
+    const c = await api('POST', `/applications/${applicationId}/service-credentials`, { cookie: platform, body: { name: 'Lifecycle', scopes: ['lifecycle.report'] } });
+    const t = await fetch(`${baseUrl()}/oidc/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${Buffer.from(`${c.json.clientId}:${c.json.clientSecret}`).toString('base64')}` },
+      body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'lifecycle.report' }),
+    });
+    serviceTokens.set(applicationId, ((await t.json()) as { access_token: string }).access_token);
+  }
+  return serviceTokens.get(applicationId)!;
+}
+const report = async (p: { id: string }, operationId: string, body: unknown, token?: string) =>
+  api('POST', `/v1/product-integrations/operations/${operationId}/result`, { headers: { authorization: `Bearer ${token ?? (await serviceToken(p.id))}` }, body });
 
 test('turned on: organization.entitled arrives signed; a 2xx answer means set up', async () => {
   answer = 200;
@@ -140,8 +151,8 @@ test('202 then a report: Open and the sidebar wait until the product says it is 
   assert.equal(await hasSidebarSection(p.productId), false);
 
   // Only the product itself can report, on its own current operation
-  assert.equal((await report(p, op.id, { generation: 1, status: 'READY' }, 'wrong')).status, 401);
-  assert.equal((await api('POST', `/product-api/operations/${op.id}/result`, { body: { generation: 1, status: 'READY' } })).status, 401);
+  assert.equal((await report(p, op.id, { generation: 1, status: 'READY' }, 'not-a-token')).status, 401);
+  assert.equal((await api('POST', `/v1/product-integrations/operations/${op.id}/result`, { body: { generation: 1, status: 'READY' } })).status, 401);
   assert.equal((await report(p, 'op_nothing', { generation: 1, status: 'READY' })).status, 404);
   const other = await importProduct();
   assert.equal((await report(other, op.id, { generation: 1, status: 'READY' })).status, 404, "another product's operation");

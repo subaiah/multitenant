@@ -168,6 +168,8 @@ export const KIT_AUDIT_EVENTS = {
   'application.manifest_imported': p("Application's manifest imported", 'platform'),
   'application.lifecycle_updated': p("Application's lifecycle events changed", 'platform'),
   'application.organization_provisioning_reported': p('An application reported setting an organization up', 'platform'),
+  'application.service_credential_created': p('Service credential made for an application', 'platform'),
+  'application.service_credential_revoked': p("An application's service credential revoked", 'platform'),
   'menu.changed': p('Menu changed', 'platform'),
   'permission.created': p('Permission added', 'platform'),
   'permission.deleted': p('Permission removed', 'platform'),

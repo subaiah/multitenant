@@ -21,13 +21,14 @@ type Delegate = { name: string; findMany: Function; update: Function };
 // users' two-factor secrets and "Sign in with" secrets and keys in the control
 // plane; the rest in every ready tenant target (as the platform role, which
 // sees every tenant's rows)
-const CONTROL_FIELDS = new Set<SecretField>(['connectionString', 'platformTotpSecret', 'oidcClientSecret', 'privateJwk', 'callbackSigningSecret', 'previousCallbackSigningSecret']);
+const CONTROL_FIELDS = new Set<SecretField>(['connectionString', 'platformTotpSecret', 'oidcClientSecret', 'privateJwk', 'callbackSigningSecret', 'previousCallbackSigningSecret', 'serviceClientSecret']);
 
 async function delegatesFor(field: SecretField): Promise<Delegate[]> {
   if (field === 'connectionString') return [{ name: 'control plane', ...bind(controlDb.databaseConfig) }];
   if (field === 'platformTotpSecret') return [{ name: 'control plane', ...bind(controlDb.platformUser) }];
   if (field === 'oidcClientSecret') return [{ name: 'control plane', ...bind(controlDb.applicationSignIn) }];
   if (field === 'privateJwk') return [{ name: 'control plane', ...bind(controlDb.oidcSigningKey) }];
+  if (field === 'serviceClientSecret') return [{ name: 'control plane', ...bind(controlDb.productServiceCredential) }];
   if (field === 'previousCallbackSigningSecret') return [{ name: 'control plane', ...bind(controlDb.applicationRegistry) }];
   if (field === 'callbackSigningSecret') return [{ name: 'control plane', ...bind(controlDb.applicationRegistry) }];
   return (await listTargets(['READY'])).map(({ target }) => {

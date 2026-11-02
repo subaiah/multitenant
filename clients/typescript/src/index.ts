@@ -26,6 +26,7 @@ export type RoleAssignment = Schemas['RoleAssignment'];
 export type AuditEntry = Schemas['AuditEntry'];
 export type WebhookEvent = Schemas['WebhookEvent'];
 export type ApiError = Schemas['Error'];
+export type ProductIdentity = Schemas['ProductIdentity'];
 
 export interface Options extends Omit<ClientOptions, 'baseUrl'> {
   /** The API's v1 address, e.g. https://app.example.com/api/v1 */
@@ -41,3 +42,54 @@ export function createClient({ baseUrl, apiKey, headers, ...rest }: Options): Cl
     headers: { ...(headers as Record<string, string> | undefined), Authorization: `Bearer ${apiKey}` },
   });
 }
+
+export interface ProductOptions extends Omit<ClientOptions, 'baseUrl'> {
+  /** The API's v1 address, e.g. https://app.example.com/api/v1 */
+  baseUrl: string;
+  /** The platform's token endpoint, e.g. https://app.example.com/api/oidc/token */
+  tokenUrl: string;
+  /** A service credential from the platform's Applications page (mts_...) */
+  clientId: string;
+  clientSecret: string;
+  /** The scopes to ask for, e.g. ['organizations.read', 'lifecycle.report'] */
+  scopes: string[];
+}
+
+/**
+ * A client for an external product calling as itself (docs/PRODUCT_INTEGRATION.md).
+ * It gets service access tokens (OAuth client credentials) and renews each a
+ * minute before it expires. Use it from the product's server only: the
+ * secret must never reach a browser.
+ */
+export function createProductClient({ baseUrl, tokenUrl, clientId, clientSecret, scopes, ...rest }: ProductOptions): Client<paths> {
+  let token: { value: string; renewAt: number } | null = null;
+  let pending: Promise<string> | null = null;
+  const fetchToken = async (): Promise<string> => {
+    const res = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        authorization: `Basic ${btoa(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`)}`,
+      },
+      body: new URLSearchParams({ grant_type: 'client_credentials', scope: scopes.join(' ') }),
+    });
+    const body = (await res.json()) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };
+    if (!res.ok || !body.access_token) throw new Error(`Getting a service token failed: ${body.error_description ?? body.error ?? res.status}`);
+    token = { value: body.access_token, renewAt: Date.now() + ((body.expires_in ?? 600) - 60) * 1000 };
+    return token.value;
+  };
+  const current = () => {
+    if (token && Date.now() < token.renewAt) return Promise.resolve(token.value);
+    pending ??= fetchToken().finally(() => (pending = null));
+    return pending;
+  };
+  const client = createFetchClient<paths>({ ...rest, baseUrl: baseUrl.replace(/\/+$/, '') });
+  client.use({
+    async onRequest({ request }) {
+      request.headers.set('Authorization', `Bearer ${await current()}`);
+      return request;
+    },
+  });
+  return client;
+}
+
