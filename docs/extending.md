@@ -1,5 +1,7 @@
 # Building a product on the kit
 
+This guide is for a product built inside a fork of the kit. A separate application with its own server, such as AppForge, integrates as an external product instead: see [PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md).
+
 This repository is a starter kit. Each product forks it and adds its own features.
 
 The kit is the same in every product. It covers:

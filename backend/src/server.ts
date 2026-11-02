@@ -15,6 +15,7 @@ import { product } from './product/index.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { applicationRoutes } from './routes/applications.js';
 import { applicationSignInRoutes } from './routes/application-sign-in.js';
+import { applicationManifestRoutes } from './routes/application-manifest.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { activityRoutes } from './routes/activities.js';
@@ -268,6 +269,7 @@ async function registerRoutes() {
     // Application management
     await protectedRoutes.register(platformScoped(applicationRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationSignInRoutes), { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationManifestRoutes), { prefix: '/applications' });
 
     // Activity logs
     await protectedRoutes.register(activityRoutes, { prefix: '/activities' });

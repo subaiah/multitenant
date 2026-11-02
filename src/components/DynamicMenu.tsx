@@ -7,7 +7,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
 import {
   Activity, Boxes, Building2, ClipboardCheck, Code, CreditCard, Database, KeyRound, KeySquare, LayoutDashboard, LifeBuoy,
-  Network, Package, Rocket, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound, type LucideIcon,
+  ExternalLink, Network, Package, Rocket, ScrollText, Server, Settings, Shield, ShieldCheck, Users, UsersRound, type LucideIcon,
 } from 'lucide-react';
 import { useMenuItems, type MenuItem } from '../hooks/useMenuItems';
 import { useAuth } from '../contexts/AuthContext';
@@ -53,6 +53,18 @@ export default function DynamicMenu({ portal, onNavigate }: { portal: 'PLATFORM'
   if (error) return <p className="px-4 text-sm text-red-300" role="alert">The menu couldn't be loaded. Reload the page to try again.</p>;
 
   const link = (item: MenuItem) => {
+    // A page in an external product the organization uses (docs/PRODUCT_INTEGRATION.md)
+    if (item.external) {
+      const Icon = (item.icon && ICONS[item.icon]) || Package;
+      return (
+        <a key={item.id} href={item.path} target="_blank" rel="noopener" onClick={onNavigate}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors text-sidebar-ink hover:bg-sidebar-raised/60 hover:text-white">
+          <Icon size={18} strokeWidth={1.75} aria-hidden className="text-sidebar-muted" />
+          <span className="truncate flex-1">{item.label}</span>
+          <ExternalLink size={13} aria-label="Opens in a new tab" className="text-sidebar-muted shrink-0" />
+        </a>
+      );
+    }
     const Icon = (item.icon && ICONS[item.icon]) || LayoutDashboard;
     const active = item.path === current;
     return (

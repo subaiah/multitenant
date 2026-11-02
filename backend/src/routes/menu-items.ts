@@ -91,6 +91,14 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
       // A section (path "#…") with nothing left in it isn't shown
       .filter((item) => !item.path.startsWith('#') || item.children.length > 0);
     
+    // External products the organization has turned on: a section each, after
+    // Dashboard, with the pages from their manifests (docs/PRODUCT_INTEGRATION.md)
+    if (portal === 'TENANT' && tenantId) {
+      const products = await productSections(tenantId, granted);
+      const at = filteredItems.findIndex((i) => !i.path.startsWith('#')) + 1;
+      filteredItems.splice(at, 0, ...(products as unknown as typeof filteredItems));
+    }
+
     return { menuItems: filteredItems };
   });
 
@@ -388,3 +396,47 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     return { message: 'Menu items reordered successfully' };
   });
 };
+
+/** Menu sections for the external products an organization has on now, with the entries this person may use */
+async function productSections(tenantId: string, granted: Set<string>) {
+  const now = new Date();
+  const apps = await controlDb.applicationRegistry.findMany({
+    where: {
+      status: 'ACTIVE',
+      baseUrl: { not: null },
+      menuItems: { some: {} },
+      tenantApplications: { some: { tenantId, state: { in: ['ENABLED', 'TRIAL'] }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } },
+    },
+    include: { menuItems: { orderBy: { order: 'asc' } } },
+    orderBy: { name: 'asc' },
+  });
+  return apps
+    .map((app, n) => ({
+      id: `app:${app.id}`,
+      portal: 'TENANT' as const,
+      parentId: null,
+      label: app.name,
+      path: `#app-${app.key}`,
+      icon: 'Package',
+      permission: null,
+      order: n,
+      isActive: true,
+      children: app.menuItems
+        .filter((i) => !i.permission || permissionMatches(granted, i.permission))
+        .map((i) => ({
+          id: `app-item:${i.id}`,
+          portal: 'TENANT' as const,
+          parentId: `app:${app.id}`,
+          label: i.label,
+          // Opens in the product, which signs the person in with this account
+          path: `${app.baseUrl}${i.path}`,
+          external: true,
+          icon: i.icon,
+          permission: i.permission,
+          order: i.order,
+          isActive: true,
+        })),
+    }))
+    .filter((section) => section.children.length > 0);
+}
+

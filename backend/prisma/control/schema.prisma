@@ -283,12 +283,17 @@ model ApplicationRegistry {
   description String?
   version     String
   status      String   @default("ACTIVE")
+  /// Where an external product lives (its manifest's baseUrl, docs/PRODUCT_INTEGRATION.md)
+  baseUrl            String?   @map("base_url")
+  /// When its manifest was last imported
+  manifestImportedAt DateTime? @map("manifest_imported_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   tenantApplications TenantApplication[]
   permissions        Permission[]
   signIn             ApplicationSignIn?
+  menuItems          ApplicationMenuItem[]
 
   @@index([status])
   @@map("application_registries")
@@ -317,6 +322,25 @@ model ApplicationSignIn {
   application            ApplicationRegistry  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@map("application_sign_ins")
+}
+
+// An external product's pages in the tenant portal's sidebar, from its
+// manifest (docs/PRODUCT_INTEGRATION.md): shown to organizations that have it
+// turned on, to the people who hold the permission
+model ApplicationMenuItem {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  label         String
+  /// Relative to the application's baseUrl, starting with "/"
+  path          String
+  icon          String?
+  permission    String?
+  order         Int                 @default(0)
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("application_menu_items")
 }
 
 enum OidcClientType {
