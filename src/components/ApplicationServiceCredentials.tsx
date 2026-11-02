@@ -35,7 +35,9 @@ export default function ApplicationServiceCredentials({ applicationId, applicati
             {made && (
               <div className="space-y-2 p-4 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10">
                 <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Copy the secret for “{made.name}” now: it isn't shown again. Keep it on the application's server.</p>
+                <p className="text-xs text-amber-900/80 dark:text-amber-200/80">Client ID</p>
                 <CopyBox value={made.clientId} label="Service client ID" />
+                <p className="text-xs text-amber-900/80 dark:text-amber-200/80">Client secret</p>
                 <CopyBox value={made.clientSecret} label="Service client secret" />
               </div>
             )}
