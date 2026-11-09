@@ -327,6 +327,32 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       nextAfter: { type: 'integer', description: 'Where to continue from (also on the last page: poll with it for new events)' },
       hasMore: { type: 'boolean' },
     }) } },
+  { method: 'POST', path: '/product-integrations/organizations/:organizationId/notifications', operationId: 'sendProductNotification', tag: 'Products',
+    summary: 'Send one of the product’s declared notification types to people in an organization that has it on. Plain text, titled with the product’s name; links only to its own pages; the organization’s rules and people’s preferences apply.',
+    scope: 'notifications.send',
+    body: obj({
+      type: { type: 'string', description: 'One of the product’s declared notification types (manifest platformServices.notifications)' },
+      title: { type: 'string', minLength: 1, maxLength: 120 },
+      body: { type: 'string', maxLength: 1000, description: 'Plain text (never shown as HTML)' },
+      link: { type: 'string', maxLength: 2000, description: 'A path on the product (/deals/42) or a full address on its own host' },
+      to: obj({
+        subjects: { ...arrayOf({ type: 'string', description: '<organization id>.<user id>' }), maxItems: 500 },
+        groupIds: { ...arrayOf(uuid), maxItems: 50 },
+        permission: { type: 'string', description: 'Everyone holding this permission (one of the product’s own)' },
+      }, [], { description: 'At least one of subjects, groupIds or permission' }),
+    }, ['type', 'title', 'to']),
+    responses: { 202: obj({ accepted: { type: 'boolean' } }) } },
+  { method: 'POST', path: '/product-integrations/organizations/:organizationId/audit-events', operationId: 'writeProductAuditEvent', tag: 'Products',
+    summary: 'Write one of the product’s declared audit event types to an organization’s audit log. Recorded with the product as the actor (APPLICATION); a person it acted for as details.onBehalfOf.',
+    scope: 'audit.write',
+    body: obj({
+      type: { type: 'string', description: 'One of the product’s declared audit event types (manifest platformServices.auditEvents)' },
+      outcome: { type: 'string', enum: ['SUCCESS', 'FAILURE'], default: 'SUCCESS' },
+      onBehalfOf: { type: 'string', description: 'The person it acted for: <organization id>.<user id>' },
+      resource: obj({ type: { type: 'string', maxLength: 50 }, id: { type: 'string', maxLength: 200 }, label: { type: 'string', maxLength: 200 } }, ['type']),
+      details: { type: 'object', additionalProperties: true, description: 'At most 4000 characters as JSON' },
+    }, ['type']),
+    responses: { 201: obj({ seq: { type: 'integer', description: 'The entry’s position in the organization’s log' } }) } },
 ];
 
 const productErrors: Record<string, string> = {
@@ -335,7 +361,7 @@ const productErrors: Record<string, string> = {
   403: 'The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)',
   404: "Not found (another product's things are not found either)",
   409: 'A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)',
-  429: 'Too many requests',
+  429: 'Too many requests (RATE_LIMITED; see Retry-After)',
 };
 
 // ---------------------------------------------------------------------------

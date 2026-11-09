@@ -7,6 +7,8 @@ export const SERVICE_SCOPES = {
   'organizations.read': 'See the organizations that have the product turned on, and their setup status',
   'members.read': 'See the people and groups in those organizations',
   'lifecycle.report': 'Report the result of setting an organization up',
+  'notifications.send': 'Send its declared notifications to people in those organizations',
+  'audit.write': 'Write its declared events to those organizations’ audit logs',
 } as const;
 export type ServiceScope = keyof typeof SERVICE_SCOPES;
 export const isServiceScope = (s: string): s is ServiceScope => Object.prototype.hasOwnProperty.call(SERVICE_SCOPES, s);

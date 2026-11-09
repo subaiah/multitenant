@@ -88,7 +88,7 @@ export async function getProductOrganization(applicationId: string, tenantId: st
 }
 
 /** The organization's data, if the product may read its people now */
-async function readableOrganization(applicationId: string, tenantId: string) {
+export async function readableOrganization(applicationId: string, tenantId: string) {
   const e = await entitlementOf(applicationId, tenantId);
   if (!e) throw new AppError('No organization with that id has this product', 404, true, 'NOT_FOUND');
   if (!isActiveNow(e)) throw new AppError('This organization doesn’t have the product turned on now', 403, true, 'NOT_ENTITLED');

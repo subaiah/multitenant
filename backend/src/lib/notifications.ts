@@ -27,6 +27,7 @@ import { notificationEmail } from './email-templates.js';
 import { PLATFORM_CHAIN, onAudit, onAuditInTransaction, type AuditActor, type AuditContent } from './audit.js';
 import { KIT_NOTIFICATION_TYPES, type NotificationType, type NotifyEvent } from '../kit/notification-types.js';
 import { product } from '../product/index.js';
+import { hiddenProductTypes, productNotificationTypes, refreshProductCatalog } from './product-catalog.js';
 import { getEnhancedUserPermissions } from '../utils/authorization.js';
 import { permissionMatches } from '../utils/permissions.js';
 import type { SessionOwner } from './auth-planes.js';
@@ -40,7 +41,9 @@ export function notificationCatalog(): Record<string, NotificationType> {
   for (const key of Object.keys(own)) {
     if (key in KIT_NOTIFICATION_TYPES) throw new Error(`Product notification type "${key}" reuses a kit key`);
   }
-  return { ...KIT_NOTIFICATION_TYPES, ...own };
+  // External products' declared types (lib/product-catalog.ts); never a kit or embedded product key
+  const external = Object.fromEntries(Object.entries(productNotificationTypes()).filter(([k]) => !(k in KIT_NOTIFICATION_TYPES) && !(k in own)));
+  return { ...KIT_NOTIFICATION_TYPES, ...own, ...external };
 }
 
 export interface Channels {
@@ -310,6 +313,8 @@ async function recipients(chain: string, type: NotificationType, payload: EventP
 /** An EVENT row: notifications and emails for everyone it concerns, all or nothing. */
 async function fanOut(chain: string, row: OutboxRow) {
   const payload = row.payload as EventPayload;
+  // An external product's type may have been declared on another server since
+  if (!notificationCatalog()[payload.type]) await refreshProductCatalog(true);
   const type = notificationCatalog()[payload.type];
   if (!type) return; // the type was removed since
   const tenant = chain === PLATFORM_CHAIN ? null : await controlDb.tenant.findUnique({ where: { id: chain }, select: { name: true } });
@@ -322,7 +327,8 @@ async function fanOut(chain: string, row: OutboxRow) {
   // Email links: the organization's own domain once verified (lib/domains.ts)
   const origin = await appOriginForTenant(chain === PLATFORM_CHAIN ? null : chain);
   const settingsLink = `${origin}${chain === PLATFORM_CHAIN ? '/platform/notifications' : '/notifications'}?tab=preferences`;
-  const link = content.link ? `${origin}${content.link}` : null;
+  // Absolute links: an external product's own pages (checked when it sent the notification)
+  const link = content.link ? (/^https?:\/\//.test(content.link) ? content.link : `${origin}${content.link}`) : null;
 
   if (chain === PLATFORM_CHAIN) {
     const prefs = await controlDb.platformNotificationPreference.findMany({ where: { userId: { in: ids }, type: payload.type } });
@@ -466,8 +472,10 @@ export async function preferencesFor(owner: SessionOwner, userId: string): Promi
     : await (await dbForTenant(owner.tenantId)).user.findFirst({ where: { id: userId, tenantId: owner.tenantId }, select: { userType: true } });
   const granted = new Set(user ? (await getEnhancedUserPermissions(userId, owner === 'platform' ? undefined : owner.tenantId, user.userType)).permissions : []);
   const probe: NotifyEvent = { type: '', occurredAt: new Date(0).toISOString(), actor: { type: 'SYSTEM' }, resource: {}, details: {} };
-  const types = Object.entries(notificationCatalog()).filter(([, t]) => {
-    if (t.scope !== scope) return false;
+  // Products' types only for those the organization has on (lib/product-catalog.ts)
+  const hidden = owner === 'platform' ? new Set<string>() : await hiddenProductTypes(owner.tenantId);
+  const types = Object.entries(notificationCatalog()).filter(([key, t]) => {
+    if (t.scope !== scope || hidden.has(key)) return false;
     const permission = t.audience(probe).permission;
     return !permission || permissionMatches(granted, permission);
   });

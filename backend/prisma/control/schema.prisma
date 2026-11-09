@@ -296,6 +296,10 @@ model ApplicationRegistry {
   previousCallbackSecretExpiresAt DateTime? @map("previous_callback_secret_expires_at")
   /// Whether it deletes an organization's data when told it left
   deletesDataOnDeprovision Boolean @default(false) @map("deletes_data_on_deprovision")
+  /// specific (one domain) or generic (a capability others use); manifest v2 (docs/hub/MANIFEST_V2.md)
+  kind             String  @default("specific")
+  /// The manifest version it was last imported with
+  manifestVersion  Int     @default(1) @map("manifest_version")
   /// Also tell it when people in an organization change (lib/product-user-events.ts)
   userEvents       Boolean @default(false) @map("user_events")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -309,6 +313,7 @@ model ApplicationRegistry {
   serviceCredentials ProductServiceCredential[]
   memberStates       ProductMemberState[]
   logoutDeliveries   OidcLogoutDelivery[]
+  declaredTypes      ProductDeclaredType[]
 
   @@index([status])
   @@map("application_registries")
@@ -662,6 +667,8 @@ enum AuditActorType {
   ANONYMOUS
   /// An API key (lib/api-keys.ts)
   API_KEY
+  /// An external product, with a service token (lib/product-services.ts)
+  APPLICATION
 }
 
 // The latest entry of each audit chain ("platform" or a tenant id), kept
@@ -1024,4 +1031,31 @@ model OidcLogoutDelivery {
   @@index([status, nextAttemptAt])
   @@index([applicationId, createdAt])
   @@map("oidc_logout_deliveries")
+}
+
+/// Notification and audit event types an external product declares in its
+/// manifest (platformServices; lib/product-catalog.ts). Kept when they leave
+/// the manifest (retired), so organizations' rules and saved webhooks still
+/// make sense.
+model ProductDeclaredType {
+  id             String              @id @default(uuid())
+  applicationId  String              @map("application_id")
+  /// notification or audit
+  kind           String
+  /// <productId>.<name>, unique across the platform
+  type           String              @unique
+  label          String
+  description    String?
+  defaultInApp   Boolean             @default(true) @map("default_in_app")
+  defaultEmail   Boolean             @default(false) @map("default_email")
+  /// Order in the manifest
+  position       Int                 @default(0)
+  retiredAt      DateTime?           @map("retired_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  application    ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("product_declared_types")
 }

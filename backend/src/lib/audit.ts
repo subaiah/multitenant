@@ -23,6 +23,7 @@
  * Recording never fails the action it records: the action has already
  * happened, so a failure to record is logged loudly instead.
  */
+import { productAuditEvents } from './product-catalog.js';
 import crypto from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
@@ -53,7 +54,9 @@ export function auditCatalog(): Record<string, AuditEventDefinition> {
   for (const key of Object.keys(productEvents)) {
     if (key in KIT_AUDIT_EVENTS) throw new Error(`Product audit event "${key}" reuses a kit event key`);
   }
-  return { ...KIT_AUDIT_EVENTS, ...productEvents };
+  // External products' declared types (lib/product-catalog.ts); never a kit or embedded product key
+  const external = Object.fromEntries(Object.entries(productAuditEvents()).filter(([k]) => !(k in KIT_AUDIT_EVENTS) && !(k in productEvents)));
+  return { ...KIT_AUDIT_EVENTS, ...productEvents, ...external };
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +64,7 @@ export function auditCatalog(): Record<string, AuditEventDefinition> {
 // ---------------------------------------------------------------------------
 
 export type AuditOutcome = 'SUCCESS' | 'FAILURE';
-export type AuditActorType = 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY';
+export type AuditActorType = 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY' | 'APPLICATION';
 
 export interface AuditActor {
   type: AuditActorType;

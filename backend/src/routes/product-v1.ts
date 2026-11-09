@@ -4,13 +4,14 @@
  * declares the scope it needs (config.serviceScope; null: any valid token).
  * Organizations are checked against current entitlements on every call.
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { authenticateService } from '../lib/product-service.js';
 import { reportOperationResult } from '../lib/product-lifecycle.js';
 import { recordAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
+import { RateLimited, sendProductNotification, writeProductAuditEvent } from '../lib/product-services.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
@@ -89,6 +90,22 @@ export async function productV1Routes(fastify: FastifyInstance) {
   fastify.get('/product-integrations/events', { config: { serviceScope: 'organizations.read' } }, async (request) => {
     const q = eventsQuery.parse(request.query);
     return listProductEvents(request.service!.applicationId, q, q.limit);
+  });
+
+  // The platform's own services (docs/hub/HUB_GAPS.md G3): the product's declared notification and audit event types
+  const throttled = (reply: FastifyReply, err: unknown) => {
+    if (err instanceof RateLimited) reply.header('Retry-After', String(err.retryAfter));
+    throw err;
+  };
+  fastify.post('/product-integrations/organizations/:organizationId/notifications', { config: { serviceScope: 'notifications.send' }, schema: { params: orgParams } }, async (request, reply) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const sent = await sendProductNotification(request.service!, organizationId, request.body).catch((err) => throttled(reply, err));
+    return reply.status(202).send(sent);
+  });
+  fastify.post('/product-integrations/organizations/:organizationId/audit-events', { config: { serviceScope: 'audit.write' }, schema: { params: orgParams } }, async (request, reply) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const written = await writeProductAuditEvent(request.service!, organizationId, request.body, { ip: request.ip, requestId: request.id }).catch((err) => throttled(reply, err));
+    return reply.status(201).send(written);
   });
 
   // The result of setting an organization up, after answering organization.entitled with 202 (lib/product-lifecycle.ts)

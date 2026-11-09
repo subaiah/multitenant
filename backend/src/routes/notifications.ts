@@ -4,6 +4,7 @@
  *   /notifications          your own inbox and preferences (tenant and platform users)
  *   /notification-settings  the organization's rules and email delivery (notifications:manage)
  */
+import { hiddenProductTypes } from '../lib/product-catalog.js';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { SessionOwner } from '../lib/auth-planes.js';
@@ -88,8 +89,10 @@ export const notificationSettingRoutes: FastifyPluginAsync = async (fastify) => 
       request.db.notificationOutbox.count({ where: { tenantId, kind: 'EMAIL', status: 'FAILED' } }),
       request.db.notificationOutbox.count({ where: { tenantId, status: { in: ['PENDING', 'PROCESSING'] } } }),
     ]);
+    // Products' types only for those the organization has on (lib/product-catalog.ts)
+    const hidden = await hiddenProductTypes(tenantId);
     const types = Object.entries(notificationCatalog())
-      .filter(([, t]) => t.scope === 'tenant')
+      .filter(([key, t]) => t.scope === 'tenant' && !hidden.has(key))
       .map(([key, t]) => {
         const s = settings.find((x) => x.type === key);
         return {
@@ -114,7 +117,8 @@ export const notificationSettingRoutes: FastifyPluginAsync = async (fastify) => 
   }, async (request) => {
     const { settings } = z.object({ settings: z.record(z.string(), settingSchema) }).parse(request.body);
     const tenantId = request.tenant.id;
-    const catalog = notificationCatalog();
+    const hidden = await hiddenProductTypes(tenantId);
+    const catalog = Object.fromEntries(Object.entries(notificationCatalog()).filter(([key]) => !hidden.has(key)));
     for (const [type, s] of Object.entries(settings)) {
       const def = catalog[type];
       if (def?.scope !== 'tenant') throw new AppError(`Unknown notification type "${type}"`, 400);

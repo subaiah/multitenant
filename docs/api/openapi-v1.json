@@ -2470,7 +2470,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2596,7 +2596,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2736,7 +2736,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2837,7 +2837,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3016,7 +3016,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3165,7 +3165,7 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3296,7 +3296,345 @@
             }
           },
           "429": {
-            "description": "Too many requests",
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/notifications": {
+      "post": {
+        "operationId": "sendProductNotification",
+        "tags": [
+          "Products"
+        ],
+        "summary": "Send one of the product’s declared notification types to people in an organization that has it on. Plain text, titled with the product’s name; links only to its own pages; the organization’s rules and people’s preferences apply.",
+        "description": "For external products, with a service access token that has the `notifications.send` scope.",
+        "security": [
+          {
+            "productToken": [
+              "notifications.send"
+            ]
+          }
+        ],
+        "x-scope": "notifications.send",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "One of the product’s declared notification types (manifest platformServices.notifications)"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "Plain text (never shown as HTML)"
+                  },
+                  "link": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "A path on the product (/deals/42) or a full address on its own host"
+                  },
+                  "to": {
+                    "type": "object",
+                    "properties": {
+                      "subjects": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "<organization id>.<user id>"
+                        },
+                        "maxItems": 500
+                      },
+                      "groupIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "maxItems": 50
+                      },
+                      "permission": {
+                        "type": "string",
+                        "description": "Everyone holding this permission (one of the product’s own)"
+                      }
+                    },
+                    "required": [],
+                    "description": "At least one of subjects, groupIds or permission"
+                  }
+                },
+                "required": [
+                  "type",
+                  "title",
+                  "to"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/audit-events": {
+      "post": {
+        "operationId": "writeProductAuditEvent",
+        "tags": [
+          "Products"
+        ],
+        "summary": "Write one of the product’s declared audit event types to an organization’s audit log. Recorded with the product as the actor (APPLICATION); a person it acted for as details.onBehalfOf.",
+        "description": "For external products, with a service access token that has the `audit.write` scope.",
+        "security": [
+          {
+            "productToken": [
+              "audit.write"
+            ]
+          }
+        ],
+        "x-scope": "audit.write",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "One of the product’s declared audit event types (manifest platformServices.auditEvents)"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "SUCCESS",
+                      "FAILURE"
+                    ],
+                    "default": "SUCCESS"
+                  },
+                  "onBehalfOf": {
+                    "type": "string",
+                    "description": "The person it acted for: <organization id>.<user id>"
+                  },
+                  "resource": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "maxLength": 50
+                      },
+                      "id": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "label": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  },
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "At most 4000 characters as JSON"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "description": "The entry’s position in the organization’s log"
+                    }
+                  },
+                  "required": [
+                    "seq"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3372,7 +3710,9 @@
             "scopes": {
               "organizations.read": "See the organizations that have the product turned on, and their setup status",
               "members.read": "See the people and groups in those organizations",
-              "lifecycle.report": "Report the result of setting an organization up"
+              "lifecycle.report": "Report the result of setting an organization up",
+              "notifications.send": "Send its declared notifications to people in those organizations",
+              "audit.write": "Write its declared events to those organizations’ audit logs"
             }
           }
         }

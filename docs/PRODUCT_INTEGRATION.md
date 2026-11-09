@@ -36,6 +36,8 @@ There are two ways to build on the platform:
 | **What organizations see**: each organization's administrators see what the application's server can learn about their people | Available | [What organizations see](#what-organizations-see) |
 | **Back-Channel Logout** and a configurable **access token lifetime** | Available | [Ending access at once](#ending-access-at-once) |
 | **Integrations page** for platform staff | Available | [The Integrations page](#the-integrations-page) |
+| **Manifest version 2**: `kind` and declared notification and audit event types (more v2 fields to come) | Available (partly) | [hub/MANIFEST_V2.md](hub/MANIFEST_V2.md) |
+| **The platform's services**: send notifications to an organization's people, write to its audit log | Available | [Using the platform's services](#using-the-platforms-services) |
 
 ## Rules
 
@@ -307,6 +309,8 @@ An application can have several credentials at once.
 | `organizations.read` | Seeing the organizations that have the application, their setup status, and the application's lifecycle events |
 | `members.read` | Seeing the people and groups in those organizations, while they have it on |
 | `lifecycle.report` | [Reporting setup results](#answering-and-setting-the-organization-up) |
+| `notifications.send` | [Sending its declared notifications](#notifications) to people in those organizations |
+| `audit.write` | [Writing its declared audit events](#audit-events) to those organizations' audit logs |
 
 ### Getting a token
 
@@ -403,6 +407,72 @@ Nothing secret (passwords, two-factor settings) is ever included.
 - `nextAfter`: pass it as `after` for the next page. It's given on the last page too, so keep it and poll from it to catch any event the application missed;
 - `hasMore`.
 
+## Using the platform's services
+
+An application can use two of the platform's own services, so an organization has one notification bell and one audit trail across all its applications. Both need **manifest version 2** with the types declared under `platformServices` ([hub/MANIFEST_V2.md](hub/MANIFEST_V2.md)), and work only for organizations that have the application turned on (`404` for others, `403 NOT_ENTITLED` while it's off).
+
+```json
+"manifestVersion": 2,
+"kind": "generic",
+"platformServices": {
+  "notifications": [
+    { "type": "hearth.mention", "label": "Someone mentioned you", "description": "In a conversation", "defaultChannels": ["in_app", "email"] }
+  ],
+  "auditEvents": [
+    { "type": "hearth.channel.archived", "label": "Channel archived" }
+  ]
+}
+```
+
+- **Type names** start with the `productId` and a dot, then lowercase letters, digits, `_` and `-` in dot-separated parts. Never one of the platform's own types.
+- **Declared types appear only where they apply.** An organization sees an application's types in its notification rules, in people's preferences, in the audit log filter and as webhook event types only while it has that application on. Webhooks mean an organization can send an application's audit events to its own systems.
+- **A type left out of a later manifest is retired, not removed.** It stays known, so old entries and saved rules still read right, but can't be sent or written. Putting it back brings it back. A version 1 manifest leaves declared types alone.
+
+### Notifications
+
+`POST /api/v1/product-integrations/organizations/{organizationId}/notifications`, scope `notifications.send`:
+
+```json
+{
+  "type": "hearth.mention",
+  "title": "Priya mentioned you",
+  "body": "In #launch: can you check the copy?",
+  "link": "/channels/launch",
+  "to": { "subjects": ["<organization id>.<user id>"] }
+}
+```
+
+The answer is `202`. The notification then reaches each person's bell, and their email if the organization's rules and their preferences allow it.
+
+Notifications go out under the platform's name, so they're held to these rules:
+
+- **Plain text.** `title` (up to 120 characters) and `body` (up to 1000) are never shown as HTML.
+- **Always titled with the application's name**, e.g. "Hearth: Priya mentioned you".
+- **Links only to the application's own pages.** Use a path (`/channels/launch`) or a full address on the same host as `baseUrl`. Anything else is refused (`INVALID_LINK`).
+- **Recipients in the organization.** Use `to.subjects` (up to 500, as in the ID token), `to.groupIds` (up to 50, from the members API), or `to.permission`: everyone holding one of the application's own permissions. People outside the organization are refused (`UNKNOWN_RECIPIENTS`); people who aren't active are skipped.
+- **The organization's rules and people's preferences apply.** An organization can turn a type off, or limit its channels.
+- **At most 120 a minute** per service credential (`429 RATE_LIMITED`, with `Retry-After`).
+
+### Audit events
+
+`POST /api/v1/product-integrations/organizations/{organizationId}/audit-events`, scope `audit.write`:
+
+```json
+{
+  "type": "hearth.channel.archived",
+  "onBehalfOf": "<organization id>.<user id>",
+  "resource": { "type": "channel", "id": "c_123", "label": "#launch" },
+  "details": { "reason": "inactive" }
+}
+```
+
+The answer is `201`, with `seq`, the entry's position in the organization's log.
+
+- **The entry is the application's own.** It's recorded with actor type `APPLICATION` and the `productId` as the actor, and its category is `application`. A person the application says it acted for goes in `details.onBehalfOf` (subject and email), never as the actor. It's the application's report, kept apart from what the platform records itself.
+- It goes into the same tamper-evident chain as everything else, so the organization's **Verify** still covers it.
+- `details` can be up to 4000 characters as JSON. `outcome` is `SUCCESS` (the default) or `FAILURE`.
+- **At most 600 a minute** per service credential.
+
 ## Ending access at once
 
 Three things together mean a person who loses access loses it in the application too, without waiting:
@@ -428,6 +498,7 @@ Products that need attention come first: a failed setup, events given up or wait
 - [ ] Service credentials (if used) ask only for the scopes needed, live on the server, and can be replaced without downtime.
 - [ ] People read from the platform are keyed by `subject`; user events (or a periodic full pass) catch group, role and removal changes.
 - [ ] User events, if taken, end a person's sessions on `user.deactivated` and `user.removed`, and unknown event types are answered `2xx`.
+- [ ] Notifications and audit events, if used, are declared in the manifest (version 2), and links in notifications point to the application's own pages.
 - [ ] A back-channel logout address is registered; its handler verifies the logout token (signature, `iss`, `aud`, `exp`, `events`), ends that person's sessions and answers `200`.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.

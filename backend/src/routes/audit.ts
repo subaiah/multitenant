@@ -4,6 +4,7 @@
  *   tenant   /audit            the current tenant's log
  *   platform /platform-audit   the platform's log, and checks/archiving of any log
  */
+import { hiddenProductTypes } from '../lib/product-catalog.js';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
@@ -80,7 +81,11 @@ export const auditRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/events', {
     config: { permission: 'audit:read' },
     schema: { tags: ['audit'], summary: 'Kinds of audit entries (for filters)' },
-  }, async () => eventsFor('tenant'));
+  }, async (request) => {
+    // Products' types only for those the organization has on (lib/product-catalog.ts)
+    const hidden = await hiddenProductTypes(request.tenant.id);
+    return eventsFor('tenant').filter((e) => !hidden.has(e.key));
+  });
 
   fastify.get('/verify', {
     config: { permission: 'audit:read' },
