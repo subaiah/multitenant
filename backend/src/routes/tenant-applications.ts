@@ -7,6 +7,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { organizationConnections, setConnectionBlocked } from '../lib/app-connections.js';
+import { assertCanTurnOff, assertCanTurnOn, dependenciesOf, isOn, lockEntitlements } from '../lib/app-dependencies.js';
 import { pageOf } from '../lib/pagination.js';
 import { issuer } from '../lib/oidc/provider.js';
 import { forgetApplicationPermissions } from '../lib/application-permissions.js';
@@ -128,8 +129,9 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // What each can learn about the organization's people (lib/application-fields.ts)
     const access = await dataAccessOf(tenantApplications.map((t) => t.applicationId));
+    const deps = await dependenciesOf(tenantApplications.map((t) => t.applicationId));
     return {
-      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId) } })),
+      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId), ...deps.get(t.applicationId) } })),
       pagination: {
         page: paging.page,
         limit: paging.limit,
@@ -221,6 +223,9 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // With the product told, if it takes lifecycle events (lib/product-lifecycle.ts)
     const tenantApplication = await controlDb.$transaction(async (tx) => {
+      // What it requires must be on already (lib/app-dependencies.ts)
+      await lockEntitlements(tx, tenantId);
+      if (isOn({ state: data.state, validTo: data.validTo ? new Date(data.validTo) : null })) await assertCanTurnOn(tx, tenantId, [data.applicationId]);
       const created = await tx.tenantApplication.create({
         data: {
           tenantId,
@@ -280,8 +285,13 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateTenantApplicationSchema.parse(request.body);
     
     const tenantApplication = await controlDb.$transaction(async (tx) => {
+      await lockEntitlements(tx, tenantId);
       const before = await tx.tenantApplication.findFirst({ where: { id, tenantId } });
       if (!before) throw new AppError('Entitlement not found', 404);
+      // Turning on needs what it requires; turning off, nothing on that requires it (lib/app-dependencies.ts)
+      const after = { state: data.state ?? before.state, validTo: data.validTo ? new Date(data.validTo) : before.validTo };
+      if (!isOn(before) && isOn(after)) await assertCanTurnOn(tx, tenantId, [before.applicationId]);
+      if (isOn(before) && !isOn(after)) await assertCanTurnOff(tx, tenantId, [before.applicationId]);
       const updated = await tx.tenantApplication.update({
         where: { id, tenantId },
         data: {
@@ -330,6 +340,10 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     const tenantApplication = await controlDb.$transaction(async (tx) => {
+      await lockEntitlements(tx, tenantId);
+      const before = await tx.tenantApplication.findFirst({ where: { id, tenantId } });
+      if (!before) throw new AppError('Entitlement not found', 404);
+      if (isOn(before)) await assertCanTurnOff(tx, tenantId, [before.applicationId]);
       const removed = await tx.tenantApplication.delete({ where: { id, tenantId }, include: { application: { select: { name: true } } } });
       await entitlementChanged(tx, removed, null);
       return removed;
@@ -413,5 +427,70 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
     return { blocked: body.blocked, changed };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bundles: named sets of applications turned on together (platform-defined)
+  // ---------------------------------------------------------------------------
+
+  fastify.get('/bundles', {
+    config: { permission: 'applications:read' },
+    schema: { tags: ['tenant-applications'], summary: 'Bundles the organization can turn on, and which of their applications it has on' },
+  }, async (request) => {
+    const tenantId = request.tenant.id;
+    const bundles = await controlDb.bundle.findMany({
+      where: { active: true },
+      include: { applications: { orderBy: { position: 'asc' }, include: { application: { select: { id: true, key: true, name: true, status: true } } } } },
+      orderBy: { name: 'asc' },
+    });
+    const on = new Set((await controlDb.tenantApplication.findMany({ where: { tenantId } })).filter((e) => isOn(e)).map((e) => e.applicationId));
+    return {
+      bundles: bundles.map((b) => ({
+        id: b.id, key: b.key, name: b.name, description: b.description,
+        applications: b.applications.map((x) => ({ ...x.application, on: on.has(x.application.id) })),
+      })),
+    };
+  });
+
+  fastify.post('/bundles/:bundleId', {
+    config: { permission: 'applications:manage' },
+    schema: { tags: ['tenant-applications'], summary: 'Turn on every application in a bundle the organization doesn’t have on yet', params: { type: 'object', required: ['bundleId'], properties: { bundleId: { type: 'string', format: 'uuid' } } } },
+  }, async (request, reply) => {
+    const { bundleId } = request.params as { bundleId: string };
+    const tenantId = request.tenant.id;
+    const bundle = await controlDb.bundle.findFirst({
+      where: { id: bundleId, active: true },
+      include: { applications: { orderBy: { position: 'asc' }, include: { application: { select: { id: true, name: true, status: true } } } } },
+    });
+    if (!bundle) throw new AppError('Bundle not found', 404);
+    const unavailable = bundle.applications.filter((x) => x.application.status !== 'ACTIVE').map((x) => x.application.name);
+    if (unavailable.length) throw new AppError(`Not available now: ${unavailable.join(', ')}`, 409, true, 'BUNDLE_UNAVAILABLE');
+
+    const turnedOn = await controlDb.$transaction(async (tx) => {
+      await lockEntitlements(tx, tenantId);
+      const existing = new Map((await tx.tenantApplication.findMany({ where: { tenantId, applicationId: { in: bundle.applications.map((x) => x.applicationId) } } })).map((e) => [e.applicationId, e]));
+      const toTurnOn = bundle.applications.filter((x) => !isOn(existing.get(x.applicationId)));
+      // Together: an application in the bundle may need another in it
+      await assertCanTurnOn(tx, tenantId, toTurnOn.map((x) => x.applicationId));
+      const done: { id: string; name: string }[] = [];
+      for (const x of toTurnOn) {
+        const before = existing.get(x.applicationId) ?? null;
+        const after = before
+          ? await tx.tenantApplication.update({ where: { id: before.id }, data: { state: 'ENABLED', validTo: null } })
+          : await tx.tenantApplication.create({ data: { tenantId, applicationId: x.applicationId, state: 'ENABLED', validFrom: new Date() } });
+        await entitlementChanged(tx, before, after);
+        done.push({ id: x.applicationId, name: x.application.name });
+      }
+      return done;
+    });
+    kickLifecycleEvents();
+    for (const app of turnedOn) {
+      await audit(request, 'entitlement.updated', { resource: { type: 'application', id: app.id, label: app.name }, changes: { enabled: [false, true] }, details: { bundle: bundle.key } });
+    }
+    return reply.status(turnedOn.length ? 201 : 200).send({
+      bundle: { id: bundle.id, name: bundle.name },
+      turnedOn: turnedOn.map((a) => a.name),
+      alreadyOn: bundle.applications.filter((x) => !turnedOn.some((t) => t.id === x.applicationId)).map((x) => x.application.name),
+    });
   });
 };

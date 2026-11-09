@@ -10,6 +10,7 @@ import { invalidateApi } from '../lib/query';
 import ApplicationSignIn from '../components/ApplicationSignIn';
 import ApplicationLifecycle from '../components/ApplicationLifecycle';
 import ApplicationServiceCredentials from '../components/ApplicationServiceCredentials';
+import BundlesManager from '../components/BundlesManager';
 
 interface Application {
   id: string;
@@ -354,6 +355,8 @@ export default function ApplicationsManagement() {
           )}
         </div>
       </div>
+
+      {canManage && <BundlesManager applications={applications} />}
 
       {/* Create Application Modal */}
       {showCreateModal && (

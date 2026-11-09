@@ -39,6 +39,7 @@ There are two ways to build on the platform:
 | **Manifest version 2**: `kind` and declared notification and audit event types (more v2 fields to come) | Available (partly) | [hub/MANIFEST_V2.md](hub/MANIFEST_V2.md) |
 | **The platform's services**: send notifications to an organization's people, write to its audit log | Available | [Using the platform's services](#using-the-platforms-services) |
 | **Calling other applications**, as itself or on behalf of the person using it; organizations see and block connections | Available | [Calling other applications](#calling-other-applications) |
+| **Dependencies and bundles**: what an application requires or works with; sets of applications turned on together | Available | [Dependencies and bundles](#dependencies-and-bundles) |
 
 ## Rules
 
@@ -577,6 +578,32 @@ On **Application Entitlements**, **Connections between applications** lists ever
 - how often the connection was used.
 
 Connections are allowed by default. Administrators (`applications:manage`) can **Block** one, which stops new tokens at once, and **Allow** it again. Both go into the audit log. Platform staff see each application's connections and use on the **Integrations** page.
+
+## Dependencies and bundles
+
+With manifest version 2, an application says which other applications it **requires** and which it **works with**:
+
+```json
+"requires": [
+  { "productId": "hearth", "reason": "Conversations on deals" }
+],
+"integratesWith": [
+  { "productId": "docs", "reason": "Attach documents to deals" }
+]
+```
+
+- **`requires`** (up to 10) is enforced for each organization:
+  - Turning the application on needs everything it requires already on. Otherwise it's refused, naming what's missing and why (`409 MISSING_DEPENDENCY`, with `details.missing`). The platform **never turns a required application on by itself**, because that may change what the organization pays.
+  - Turning off a required application is refused while an application that requires it is on (`409 REQUIRED_BY`, with `details.requiredBy`). That includes disabling, ending and removing it. Turn the dependant off first.
+- **`integratesWith`** (up to 20) is informational. Both kinds are shown to administrators in the catalogue and on Application Entitlements, each with its reason; required ones not on yet are marked.
+- **An application that isn't registered yet** can still be named. The import gives a warning (`dependencies.notRegisteredYet`), and turning on an application that requires it is refused until it exists.
+- **A requirement added later** doesn't turn anything off for organizations that already have the application. The Integrations page lists how many organizations have it without something it requires.
+- **`kind`** (`specific` or `generic`) is shown in the catalogue.
+
+**Bundles** are named sets of applications organizations turn on together, such as a "Sales suite" of CRMForge, Hearth and Docs:
+- Platform staff make them on the Applications page (**Bundles**): at least two applications, and a bundle can be hidden from organizations without deleting it.
+- Organizations turn one on from Application Entitlements (**Bundles → Turn on**). Everything in it that they don't have on yet is turned on in one step, and requirements are checked across the whole set, so a bundle can hold what its applications need.
+- It's all or nothing: if something is still missing, nothing is turned on.
 
 ## Ending access at once
 

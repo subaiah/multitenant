@@ -318,6 +318,8 @@ model ApplicationRegistry {
   declaredTypes      ProductDeclaredType[]
   apiScopes          ProductApiScope[]
   consumedScopes     ProductConsumedScope[]
+  dependencies       ProductDependency[]
+  bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
 
@@ -1121,4 +1123,52 @@ model AppConnectionState {
   @@id([tenantId, callerApplicationId, targetApplicationId])
   @@index([tenantId])
   @@map("app_connection_states")
+}
+
+/// Another application this one needs (requires) or works with
+/// (integratesWith); manifest v2 (lib/app-dependencies.ts). By product id,
+/// because the other application may be registered later. Replaced on import.
+model ProductDependency {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  /// requires or integrates
+  kind          String
+  /// The other application's productId
+  productKey    String              @map("product_key")
+  reason        String
+  position      Int                 @default(0)
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, productKey])
+  @@index([productKey])
+  @@map("product_dependencies")
+}
+
+/// A named set of applications organizations turn on together, defined by
+/// platform staff (e.g. "Sales suite")
+model Bundle {
+  id           String              @id @default(uuid())
+  key          String              @unique
+  name         String
+  description  String?
+  active       Boolean             @default(true)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  applications BundleApplication[]
+
+  @@map("bundles")
+}
+
+model BundleApplication {
+  bundleId      String              @map("bundle_id")
+  applicationId String              @map("application_id")
+  position      Int                 @default(0)
+
+  bundle        Bundle              @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([bundleId, applicationId])
+  @@map("bundle_applications")
 }

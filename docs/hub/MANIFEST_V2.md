@@ -1,6 +1,6 @@
 # Manifest version 2 (proposal)
 
-**Status:** Partly implemented: `kind` and `platformServices` (10 Nov 2026), `api` and `consumes` (11 Nov 2026). The rest is a proposal.
+**Status:** Partly implemented: `kind` and `platformServices` (10 Nov 2026), `api` and `consumes` (11 Nov 2026), `requires` and `integratesWith` (12 Nov 2026). The rest is a proposal.
 **Date:** 9 Nov 2026
 **Builds on:** manifest v1 in [PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#the-manifest)
 
@@ -13,10 +13,11 @@ Version 2 adds what an application needs to work **with other applications** in 
 | `manifestVersion: 2`, `kind` | Implemented |
 | `platformServices.notifications`, `platformServices.auditEvents` | Implemented, with `notifications.send` and `audit.write` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#using-the-platforms-services)) |
 | `api` (scopes, openApiUrl), `consumes` | Implemented, with application-to-application tokens ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#calling-other-applications)) |
-| `requires`, `integratesWith`, `embeds`, `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
+| `requires`, `integratesWith` | Implemented: enforced when organizations turn applications on and off, never turned on automatically; plus bundles ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#dependencies-and-bundles)) |
+| `embeds`, `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
 
 Also implemented:
-- A version 1 manifest with a version 2 field is refused (`kind: needs "manifestVersion": 2`), for the same reason.
+- A version 1 manifest with any version 2 field, supported or not yet, is refused (`kind: needs "manifestVersion": 2`), for the same reason.
 - Declared types keep the manifest's order.
 - A declared type can't be one of the platform's own types, even for a product whose id matches a platform prefix (e.g. `auth`).
 
@@ -155,7 +156,7 @@ Also implemented:
 | Field | Required | Rules |
 | --- | --- | --- |
 | `kind` | No (default `specific`) | `specific` or `generic`. Shown in the catalogue; generic applications can be offered as add-ons and in bundles. |
-| `requires` | No | Up to 10 `{ productId, reason }`. Turning this application on needs these on too: the platform turns them on with it (if the plan allows) or refuses with the reason. Turning off a required application is refused while a dependant is on. |
+| `requires` | No | Up to 10 `{ productId, reason }`. Turning this application on needs these on already (or in the same bundle); otherwise refused with the reason. They're never turned on automatically (until per-application billing, G6). Turning off a required application is refused while a dependant is on. |
 | `integratesWith` | No | Up to 20 `{ productId, reason }`. Optional; features appear when both are on. Shown to administrators. |
 | `api.scopes` | No | Up to 50. `name` follows the permission rule (`<productId>[.<thing>]:<action>`); `description` up to 200 characters; `allowsOnBehalfOf` (default `false`). The audience is always `urn:mt:app:<productId>`. |
 | `api.openApiUrl` | No | Where the exposed API's OpenAPI document lives. Shown to developers on the platform's Developers page. |

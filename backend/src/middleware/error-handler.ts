@@ -9,6 +9,8 @@ export class AppError extends Error {
   isOperational: boolean;
   /** Machine-readable reason for clients (e.g. SESSION_IDLE), sent as `code` */
   code?: string;
+  /** Structured detail for clients, sent as `details` (e.g. which applications are missing) */
+  details?: unknown;
 
   constructor(message: string, statusCode: number = 500, isOperational: boolean = true, code?: string) {
     super(message);
@@ -43,6 +45,7 @@ export const errorHandler = async (
       error: error.name,
       message: error.message,
       ...(error.code && { code: error.code }),
+      ...(error.details !== undefined && { details: error.details }),
     });
   }
 
