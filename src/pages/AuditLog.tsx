@@ -49,7 +49,7 @@ interface VerifyReport {
 interface ArchiveInfo { id: string; chain: string; fromSeq: number; toSeq: number; fromAt: string; toAt: string; rows: number; bytes: number }
 interface TenantOption { id: string; name: string; slug: string }
 
-const CATEGORIES = ['security', 'account', 'access', 'config', 'tenant', 'platform', 'audit', 'data'];
+const CATEGORIES = ['security', 'account', 'access', 'config', 'tenant', 'platform', 'audit', 'data', 'application'];
 const FILTER_KEYS = ['q', 'category', 'event', 'outcome', 'from', 'to', 'tenantId'] as const;
 
 const ACTORS = {
