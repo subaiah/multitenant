@@ -19,6 +19,7 @@ interface Integration {
   signIn: { enabled: boolean; clientType: string; backchannelLogout: boolean; accessTokenLifetime: number } | null;
   lifecycle: { callback: boolean; userEvents: boolean };
   credentials: { active: number; lastUsedAt: string | null };
+  appToApp: { exposes: number; consumes: number; tokensIssued: number; lastIssuedAt: string | null; blockedBy: number };
   organizations: { total: number; ready: number; settingUp: number; failed: number };
   events: { pending: number; failed: number; lastDeliveredAt: string | null; pendingSince: string | null };
   logouts: { pending: number; failed: number; lastDeliveredAt: string | null };
@@ -98,6 +99,15 @@ function IntegrationCard({ a }: { a: Integration }) {
         </Item>
         <Item label="Service credentials">
           {a.credentials.active ? `${a.credentials.active} active · ${a.credentials.lastUsedAt ? `used ${formatRelative(a.credentials.lastUsedAt)}` : 'not used yet'}` : 'None'}
+        </Item>
+        <Item label="Calls between applications">
+          {a.appToApp.exposes || a.appToApp.consumes
+            ? <>{`Exposes ${a.appToApp.exposes} scope${a.appToApp.exposes === 1 ? '' : 's'} · consumes ${a.appToApp.consumes}`}
+                <span className="block text-xs text-slate-500">
+                  {a.appToApp.tokensIssued ? `${a.appToApp.tokensIssued} tokens issued, last ${formatRelative(a.appToApp.lastIssuedAt!)}` : 'No tokens issued yet'}
+                  {a.appToApp.blockedBy ? ` · blocked by ${a.appToApp.blockedBy} organization${a.appToApp.blockedBy === 1 ? '' : 's'}` : ''}
+                </span></>
+            : 'None'}
         </Item>
         <Item label="Organizations">
           {o.total ? `${o.ready} of ${o.total} ready${o.settingUp ? ` · ${o.settingUp} setting up` : ''}${o.failed ? ` · ${o.failed} failed` : ''}` : 'None have it on'}

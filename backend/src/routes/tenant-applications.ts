@@ -6,6 +6,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
+import { organizationConnections, setConnectionBlocked } from '../lib/app-connections.js';
 import { pageOf } from '../lib/pagination.js';
 import { issuer } from '../lib/oidc/provider.js';
 import { forgetApplicationPermissions } from '../lib/application-permissions.js';
@@ -383,5 +384,34 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
       hasEntitlement: !!tenantApplication,
       tenantApplication: tenantApplication || null,
     };
+  });
+
+  // ---------------------------------------------------------------------------
+  // Applications calling each other (docs/adr/0001-app-to-app-calls.md):
+  // allowed between applications the organization has on, unless blocked here
+  // ---------------------------------------------------------------------------
+
+  fastify.get('/connections', {
+    config: { permission: 'applications:read' },
+    schema: { tags: ['tenant-applications'], summary: 'Which of the organization’s applications can call which, with what, and whether it’s blocked' },
+  }, async (request) => ({ connections: await organizationConnections(request.tenant.id) }));
+
+  fastify.put('/connections', {
+    config: { permission: 'applications:manage' },
+    schema: { tags: ['tenant-applications'], summary: 'Block or allow one application calling another' },
+  }, async (request) => {
+    const body = z.object({ callerApplicationId: z.string().uuid(), targetApplicationId: z.string().uuid(), blocked: z.boolean() }).parse(request.body);
+    const tenantId = request.tenant.id;
+    const connection = (await organizationConnections(tenantId)).find((c) => c.caller.id === body.callerApplicationId && c.target.id === body.targetApplicationId);
+    if (!connection) throw new AppError('No such connection between applications this organization has on', 404);
+    const who = request.user ? await request.db.user.findFirst({ where: { id: request.user.userId, tenantId }, select: { email: true } }) : null;
+    const changed = await setConnectionBlocked(tenantId, body.callerApplicationId, body.targetApplicationId, body.blocked, who?.email ?? null);
+    if (changed) {
+      await audit(request, body.blocked ? 'app_connection.blocked' : 'app_connection.allowed', {
+        resource: { type: 'app_connection', id: `${connection.caller.key}->${connection.target.key}`, label: `${connection.caller.name} → ${connection.target.name}` },
+        details: { caller: connection.caller.key, target: connection.target.key, scopes: connection.scopes.map((sc) => sc.name) },
+      });
+    }
+    return { blocked: body.blocked, changed };
   });
 };

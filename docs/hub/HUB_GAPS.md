@@ -28,7 +28,10 @@ Identity stays where it is. Tenant users, roles and groups remain in the tenant'
 
 Each gap names what is missing, why the hub needs it, and the proposed direction. Priority: **P1** needed before a generic application (Hearth) can be used inside a specific one; **P2** needed for a good suite; **P3** later.
 
-### G1. Applications can't call each other (P1)
+### G1. Applications can't call each other (P1): **done**
+
+**Done (11 Nov 2026).** Machine calls (client credentials with `resource=urn:mt:app:<target>` and `organization_id`) and calls on behalf of a person (token exchange). Manifest v2 `api.scopes` and `consumes`. Organizations see and block connections on Application Entitlements. Client helpers both ways. See [PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#calling-other-applications); the introspection endpoint is still to come.
+
 
 **Now.** Service tokens are issued only for API v1 (`aud: urn:multitenant:api:v1`), and service scopes are limited to `organizations.read`, `members.read` and `lifecycle.report` (`lib/service-scopes.ts`). There is no token an application can present to another application, and no way to act on behalf of the signed-in person in another application.
 
@@ -130,7 +133,7 @@ Notification and audit event types are declared in the manifest, so organization
 ## Order of work
 
 1. ~~**G3** platform services for applications~~ (done: notifications and audit)
-2. **G1** application-to-application tokens ([ADR-0001](../adr/0001-app-to-app-calls.md))
+2. ~~**G1** application-to-application tokens~~ (done)
 3. **G2** kinds, dependencies, bundles
 4. **G7** scoped permissions and org units
 5. **G5** embedding contract

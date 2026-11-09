@@ -104,6 +104,8 @@ export const KIT_AUDIT_EVENTS = {
   'api_config.updated': t('API settings changed', 'config'),
   'database_config.updated': t('Database settings changed', 'config'),
   'entitlement.updated': t('Application entitlement changed', 'config'),
+  'app_connection.blocked': t('Application blocked from calling another', 'access'),
+  'app_connection.allowed': t('Application allowed to call another again', 'access'),
   'tenant_profile.updated': t('Organization profile changed', 'config'),
   'notification_settings.updated': t('Notification settings changed', 'config'),
   // Platform support working in this tenant (also in the platform's log)

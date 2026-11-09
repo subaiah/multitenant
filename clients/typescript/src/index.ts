@@ -97,3 +97,6 @@ export function createProductClient({ baseUrl, tokenUrl, clientId, clientSecret,
   return client;
 }
 
+
+// Applications calling each other (docs/adr/0001-app-to-app-calls.md)
+export { createAppTokens, createAppTokenVerifier, appAudience, AppTokenError, AppTokenInvalid, type AppCaller, type AppTokenOptions } from './apps.js';

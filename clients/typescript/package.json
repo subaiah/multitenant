@@ -6,13 +6,17 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "generate": "openapi-typescript ../../docs/api/openapi-v1.json -o src/schema.d.ts",
     "build": "tsc -p tsconfig.json && cp src/schema.d.ts dist/schema.d.ts",
     "check": "npm run generate && git diff --exit-code -- src/schema.d.ts && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "jose": "6.2.12",
     "openapi-fetch": "0.17.0"
   },
   "devDependencies": {

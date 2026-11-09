@@ -64,9 +64,19 @@ const v2Fields = {
     })).max(50).default([]),
     auditEvents: z.array(z.object({ type: declaredName, label: z.string().trim().min(1).max(100) })).max(100).default([]),
   }).default({ notifications: [], auditEvents: [] }),
+  // Calls between applications (docs/adr/0001-app-to-app-calls.md)
+  api: z.object({
+    scopes: z.array(z.object({
+      name: z.string().max(100),
+      description: z.string().trim().min(1).max(200),
+      allowsOnBehalfOf: z.boolean().default(false),
+    })).max(50).default([]),
+    openApiUrl: uri.optional(),
+  }).default({ scopes: [] }),
+  consumes: z.array(z.object({ scope: z.string().max(100), reason: z.string().trim().min(1).max(200) })).max(50).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['requires', 'integratesWith', 'api', 'consumes', 'embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
+export const V2_NOT_YET = ['requires', 'integratesWith', 'embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -93,6 +103,23 @@ export const manifestSchema = z
           seen.add(t.type);
         });
       }
+      // Exposed scopes: named like permissions, under the product's key
+      const scopeNames = new Set<string>();
+      m.api.scopes.forEach((sc, i) => {
+        const problem = applicationPermissionProblem(m.productId, sc.name);
+        if (problem) ctx.addIssue({ code: 'custom', path: ['api', 'scopes', i, 'name'], message: `"${sc.name}": ${problem}` });
+        if (scopeNames.has(sc.name)) ctx.addIssue({ code: 'custom', path: ['api', 'scopes', i, 'name'], message: `"${sc.name}" is listed twice` });
+        scopeNames.add(sc.name);
+      });
+      // Consumed scopes: another application's
+      const consumed = new Set<string>();
+      m.consumes.forEach((c, i) => {
+        const owner = /^([a-z0-9][a-z0-9-]*)(?:\.[a-z0-9][a-z0-9-]*)?:[a-z0-9][a-z0-9-]*$/.exec(c.scope)?.[1];
+        if (!owner) ctx.addIssue({ code: 'custom', path: ['consumes', i, 'scope'], message: `"${c.scope}": not a scope name (<productId>[.<thing>]:<action>)` });
+        else if (owner === m.productId) ctx.addIssue({ code: 'custom', path: ['consumes', i, 'scope'], message: `"${c.scope}" is this application's own scope` });
+        if (consumed.has(c.scope)) ctx.addIssue({ code: 'custom', path: ['consumes', i, 'scope'], message: `"${c.scope}" is listed twice` });
+        consumed.add(c.scope);
+      });
     }
     const names = new Set<string>();
     m.permissions.forEach((p, i) => {
@@ -140,6 +167,8 @@ export interface ImportResult {
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   /** Declared notification and audit event types (manifest v2); a version 1 manifest leaves them alone */
   platformServices: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
+  /** Scopes exposed to other applications, and those consumed from them (manifest v2); a version 1 manifest leaves them alone */
+  api: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
   menuItems: number;
   /** What changed in the catalogue entry and its sign-in, { field: [before, after] } (audited) */
   changes: Record<string, [unknown, unknown]>;
@@ -184,6 +213,12 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
     select: { type: true },
   });
   if (takenTypes.length) throw new AppError(`Already declared by another application: ${takenTypes.map((t) => t.type).join(', ')}`, 409);
+  const apiScopes = m.manifestVersion === 2 ? m.api.scopes.map((sc, position) => ({ name: sc.name, description: sc.description, allowsOnBehalfOf: sc.allowsOnBehalfOf, position })) : [];
+  const takenScopes = await controlDb.productApiScope.findMany({
+    where: { name: { in: apiScopes.map((sc) => sc.name) }, NOT: { application: { key: m.productId } } },
+    select: { name: true },
+  });
+  if (takenScopes.length) throw new AppError(`Already exposed by another application: ${takenScopes.map((sc) => sc.name).join(', ')}`, 409);
 
   let result;
   try {
@@ -204,6 +239,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
         userEvents: m.provisioning?.userEvents ?? false,
         manifestVersion: m.manifestVersion,
+        ...(m.manifestVersion === 2 && { apiOpenApiUrl: m.api.openApiUrl ?? null }),
         // A version 1 manifest leaves the kind as it was
         ...(m.manifestVersion === 2 && { kind: m.kind }),
         ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
@@ -288,6 +324,40 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         platformServices = ps;
       }
 
+      // Exposed scopes: like declared types (retired, not removed). Consumed: replaced.
+      let api: ImportResult['api'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        const had = new Map((await tx.productApiScope.findMany({ where: { applicationId: app.id } })).map((sc) => [sc.name, sc]));
+        const out = { added: [] as string[], updated: [] as string[], retired: [] as string[], consumes: m.consumes.length, notExposedYet: [] as string[] };
+        for (const sc of apiScopes) {
+          const old = had.get(sc.name);
+          if (!old) {
+            await tx.productApiScope.create({ data: { applicationId: app.id, ...sc } });
+            out.added.push(sc.name);
+          } else if (old.retiredAt || old.description !== sc.description || old.allowsOnBehalfOf !== sc.allowsOnBehalfOf) {
+            await tx.productApiScope.update({ where: { id: old.id }, data: { ...sc, retiredAt: null } });
+            out.updated.push(sc.name);
+          } else if (old.position !== sc.position) {
+            await tx.productApiScope.update({ where: { id: old.id }, data: { position: sc.position } });
+          }
+        }
+        const listedScopes = new Set(apiScopes.map((sc) => sc.name));
+        for (const old of had.values()) {
+          if (!listedScopes.has(old.name) && !old.retiredAt) {
+            await tx.productApiScope.update({ where: { id: old.id }, data: { retiredAt: new Date() } });
+            out.retired.push(old.name);
+          }
+        }
+        await tx.productConsumedScope.deleteMany({ where: { applicationId: app.id } });
+        if (m.consumes.length) {
+          await tx.productConsumedScope.createMany({ data: m.consumes.map((c, position) => ({ applicationId: app.id, scope: c.scope, reason: c.reason, position })) });
+          // A warning, not an error: the other application may be registered later
+          const exposed = new Set((await tx.productApiScope.findMany({ where: { name: { in: m.consumes.map((c) => c.scope) }, retiredAt: null }, select: { name: true } })).map((sc) => sc.name));
+          out.notExposedYet = m.consumes.map((c) => c.scope).filter((sc) => !exposed.has(sc));
+        }
+        api = out;
+      }
+
       // What changed, for the audit log and the dry run (never secrets)
       const was = {
         name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null, kind: existing?.kind ?? null,
@@ -316,6 +386,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         hadUserEvents: existing?.userEvents ?? false,
         permissions: { added, updated, notInManifest },
         platformServices,
+        api,
         menuItems: m.menu.length,
       };
       // A dry run: everything checked and worked out, then rolled back
@@ -349,6 +420,8 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
     include: {
       signIn: true, permissions: { orderBy: { name: 'asc' } }, menuItems: { orderBy: { order: 'asc' } },
       declaredTypes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { type: 'asc' }] },
+      apiScopes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { name: 'asc' }] },
+      consumedScopes: { orderBy: { position: 'asc' } },
     },
   });
   if (!app) throw new AppError('Application not found', 404);
@@ -384,5 +457,13 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       })),
       auditEvents: app.declaredTypes.filter((t) => t.kind === 'audit').map((t) => ({ type: t.type, label: t.label })),
     },
-  };
+    // Only when there's something (so a manifest without them exports as it was)
+    ...((app.apiScopes.length || app.apiOpenApiUrl) && {
+      api: {
+        scopes: app.apiScopes.map((sc) => ({ name: sc.name, description: sc.description, allowsOnBehalfOf: sc.allowsOnBehalfOf })),
+        ...(app.apiOpenApiUrl && { openApiUrl: app.apiOpenApiUrl }),
+      },
+    }),
+    ...(app.consumedScopes.length && { consumes: app.consumedScopes.map((c) => ({ scope: c.scope, reason: c.reason })) }),
+  } as ProductManifest;
 }
