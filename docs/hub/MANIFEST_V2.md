@@ -1,0 +1,180 @@
+# Manifest version 2 (proposal)
+
+**Status:** Proposal
+**Date:** 9 Nov 2026
+**Builds on:** manifest v1 in [PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#the-manifest)
+
+Version 2 adds what an application needs to work **with other applications** in the hub ([HUB_GAPS.md](HUB_GAPS.md)). Every v1 field keeps its meaning and rules. A v1 manifest keeps working; importing it never removes v2 data set earlier (the import reports it as left alone).
+
+## Example: Hearth (a generic application)
+
+```json
+{
+  "manifestVersion": 2,
+  "productId": "hearth",
+  "name": "Hearth",
+  "description": "Team chat for every application",
+  "version": "0.3.0",
+  "kind": "generic",
+  "baseUrl": "https://hearth.example.com",
+
+  "signIn": {
+    "clientType": "CONFIDENTIAL",
+    "redirectUris": ["https://hearth.example.com/auth/callback"],
+    "openPath": "/login",
+    "backchannelLogoutUri": "https://hearth.example.com/auth/backchannel-logout"
+  },
+
+  "provisioning": {
+    "callbackUrl": "https://hearth.example.com/platform/events",
+    "deletesDataOnDeprovision": true,
+    "userEvents": true
+  },
+
+  "permissions": [
+    { "name": "hearth:admin", "description": "Manage Hearth for the organization" },
+    { "name": "hearth.channels:create", "description": "Create channels" }
+  ],
+
+  "menu": [
+    { "label": "Chat", "path": "/", "icon": "MessageSquare" }
+  ],
+
+  "api": {
+    "scopes": [
+      { "name": "hearth.threads:read",  "description": "Read record threads",           "allowsOnBehalfOf": true },
+      { "name": "hearth.threads:write", "description": "Create and post to threads",    "allowsOnBehalfOf": true },
+      { "name": "hearth.messages:post", "description": "Post messages as a bot",        "allowsOnBehalfOf": false }
+    ],
+    "openApiUrl": "https://hearth.example.com/openapi.json"
+  },
+
+  "consumes": [],
+
+  "embeds": [
+    {
+      "tag": "hearth-record-thread",
+      "scriptUrl": "https://hearth.example.com/embed/v1/hearth.js",
+      "attributes": ["resource"],
+      "description": "A conversation attached to a record"
+    },
+    {
+      "tag": "hearth-channel",
+      "scriptUrl": "https://hearth.example.com/embed/v1/hearth.js",
+      "attributes": ["channel-id"],
+      "description": "One channel"
+    }
+  ],
+
+  "platformServices": {
+    "notifications": [
+      { "type": "hearth.mention",  "label": "Someone mentioned you", "defaultChannels": ["in_app", "email"] },
+      { "type": "hearth.dm",       "label": "Direct message",        "defaultChannels": ["in_app"] }
+    ],
+    "auditEvents": [
+      { "type": "hearth.channel.archived", "label": "Channel archived" },
+      { "type": "hearth.message.deleted_by_admin", "label": "Message deleted by an administrator" }
+    ]
+  },
+
+  "events": {
+    "emits": [
+      { "type": "hearth.message.created", "schemaUrl": "https://hearth.example.com/schemas/message.created.v1.json" }
+    ],
+    "subscribes": []
+  },
+
+  "limits": [
+    { "key": "hearth.history_days",    "label": "Message history (days)", "type": "integer", "unlimited": true },
+    { "key": "hearth.file_max_mb",     "label": "Largest file (MB)",      "type": "integer" },
+    { "key": "hearth.agents_enabled",  "label": "AI agents in chat",      "type": "boolean" }
+  ],
+
+  "usage": [],
+
+  "health": { "url": "https://hearth.example.com/health" }
+}
+```
+
+## Example: CRMForge (a specific application using Hearth)
+
+```json
+{
+  "manifestVersion": 2,
+  "productId": "crmforge",
+  "name": "CRMForge",
+  "version": "0.1.0",
+  "kind": "specific",
+  "baseUrl": "https://crm.example.com",
+  "signIn": { "clientType": "CONFIDENTIAL", "redirectUris": ["https://crm.example.com/auth/callback"], "openPath": "/login" },
+
+  "requires": [],
+  "integratesWith": [
+    { "productId": "hearth", "reason": "Conversations on deals and accounts" }
+  ],
+
+  "consumes": [
+    { "scope": "hearth.threads:read",  "reason": "Show the conversation on a deal" },
+    { "scope": "hearth.threads:write", "reason": "Start a conversation when a deal is created" }
+  ],
+
+  "api": {
+    "scopes": [
+      { "name": "crmforge.records:check", "description": "Check whether a person can see a record", "allowsOnBehalfOf": false }
+    ]
+  },
+
+  "resources": [
+    { "type": "deal",    "label": "Deal",    "urlTemplate": "/deals/{id}" },
+    { "type": "account", "label": "Account", "urlTemplate": "/accounts/{id}" }
+  ],
+
+  "events": {
+    "emits": [ { "type": "crmforge.deal.won", "schemaUrl": "https://crm.example.com/schemas/deal.won.v1.json" } ],
+    "subscribes": [ "hearth.message.created" ]
+  }
+}
+```
+
+## New fields
+
+| Field | Required | Rules |
+| --- | --- | --- |
+| `kind` | No (default `specific`) | `specific` or `generic`. Shown in the catalogue; generic applications can be offered as add-ons and in bundles. |
+| `requires` | No | Up to 10 `{ productId, reason }`. Turning this application on needs these on too: the platform turns them on with it (if the plan allows) or refuses with the reason. Turning off a required application is refused while a dependant is on. |
+| `integratesWith` | No | Up to 20 `{ productId, reason }`. Optional; features appear when both are on. Shown to administrators. |
+| `api.scopes` | No | Up to 50. `name` follows the permission rule (`<productId>[.<thing>]:<action>`); `description` up to 200 characters; `allowsOnBehalfOf` (default `false`). The audience is always `urn:mt:app:<productId>`. |
+| `api.openApiUrl` | No | Where the exposed API's OpenAPI document lives. Shown to developers on the platform's Developers page. |
+| `consumes` | No | Up to 50 `{ scope, reason }`. Each scope must be exposed by another registered application (a warning, not an error, if that application isn't registered yet). Shown to organization administrators; they can block a connection ([ADR-0001](../adr/0001-app-to-app-calls.md)). |
+| `embeds` | No | Up to 20. `tag` is a custom element name starting with `<productId>-`; `scriptUrl` same address rules as `baseUrl` and on the same host; `attributes` up to 10 names. |
+| `platformServices.notifications` | No | Up to 50 types named `<productId>.<name>`, with `label` and `defaultChannels` (`in_app`, `email`). Appear in organization notification rules and personal preferences. Needs the `notifications.send` service scope to send. |
+| `platformServices.auditEvents` | No | Up to 100 types named `<productId>.<name>`, with `label`. Appear in the audit log filter and as webhook event types. Needs `audit.write`. |
+| `events.emits` | No | Up to 100 types named `<productId>.<name>`, each with an optional JSON Schema URL. Needs `events.publish`. |
+| `events.subscribes` | No | Up to 100 event types from other applications. Delivered to `provisioning.callbackUrl` only for organizations that have both applications on. |
+| `resources` | No | Up to 50 record types the application owns: `type`, `label`, `urlTemplate` (relative path with `{id}`). Identifiers: `mt://<productId>/<type>/<id>`. |
+| `limits` | No | Up to 50. `key` named `<productId>.<name>`, `label`, `type` (`integer` or `boolean`), `unlimited` (whether a plan may set no limit). Values are set per plan by platform staff and sent in `organization.entitled` and `organization.entitlement_changed` (`data.limits`). |
+| `usage` | No | Up to 20 metered features: `key`, `label`, `unit`. Reported with `usage.report`; billed per plan. |
+| `health.url` | No | An `https://` address on the same host answering `200` with `{ "status": "ok", "version": "…" }`. Polled every minute; shown on the Integrations page. |
+
+## New service scopes
+
+| Scope | Allows |
+| --- | --- |
+| `notifications.send` | Sending the application's declared notification types to people in organizations that have it on |
+| `audit.write` | Writing the application's declared audit event types to those organizations' audit logs |
+| `events.publish` | Publishing the application's declared event types |
+| `usage.report` | Reporting usage of declared metered features |
+| `units.read` | Reading organizations, org units and unit membership (or folded into `members.read`) |
+
+## Import behaviour (additions)
+
+- `requires`, `integratesWith`, `consumes`, `embeds`, `platformServices`, `events`, `resources`, `limits`, `usage`, `health`: **replaced** by the manifest's, like `menu`, except:
+  - declared notification types, audit event types, API scopes and limits that disappear are **not removed** while something still uses them (organization rules, saved webhooks, plan values, blocked connections). The import lists them, as it does for permissions today.
+- A new `requires` entry doesn't turn anything on for organizations that already have the application; the Integrations page lists organizations missing a dependency.
+- `?dryRun=true` reports v2 changes the same way as v1.
+
+## Compatibility
+
+- `manifestVersion: 1` stays valid with exactly today's rules.
+- The schema becomes a discriminated union on `manifestVersion` in `lib/product-manifest.ts`.
+- API v1 grows only by addition (new routes and scopes), as the contract requires; CI's breaking-change check covers it.
