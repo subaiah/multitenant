@@ -7,6 +7,8 @@ How a separate application, such as AppForge, becomes part of the platform. The 
 - who may do what;
 - the place people open the application from.
 
+For where this is heading (applications that work with each other, not only with the platform), see [hub/HUB_GAPS.md](hub/HUB_GAPS.md).
+
 This document is the contract between them. Each rule says **must** (required to integrate) or **should** (strongly recommended). It links to the detailed documents rather than repeating them.
 
 There are two ways to build on the platform:
