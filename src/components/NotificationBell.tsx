@@ -3,6 +3,7 @@
  * focus, as a background request so it doesn't keep an idle session alive)
  * and the latest notifications.
  */
+import { openLink } from '../lib/open-link';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck } from 'lucide-react';
@@ -65,7 +66,7 @@ export default function NotificationBell({ allPath, dark = false }: { allPath: s
       void invalidateApi('/notifications');
     }
     setOpen(false);
-    if (n.link) navigate(n.link);
+    if (n.link) openLink(n.link, navigate);
   };
 
   const readAll = async () => {

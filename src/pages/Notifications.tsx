@@ -2,6 +2,7 @@
  * Notifications: your inbox, what you get and how (preferences), and for
  * tenant admins, what the organization sends (Organization).
  */
+import { openLink } from '../lib/open-link';
 import { Fragment, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCheck, Lock, Loader2, RotateCw } from 'lucide-react';
@@ -170,7 +171,7 @@ function Inbox() {
               <li key={n.id} className="flex items-start gap-3 px-5 py-3">
                 <span className={`mt-2 w-2 h-2 rounded-full shrink-0 ${n.readAt ? 'bg-transparent' : 'bg-blue-600'}`} aria-label={n.readAt ? undefined : 'Unread'} />
                 <div className="min-w-0 flex-1">
-                  <button className="text-left" onClick={() => { void markRead([n.id]); if (n.link) navigate(n.link); }}>
+                  <button className="text-left" onClick={() => { void markRead([n.id]); if (n.link) openLink(n.link, navigate); }}>
                     <p className={`text-sm ${n.readAt ? 'text-slate-700 dark:text-slate-200' : 'font-semibold text-slate-900 dark:text-white'}`}>{n.title}</p>
                     {n.body && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{n.body}</p>}
                   </button>

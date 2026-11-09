@@ -40,10 +40,12 @@ In manifest v2 ([MANIFEST_V2.md](../hub/MANIFEST_V2.md)):
 POST /api/oidc/token
 Authorization: Basic <service credential>
 grant_type=client_credentials
-&audience=urn:mt:app:hearth
+&resource=urn:mt:app:hearth
 &scope=hearth.threads:write
 &organization_id=<tenant id>
 ```
+
+The target is named with `resource` (RFC 8707), not `audience`. That's how the platform's OIDC provider (oidc-provider, with resource indicators) already selects the audience of service tokens today (`urn:multitenant:api:v1`). `organization_id` is an extra parameter the token endpoint accepts.
 
 The platform issues a token only if:
 - the caller's manifest `consumes` that scope, and the target exposes it;
@@ -51,7 +53,7 @@ The platform issues a token only if:
 - the organization has **both** applications on now, and set up (`READY`);
 - the organization has not blocked this connection (see Approval).
 
-Token claims: `iss`, `aud` (target), `client_id`, `product_id` (caller), `tenant_id`, `scope`, `exp` (10 minutes), `jti`.
+Token claims: `iss`, `aud` (target), `client_id`, `product_id` (caller), `tenant_id` (the same name as in ID tokens), `scope`, `exp` (10 minutes), `jti`.
 
 ### Calls on behalf of a person
 
@@ -63,9 +65,11 @@ Authorization: Basic <service credential>
 grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 &subject_token=<person's access token for CRMForge>
 &subject_token_type=urn:ietf:params:oauth:token-type:access_token
-&audience=urn:mt:app:hearth
+&resource=urn:mt:app:hearth
 &scope=hearth.threads:read hearth.threads:write
 ```
+
+RFC 8693 allows `resource` or `audience`. The platform takes `resource`, as for client credentials, and accepts `audience` as the same thing. oidc-provider doesn't implement token exchange, so this is a custom grant type (`provider.registerGrantType`). That is most of G1's work.
 
 Additional checks: the subject token is valid and was issued to the caller; the scope allows on-behalf-of; the person is active and their organization still has both applications on.
 

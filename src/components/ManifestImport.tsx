@@ -18,6 +18,8 @@ interface ImportResult {
   callbackSigningSecret?: string;
   organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
+  /** Declared notification and audit event types (manifest v2) */
+  platformServices?: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -51,6 +53,7 @@ function Plan({ plan }: { plan: ImportResult }) {
       <p className="text-slate-600 dark:text-slate-300">
         Permissions: {p.added.length} added, {p.updated.length} updated{p.notInManifest.length ? `, ${p.notInManifest.length} no longer listed (kept)` : ''}. Menu entries: {plan.menuItems}.
       </p>
+      <ServicesLine services={plan.platformServices} />
     </div>
   );
 }
@@ -115,6 +118,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Version {result.application.version}. {p.added.length} permission{p.added.length === 1 ? '' : 's'} added, {p.updated.length} updated; {result.menuItems} menu entr{result.menuItems === 1 ? 'y' : 'ies'}.
         </p>
+        <ServicesLine services={result.platformServices} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
           <CopyBox value={result.clientId} label="Client ID" />
@@ -177,5 +181,18 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         </button>
       </div>
     </Dialog>
+  );
+}
+
+/** Declared notification and audit event types: what the import did with them */
+function ServicesLine({ services }: { services?: ImportResult['platformServices'] }) {
+  if (!services) return null;
+  if ('leftAlone' in services) return null;
+  const { added, updated, retired } = services;
+  if (!added.length && !updated.length && !retired.length) return null;
+  return (
+    <p className="text-sm text-slate-600 dark:text-slate-300">
+      Notification and audit event types: {added.length} added, {updated.length} updated{retired.length ? `, ${retired.length} no longer listed (kept, can't be used)` : ''}.
+    </p>
   );
 }

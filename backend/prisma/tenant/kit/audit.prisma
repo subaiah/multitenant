@@ -55,4 +55,6 @@ enum AuditActorType {
   ANONYMOUS
   /// An API key (lib/api-keys.ts)
   API_KEY
+  /// An external product, with a service token (lib/product-services.ts)
+  APPLICATION
 }

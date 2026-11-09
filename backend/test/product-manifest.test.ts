@@ -71,7 +71,7 @@ test('a manifest with problems is refused, with every problem named', async () =
   for (const field of ['productId', 'baseUrl', 'signIn.redirectUris.0', 'permissions.0.name', 'permissions.1.name', 'menu.0.path', 'menu.0.permission']) {
     assert.match(res.json.message, new RegExp(`${field.replace(/\./g, '\\.')}:`), field);
   }
-  assert.equal((await importIt({ ...m, manifestVersion: 2 })).status, 400);
+  assert.equal((await importIt({ ...m, manifestVersion: 3 })).status, 400, 'an unknown version');
   // Only platform staff
   assert.equal((await importIt(manifest(), adminA)).status, 403);
 });

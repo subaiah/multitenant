@@ -48,9 +48,24 @@ Decision: [ADR-0001](../adr/0001-app-to-app-calls.md).
 - `kind: "specific" | "generic"` in the manifest (shown in the catalogue; generic applications can be offered as add-ons).
 - `requires` (hard dependency) and `integratesWith` (optional; features light up when present).
 - Entitling an application with a hard dependency entitles the dependency too, or refuses with a clear reason. Turning off a dependency that another enabled application requires is refused (or requires confirmation listing what breaks).
+- **Until G6** (per-application billing), refuse with the reason rather than turning the dependency on. Turning it on automatically may change what the organization pays.
 - Bundles: a named set of applications entitled together (e.g. "Sales suite" = CRMForge + Hearth + Documents).
 
-### G3. Applications can't use the platform's own services (P1)
+### G3. Applications can't use the platform's own services (P1): **done** for notifications and audit
+
+**Done (10 Nov 2026).** `notifications.send` and `audit.write`, with declared types in manifest v2 ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#using-the-platforms-services)). Organizations can already send an application's audit events to their own systems, because declared audit types are webhook event types. Application-defined domain events stay in G4.
+
+The review found more to it than the table below suggests, and it was built in:
+- The notification and audit catalogs were fixed in code and looked up synchronously (inside the audit transaction, too). Declared types now live in the database (`product_declared_types`), with an in-memory registry kept fresh across servers (`lib/product-catalog.ts`).
+- A new audit actor type, `APPLICATION`, needed a migration on every tenant database. An application's entries can never pass for a person's or the platform's; a person it acted for is `details.onBehalfOf`.
+- Anti-phishing rules, because notifications go out under the platform's name:
+  - plain text only;
+  - always titled with the application's name;
+  - links only to its own host;
+  - recipients must be in the organization;
+  - a rate limit per credential.
+- Organizations see an application's types (notification rules, preferences, audit filter, webhook types) only while they have it on.
+
 
 **Now.** API v1 for products is read-only plus `lifecycle.report` (`routes/product-v1.ts`). Notification types can be added only by an **embedded** product (`ProductModule`). An external product can't write to the organization's audit log, send a notification, or have its events delivered through the organization's webhooks.
 
@@ -114,7 +129,7 @@ Notification and audit event types are declared in the manifest, so organization
 
 ## Order of work
 
-1. **G3** platform services for applications (smallest, immediately useful for AppForge and Hearth)
+1. ~~**G3** platform services for applications~~ (done: notifications and audit)
 2. **G1** application-to-application tokens ([ADR-0001](../adr/0001-app-to-app-calls.md))
 3. **G2** kinds, dependencies, bundles
 4. **G7** scoped permissions and org units

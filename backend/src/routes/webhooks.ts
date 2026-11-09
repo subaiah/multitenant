@@ -11,6 +11,7 @@
  *   GET    /webhooks/:id/deliveries           recent deliveries (?status=FAILED)
  *   POST   /webhooks/deliveries/:id/retry     send one again
  */
+import { hiddenProductTypes, refreshProductCatalog } from '../lib/product-catalog.js';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
@@ -35,6 +36,8 @@ const eventsSchema = z.array(z.string().max(100)).min(1).max(200).superRefine((e
 });
 
 export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
+  // Products' declared audit types are subscribable too (lib/product-catalog.ts)
+  fastify.addHook('preHandler', async () => refreshProductCatalog());
   const endpointOf = async (request: FastifyRequest) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
     const e = await request.db.webhookEndpoint.findFirst({ where: { id, tenantId: request.tenant.id } });
@@ -64,7 +67,10 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/events', {
     config: { permission: 'api:read' },
     schema: { tags: ['webhooks'], summary: 'Events a webhook can subscribe to (the organization’s audit events)' },
-  }, async () => ({ events: webhookEvents() }));
+  }, async (request) => {
+    const hidden = await hiddenProductTypes(request.tenant.id);
+    return { events: webhookEvents().filter((e) => !hidden.has(e.type)) };
+  });
 
   fastify.post('/', {
     config: { permission: 'api:manage', rateLimit: { max: 20, timeWindow: '10 minutes' } },

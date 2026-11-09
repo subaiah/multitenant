@@ -480,6 +480,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/product-integrations/organizations/{organizationId}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send one of the product’s declared notification types to people in an organization that has it on. Plain text, titled with the product’s name; links only to its own pages; the organization’s rules and people’s preferences apply.
+         * @description For external products, with a service access token that has the `notifications.send` scope.
+         */
+        post: operations["sendProductNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/product-integrations/organizations/{organizationId}/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write one of the product’s declared audit event types to an organization’s audit log. Recorded with the product as the actor (APPLICATION); a person it acted for as details.onBehalfOf.
+         * @description For external products, with a service access token that has the `audit.write` scope.
+         */
+        post: operations["writeProductAuditEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     event: {
@@ -2563,7 +2603,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2648,7 +2688,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2713,7 +2753,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2789,7 +2829,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2875,7 +2915,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -2958,7 +2998,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -3024,7 +3064,206 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Too many requests */
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    sendProductNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One of the product’s declared notification types (manifest platformServices.notifications) */
+                    type: string;
+                    title: string;
+                    /** @description Plain text (never shown as HTML) */
+                    body?: string;
+                    /** @description A path on the product (/deals/42) or a full address on its own host */
+                    link?: string;
+                    /** @description At least one of subjects, groupIds or permission */
+                    to: {
+                        subjects?: string[];
+                        groupIds?: string[];
+                        /** @description Everyone holding this permission (one of the product’s own) */
+                        permission?: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        accepted: boolean;
+                    };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    writeProductAuditEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One of the product’s declared audit event types (manifest platformServices.auditEvents) */
+                    type: string;
+                    /**
+                     * @default SUCCESS
+                     * @enum {string}
+                     */
+                    outcome?: "SUCCESS" | "FAILURE";
+                    /** @description The person it acted for: <organization id>.<user id> */
+                    onBehalfOf?: string;
+                    resource?: {
+                        type: string;
+                        id?: string;
+                        label?: string;
+                    };
+                    /** @description At most 4000 characters as JSON */
+                    details?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The entry’s position in the organization’s log */
+                        seq: number;
+                    };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;

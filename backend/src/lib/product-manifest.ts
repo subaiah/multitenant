@@ -12,14 +12,16 @@ import { applicationPermissionProblem, forgetApplicationPermissions } from './ap
 import { userEventsChanged } from './product-user-events.js';
 import { DEFAULT_ACCESS_TOKEN_LIFETIME } from './oidc/provider.js';
 import { AppError } from '../middleware/error-handler.js';
+import { refreshProductCatalog } from './product-catalog.js';
+import { KIT_AUDIT_EVENTS } from '../kit/audit-events.js';
+import { KIT_NOTIFICATION_TYPES } from '../kit/notification-types.js';
 import { callbackChanged, callbackUrlSchema, newCallbackSecret } from './product-lifecycle.js';
 
 const uri = z.string().max(2000).refine(allowedUri, 'Use an https:// address (or http://localhost while developing), without a #fragment');
 const relativePath = z.string().max(500).regex(/^\/(?!\/)[^\s#]*$/, 'A path starting with / (no #fragment)');
 
-export const manifestSchema = z
-  .object({
-    manifestVersion: z.literal(1),
+// The fields every version has (version 1's)
+const commonFields = {
     productId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,49}$/, 'Lowercase letters, digits and hyphens, 2–50 characters'),
     name: z.string().trim().min(2).max(100),
     description: z.string().max(500).optional(),
@@ -47,8 +49,51 @@ export const manifestSchema = z
       }))
       .max(20)
       .default([]),
-  })
+};
+
+// Version 2 (docs/hub/MANIFEST_V2.md): what's supported so far
+const declaredName = z.string().max(100);
+const v2Fields = {
+  kind: z.enum(['specific', 'generic']).default('specific'),
+  platformServices: z.object({
+    notifications: z.array(z.object({
+      type: declaredName,
+      label: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(200).optional(),
+      defaultChannels: z.array(z.enum(['in_app', 'email'])).max(2).default(['in_app']),
+    })).max(50).default([]),
+    auditEvents: z.array(z.object({ type: declaredName, label: z.string().trim().min(1).max(100) })).max(100).default([]),
+  }).default({ notifications: [], auditEvents: [] }),
+};
+/** Version 2 fields this platform doesn't take yet (refused, not dropped) */
+export const V2_NOT_YET = ['requires', 'integratesWith', 'api', 'consumes', 'embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
+
+/** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
+const declaredTypeProblem = (productId: string, type: string): string | null => {
+  if (!type.startsWith(`${productId}.`)) return `must start with "${productId}."`;
+  if (!/^[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/.test(type.slice(productId.length + 1))) return 'use lowercase letters, digits, _ and -, in dot-separated parts';
+  if (type in KIT_AUDIT_EVENTS || type in KIT_NOTIFICATION_TYPES) return "is one of the platform's own types";
+  return null;
+};
+
+export const manifestSchema = z
+  .discriminatedUnion('manifestVersion', [
+    z.object({ manifestVersion: z.literal(1), ...commonFields }),
+    z.object({ manifestVersion: z.literal(2), ...commonFields, ...v2Fields }),
+  ])
   .superRefine((m, ctx) => {
+    if (m.manifestVersion === 2) {
+      const seen = new Set<string>();
+      const lists = [['notifications', m.platformServices.notifications], ['auditEvents', m.platformServices.auditEvents]] as const;
+      for (const [list, items] of lists) {
+        items.forEach((t, i) => {
+          const problem = declaredTypeProblem(m.productId, t.type);
+          if (problem) ctx.addIssue({ code: 'custom', path: ['platformServices', list, i, 'type'], message: `"${t.type}" ${problem}` });
+          if (seen.has(t.type)) ctx.addIssue({ code: 'custom', path: ['platformServices', list, i, 'type'], message: `"${t.type}" is declared twice` });
+          seen.add(t.type);
+        });
+      }
+    }
     const names = new Set<string>();
     m.permissions.forEach((p, i) => {
       const problem = applicationPermissionProblem(m.productId, p.name);
@@ -67,9 +112,19 @@ export type ProductManifest = z.infer<typeof manifestSchema>;
 
 /** The manifest's problems as readable lines (field: message) */
 export function manifestProblems(input: unknown): string[] | null {
+  const extra: string[] = [];
+  if (input && typeof input === 'object') {
+    const raw = input as Record<string, unknown>;
+    // Refused rather than silently dropped, so nobody thinks they're in effect
+    const v2Only = ['kind', 'platformServices', ...V2_NOT_YET].filter((k) => k in raw);
+    if (raw.manifestVersion === 1 && v2Only.length) extra.push(...v2Only.map((k) => `${k}: needs "manifestVersion": 2`));
+    if (raw.manifestVersion === 2) {
+      extra.push(...V2_NOT_YET.filter((k) => k in raw).map((k) => `${k}: not supported by this platform yet (docs/hub/MANIFEST_V2.md); leave it out for now`));
+    }
+  }
   const parsed = manifestSchema.safeParse(input);
-  if (parsed.success) return null;
-  return parsed.error.issues.map((i) => `${i.path.join('.') || 'manifest'}: ${i.message}`);
+  const problems = [...extra, ...(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.') || 'manifest'}: ${i.message}`))];
+  return problems.length ? problems : null;
 }
 
 export interface ImportResult {
@@ -83,6 +138,8 @@ export interface ImportResult {
   /** Organizations told now (organization.entitled), when a callback address was just added */
   organizationsTold?: number;
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
+  /** Declared notification and audit event types (manifest v2); a version 1 manifest leaves them alone */
+  platformServices: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
   menuItems: number;
   /** What changed in the catalogue entry and its sign-in, { field: [before, after] } (audited) */
   changes: Record<string, [unknown, unknown]>;
@@ -116,6 +173,17 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
     select: { name: true },
   });
   if (taken.length) throw new AppError(`Already used by another application: ${taken.map((t) => t.name).join(', ')}`, 409);
+  // So are declared types (they start with the product id, but an older product may have the same prefix)
+  const services = m.manifestVersion === 2 ? m.platformServices : null;
+  const declared = services ? [
+    ...services.notifications.map((t) => ({ kind: 'notification', type: t.type, label: t.label, description: t.description ?? null, defaultInApp: t.defaultChannels.includes('in_app'), defaultEmail: t.defaultChannels.includes('email') })),
+    ...services.auditEvents.map((t) => ({ kind: 'audit', type: t.type, label: t.label, description: null, defaultInApp: true, defaultEmail: false })),
+  ].map((t, position) => ({ ...t, position })) : [];
+  const takenTypes = await controlDb.productDeclaredType.findMany({
+    where: { type: { in: declared.map((t) => t.type) }, NOT: { application: { key: m.productId } } },
+    select: { type: true },
+  });
+  if (takenTypes.length) throw new AppError(`Already declared by another application: ${takenTypes.map((t) => t.type).join(', ')}`, 409);
 
   let result;
   try {
@@ -135,6 +203,9 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         provisioningCallbackUrl: m.provisioning?.callbackUrl ?? null,
         deletesDataOnDeprovision: m.provisioning?.deletesDataOnDeprovision ?? false,
         userEvents: m.provisioning?.userEvents ?? false,
+        manifestVersion: m.manifestVersion,
+        // A version 1 manifest leaves the kind as it was
+        ...(m.manifestVersion === 2 && { kind: m.kind }),
         ...(callbackSecret && { callbackSigningSecret: callbackSecret }),
       };
       const app = existing
@@ -189,16 +260,44 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         });
       }
 
+      // Declared types: added or refreshed; gone from the manifest, retired (still known, can't be used)
+      let platformServices: ImportResult['platformServices'] = { leftAlone: true };
+      if (services) {
+        const had = new Map((await tx.productDeclaredType.findMany({ where: { applicationId: app.id } })).map((t) => [t.type, t]));
+        const ps = { added: [] as string[], updated: [] as string[], retired: [] as string[] };
+        for (const t of declared) {
+          const old = had.get(t.type);
+          if (!old) {
+            await tx.productDeclaredType.create({ data: { applicationId: app.id, ...t } });
+            ps.added.push(t.type);
+          } else if (old.retiredAt || old.kind !== t.kind || old.label !== t.label || old.description !== t.description || old.defaultInApp !== t.defaultInApp || old.defaultEmail !== t.defaultEmail) {
+            await tx.productDeclaredType.update({ where: { id: old.id }, data: { ...t, retiredAt: null } });
+            ps.updated.push(t.type);
+          } else if (old.position !== t.position) {
+            // Only moved: not a change worth reporting
+            await tx.productDeclaredType.update({ where: { id: old.id }, data: { position: t.position } });
+          }
+        }
+        const listedTypes = new Set(declared.map((t) => t.type));
+        for (const old of had.values()) {
+          if (!listedTypes.has(old.type) && !old.retiredAt) {
+            await tx.productDeclaredType.update({ where: { id: old.id }, data: { retiredAt: new Date() } });
+            ps.retired.push(old.type);
+          }
+        }
+        platformServices = ps;
+      }
+
       // What changed, for the audit log and the dry run (never secrets)
       const was = {
-        name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null,
+        name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null, kind: existing?.kind ?? null,
         callbackUrl: existing?.provisioningCallbackUrl ?? null, deletesDataOnDeprovision: existing?.deletesDataOnDeprovision ?? false, userEvents: existing?.userEvents ?? false,
         clientType: before?.clientType ?? null, redirectUris: before?.redirectUris ?? [], postLogoutRedirectUris: before?.postLogoutRedirectUris ?? [],
         openUrl: before?.initiateLoginUri ?? null, signInEnabled: before?.enabled ?? null,
         backchannelLogoutUri: before?.backchannelLogoutUri ?? null, accessTokenLifetime: before?.accessTokenLifetime ?? null,
       };
       const now = {
-        name: app.name, version: app.version, baseUrl: app.baseUrl, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision, userEvents: fields.userEvents,
+        name: app.name, version: app.version, baseUrl: app.baseUrl, kind: app.kind, callbackUrl: fields.provisioningCallbackUrl, deletesDataOnDeprovision: fields.deletesDataOnDeprovision, userEvents: fields.userEvents,
         clientType: signIn.clientType, redirectUris: signIn.redirectUris, postLogoutRedirectUris: signIn.postLogoutRedirectUris, openUrl: signIn.initiateLoginUri, signInEnabled: signIn.enabled,
         backchannelLogoutUri: signIn.backchannelLogoutUri, accessTokenLifetime: signIn.accessTokenLifetime,
       };
@@ -216,6 +315,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         hadCallback: !!existing?.provisioningCallbackUrl,
         hadUserEvents: existing?.userEvents ?? false,
         permissions: { added, updated, notInManifest },
+        platformServices,
         menuItems: m.menu.length,
       };
       // A dry run: everything checked and worked out, then rolled back
@@ -234,6 +334,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
     throw err;
   }
   forgetApplicationPermissions();
+  await refreshProductCatalog(true);
   // Organizations that have it on and weren't told yet are told now
   const { hadCallback, hadUserEvents, ...rest } = result;
   const told = await callbackChanged(result.application.id, hadCallback, !!m.provisioning);
@@ -245,13 +346,15 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
 export async function exportManifest(applicationId: string): Promise<ProductManifest> {
   const app = await controlDb.applicationRegistry.findUnique({
     where: { id: applicationId },
-    include: { signIn: true, permissions: { orderBy: { name: 'asc' } }, menuItems: { orderBy: { order: 'asc' } } },
+    include: {
+      signIn: true, permissions: { orderBy: { name: 'asc' } }, menuItems: { orderBy: { order: 'asc' } },
+      declaredTypes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { type: 'asc' }] },
+    },
   });
   if (!app) throw new AppError('Application not found', 404);
   const base = app.baseUrl ?? '';
   const openPath = app.signIn?.initiateLoginUri && base && app.signIn.initiateLoginUri.startsWith(base) ? app.signIn.initiateLoginUri.slice(base.length) || '/' : undefined;
-  return {
-    manifestVersion: 1,
+  const common = {
     productId: app.key,
     name: app.name,
     ...(app.description && { description: app.description }),
@@ -268,5 +371,18 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
     ...(app.provisioningCallbackUrl && { provisioning: { callbackUrl: app.provisioningCallbackUrl, deletesDataOnDeprovision: app.deletesDataOnDeprovision, userEvents: app.userEvents } }),
     permissions: app.permissions.map((p) => ({ name: p.name, description: p.description ?? p.name })),
     menu: app.menuItems.map((i) => ({ label: i.label, path: i.path, ...(i.icon && { icon: i.icon }), ...(i.permission && { permission: i.permission }) })),
+  };
+  if (app.manifestVersion !== 2) return { manifestVersion: 1, ...common };
+  return {
+    manifestVersion: 2,
+    ...common,
+    kind: app.kind === 'generic' ? 'generic' : 'specific',
+    platformServices: {
+      notifications: app.declaredTypes.filter((t) => t.kind === 'notification').map((t) => ({
+        type: t.type, label: t.label, ...(t.description && { description: t.description }),
+        defaultChannels: [...(t.defaultInApp ? ['in_app' as const] : []), ...(t.defaultEmail ? ['email' as const] : [])],
+      })),
+      auditEvents: app.declaredTypes.filter((t) => t.kind === 'audit').map((t) => ({ type: t.type, label: t.label })),
+    },
   };
 }

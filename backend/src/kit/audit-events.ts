@@ -8,7 +8,7 @@
  * log (the request's tenant); 'platform' entries in the platform's, with the
  * tenant they concern, if any.
  */
-export type AuditCategory = 'security' | 'account' | 'access' | 'config' | 'tenant' | 'platform' | 'audit' | 'data';
+export type AuditCategory = 'security' | 'account' | 'access' | 'config' | 'tenant' | 'platform' | 'audit' | 'data' | 'application';
 
 export interface AuditEventDefinition {
   label: string;

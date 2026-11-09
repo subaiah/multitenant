@@ -6,7 +6,7 @@
 import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Search, ShieldCheck, ShieldAlert, Download, ChevronDown, ChevronRight, Archive, Loader2, Bot, User, Building2, UserX, KeyRound } from 'lucide-react';
+  Search, ShieldCheck, ShieldAlert, Download, ChevronDown, ChevronRight, Archive, Loader2, Bot, User, Building2, UserX, KeyRound, Package } from 'lucide-react';
 import { API_URL, apiGet, apiPost } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -22,7 +22,7 @@ interface Entry {
   event: string;
   category: string;
   outcome: 'SUCCESS' | 'FAILURE';
-  actorType: 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY';
+  actorType: 'USER' | 'PLATFORM' | 'SYSTEM' | 'ANONYMOUS' | 'API_KEY' | 'APPLICATION';
   actorId: string | null;
   actorEmail: string | null;
   resourceType: string | null;
@@ -49,7 +49,7 @@ interface VerifyReport {
 interface ArchiveInfo { id: string; chain: string; fromSeq: number; toSeq: number; fromAt: string; toAt: string; rows: number; bytes: number }
 interface TenantOption { id: string; name: string; slug: string }
 
-const CATEGORIES = ['security', 'account', 'access', 'config', 'tenant', 'platform', 'audit', 'data'];
+const CATEGORIES = ['security', 'account', 'access', 'config', 'tenant', 'platform', 'audit', 'data', 'application'];
 const FILTER_KEYS = ['q', 'category', 'event', 'outcome', 'from', 'to', 'tenantId'] as const;
 
 const ACTORS = {
@@ -58,6 +58,8 @@ const ACTORS = {
   SYSTEM: { icon: Bot, label: 'System' },
   ANONYMOUS: { icon: UserX, label: 'Not signed in' },
   API_KEY: { icon: KeyRound, label: 'API key' },
+  /** An external application, with a service token (its id is the product id) */
+  APPLICATION: { icon: Package, label: 'Application' },
 };
 
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
@@ -271,7 +273,7 @@ export default function AuditLog({ scope }: { scope: 'tenant' | 'platform' }) {
                       <td className="px-3 py-2.5">
                         <span className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                           <Actor size={14} className="text-slate-400 shrink-0" aria-label={ACTORS[e.actorType].label} />
-                          <span className="truncate max-w-[220px]">{e.actorEmail ?? ACTORS[e.actorType].label}</span>
+                          <span className="truncate max-w-[220px]">{e.actorEmail ?? (e.actorType === 'APPLICATION' && e.actorId ? e.actorId : ACTORS[e.actorType].label)}</span>
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-slate-800 dark:text-white">{labelOf(e.event)}</td>
