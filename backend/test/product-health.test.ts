@@ -27,8 +27,8 @@ const manifest = (extra: Record<string, unknown> = {}) => ({
 
 before(async () => {
   site = createServer((req, res) => {
-    if (req.url !== '/health') return res.writeHead(404).end();
-    res.writeHead(answer.status, { 'content-type': 'application/json' }).end(JSON.stringify(answer.body));
+    if (req.url !== '/health') res.writeHead(404).end();
+    else res.writeHead(answer.status, { 'content-type': 'application/json' }).end(JSON.stringify(answer.body));
   });
   await new Promise<void>((r) => site.listen(0, r));
   siteUrl = `http://localhost:${(site.address() as AddressInfo).port}`;
