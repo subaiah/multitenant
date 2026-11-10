@@ -133,7 +133,7 @@ test('Razorpay: the period ends, its charges become add-ons on the next invoice,
   await maintenance();
   const addons = pay.razorpay.addons.filter((a) => a.subscription_id === subId);
   assert.deepEqual(addons.map((a) => [a.item.amount, a.item.currency]).sort(), [[300, 'INR'], [10000 * seats, 'INR']].sort());
-  assert.match(addons.find((a) => a.item.amount === 300).item.name, new RegExp(`App ${key}: 3,500 tokens`));
+  assert.match(addons.find((a) => a.item.amount === 300)!.item.name, new RegExp(`App ${key}: 3,500 tokens`));
   rows = await controlDb.applicationCharge.findMany({ where: { tenantId: T.tenantId } });
   assert.ok(rows.every((r) => r.status === 'ADDED' && r.providerChargeId?.startsWith('ao_')));
 
