@@ -2920,6 +2920,16 @@
             }
           },
           {
+            "name": "orgUnitId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Only people directly in this unit"
+            }
+          },
+          {
             "name": "updatedSince",
             "in": "query",
             "required": false,
@@ -3110,6 +3120,107 @@
                     "groups",
                     "pagination"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/org-units": {
+      "get": {
+        "operationId": "listProductOrgUnits",
+        "tags": [
+          "Products"
+        ],
+        "summary": "An organization’s own organizations and units (the tree scoped permissions refer to). Only while it has the product turned on.",
+        "description": "For external products, with a service access token that has the `members.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "members.read"
+            ]
+          }
+        ],
+        "x-scope": "members.read",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOrgUnits"
                 }
               }
             }
@@ -3709,7 +3820,7 @@
             "tokenUrl": "/api/oidc/token",
             "scopes": {
               "organizations.read": "See the organizations that have the product turned on, and their setup status",
-              "members.read": "See the people and groups in those organizations",
+              "members.read": "See the people, groups and units in those organizations",
               "lifecycle.report": "Report the result of setting an organization up",
               "notifications.send": "Send its declared notifications to people in those organizations",
               "audit.write": "Write its declared events to those organizations’ audit logs"
@@ -4884,8 +4995,41 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "This product’s own permissions the person holds now (empty unless ACTIVE)"
+              "description": "This product’s own permissions the person holds now across the whole organization (empty unless ACTIVE)"
             }
+          },
+          "scopedPermissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScopedPermission"
+            },
+            "description": "This product’s own permissions the person holds only in part of the organization (not repeated if held everywhere). As the scoped_permissions claim."
+          },
+          "memberOf": {
+            "type": "object",
+            "properties": {
+              "organizations": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The organization’s own organizations they are directly in"
+                }
+              },
+              "units": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Units they are directly in (not the units above)"
+                }
+              }
+            },
+            "required": [
+              "organizations",
+              "units"
+            ],
+            "description": "From GET …/org-units"
           },
           "lastLoginAt": {
             "type": [
@@ -4913,10 +5057,153 @@
           "groups",
           "roles",
           "permissions",
+          "scopedPermissions",
+          "memberOf",
           "lastLoginAt",
           "createdAt",
           "updatedAt"
         ]
+      },
+      "ScopedPermission": {
+        "type": "object",
+        "properties": {
+          "permission": {
+            "type": "string"
+          },
+          "scopeType": {
+            "type": "string",
+            "enum": [
+              "ORGANIZATION",
+              "ORG_UNIT",
+              "RESOURCE"
+            ],
+            "description": "ORGANIZATION: one of the organization’s own organizations; ORG_UNIT: that unit and every unit below it; RESOURCE: one record"
+          },
+          "scopeId": {
+            "type": "string",
+            "description": "An id from GET …/org-units, or a resource id"
+          }
+        },
+        "required": [
+          "permission",
+          "scopeType",
+          "scopeId"
+        ],
+        "description": "A permission held in part of the organization only"
+      },
+      "ProductOrgUnits": {
+        "type": "object",
+        "properties": {
+          "organizations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                },
+                "memberCount": {
+                  "type": "integer",
+                  "description": "People directly in it (not through a unit)"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "description",
+                "status",
+                "memberCount",
+                "createdAt",
+                "updatedAt"
+              ]
+            }
+          },
+          "units": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "organizationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "parentUnitId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "unitType": {
+                  "type": "string",
+                  "description": "DIVISION, DEPARTMENT, TEAM, LOCATION"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "memberCount": {
+                  "type": "integer",
+                  "description": "People directly in it"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "organizationId",
+                "parentUnitId",
+                "unitType",
+                "name",
+                "description",
+                "memberCount",
+                "createdAt",
+                "updatedAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "organizations",
+          "units"
+        ],
+        "description": "All of the organization’s own organizations and units: units form a tree by parentUnitId"
       },
       "ProductGroup": {
         "type": "object",

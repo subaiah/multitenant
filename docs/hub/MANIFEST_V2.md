@@ -179,7 +179,7 @@ Also implemented:
 | `audit.write` | Writing the application's declared audit event types to those organizations' audit logs |
 | `events.publish` | Publishing the application's declared event types |
 | `usage.report` | Reporting usage of declared metered features |
-| `units.read` | Reading organizations, org units and unit membership (or folded into `members.read`) |
+| ~~`units.read`~~ | Folded into `members.read`: organizations, org units and unit membership come with people (G7, done) |
 
 ## Import behaviour (additions)
 

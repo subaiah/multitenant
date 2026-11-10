@@ -29,6 +29,7 @@ export type ApiError = Schemas['Error'];
 export type ProductIdentity = Schemas['ProductIdentity'];
 export type ProductOrganization = Schemas['ProductOrganization'];
 export type ProductMember = Schemas['ProductMember'];
+export type ProductOrgUnits = Schemas['ProductOrgUnits'];
 export type ProductGroup = Schemas['ProductGroup'];
 export type ProductEvent = Schemas['ProductEvent'];
 
@@ -100,3 +101,6 @@ export function createProductClient({ baseUrl, tokenUrl, clientId, clientSecret,
 
 // Applications calling each other (docs/adr/0001-app-to-app-calls.md)
 export { createAppTokens, createAppTokenVerifier, appAudience, AppTokenError, AppTokenInvalid, type AppCaller, type AppTokenOptions } from './apps.js';
+
+// Applying permissions held across the organization or in part of it (docs/hub/HUB_GAPS.md G7)
+export { allows, permissionMatches, unitTree, type Access, type ScopedPermission, type Target, type UnitTree } from './access.js';

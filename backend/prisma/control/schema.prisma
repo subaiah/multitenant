@@ -471,6 +471,8 @@ model TenantApplication {
   /// Rises with each setup operation; a report for an older one is refused
   provisioningGeneration  Int       @default(0) @map("provisioning_generation")
   provisioningOperationId String?   @map("provisioning_operation_id")
+  /// A hash of the organization's own organizations and units as last told (user events: units.changed)
+  unitsStateHash String?            @map("units_state_hash")
   createdAt     DateTime            @default(now()) @map("created_at")
 
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1008,6 +1010,12 @@ model ProductMemberState {
   nameHash        String   @map("name_hash")
   /// The product's own permissions the person holds (names, sorted)
   permissions     String[] @default([])
+  /// Of those, held in part of the organization only (permission@SCOPE_TYPE:id, sorted)
+  scopedPermissions String[] @default([]) @map("scoped_permissions")
+  /// Organizations (ORGANIZATION:id) and units (ORG_UNIT:id) they are directly in, sorted
+  units           String[] @default([])
+  /// Whether scopedPermissions and units were recorded (rows from before they were tracked: record silently)
+  unitsRecorded   Boolean  @default(false) @map("units_recorded")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   application     ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)

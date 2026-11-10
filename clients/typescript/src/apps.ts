@@ -13,6 +13,7 @@
  *   // caller.tenantId: scope every query by it; caller.person: apply their permissions
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import type { ScopedPermission } from './access.js';
 
 export const APP_AUDIENCE_PREFIX = 'urn:mt:app:';
 export const TOKEN_EXCHANGE = 'urn:ietf:params:oauth:grant-type:token-exchange';
@@ -73,8 +74,11 @@ export interface AppCaller {
   /** The calling application's product id */
   productId: string;
   scopes: Set<string>;
-  /** On behalf of a person: who, and their permissions in this application (apply these, never the caller's) */
-  person: { subject: string; permissions: string[] } | null;
+  /**
+   * On behalf of a person: who, and their permissions in this application
+   * (apply these, never the caller's; allows() in ./access.ts applies both kinds)
+   */
+  person: { subject: string; permissions: string[]; scopedPermissions: ScopedPermission[] } | null;
   claims: JWTPayload;
 }
 
@@ -105,7 +109,13 @@ export function createAppTokenVerifier({ issuer, productId, jwksUrl }: { issuer:
       tenantId,
       productId: String(claims.product_id ?? ''),
       scopes: new Set(String(claims.scope ?? '').split(' ').filter(Boolean)),
-      person: act && claims.sub ? { subject: claims.sub, permissions: Array.isArray(claims.permissions) ? (claims.permissions as string[]) : [] } : null,
+      person: act && claims.sub
+        ? {
+            subject: claims.sub,
+            permissions: Array.isArray(claims.permissions) ? (claims.permissions as string[]) : [],
+            scopedPermissions: Array.isArray(claims.scoped_permissions) ? (claims.scoped_permissions as ScopedPermission[]) : [],
+          }
+        : null,
       claims,
     };
   };

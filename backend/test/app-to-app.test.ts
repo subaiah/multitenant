@@ -177,7 +177,7 @@ test("on behalf of a person: the person's own access in the target, who's acting
   const verify = client.createAppTokenVerifier({ issuer: issuer(), productId: chat.key });
   const caller = await verify(`Bearer ${res.json.access_token}`);
   const adminId = (await A.db.user.findFirstOrThrow({ where: { tenantId: A.tenantId, email: A.adminEmail } })).id;
-  assert.deepEqual(caller.person, { subject: `${A.tenantId}.${adminId}`, permissions: [`${chat.key}.channels:create`, `${chat.key}:admin`].sort() }, "the person's permissions in the chat application");
+  assert.deepEqual(caller.person, { subject: `${A.tenantId}.${adminId}`, permissions: [`${chat.key}.channels:create`, `${chat.key}:admin`].sort(), scopedPermissions: [] }, "the person's permissions in the chat application (held everywhere: none scoped)");
   assert.equal(caller.tenantId, A.tenantId);
   assert.deepEqual(caller.claims.act, { sub: service.clientId, product_id: crm.key });
   // Without scope: every scope that allows on behalf of a person

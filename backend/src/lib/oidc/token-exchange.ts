@@ -76,6 +76,7 @@ export function registerTokenExchange(provider: Provider, refused: (err: unknown
     // The person's access in the target application, as at signing in to it
     const claims = await claimsFor(subject.accountId, person.account, connection.target.id, new Set(['roles']));
     const permissions = (claims.permissions as string[] | undefined) ?? [];
+    const scopedPermissions = claims.scoped_permissions ?? [];
 
     const [jwk] = await signingKeys();
     const key = await importJWK(jwk as never, 'RS256');
@@ -85,6 +86,7 @@ export function registerTokenExchange(provider: Provider, refused: (err: unknown
       tenant_id: tenantId,
       scope,
       permissions,
+      scoped_permissions: scopedPermissions,
       act: { sub: client.clientId, product_id: connection.caller.key },
     })
       .setProtectedHeader({ alg: 'RS256', kid: jwk.kid, typ: 'at+jwt' })

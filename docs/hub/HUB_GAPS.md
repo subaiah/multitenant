@@ -114,7 +114,7 @@ Notification and audit event types are declared in the manifest, so organization
 - Limits per application and plan (e.g. Hearth file size and history; AppForge workflow runs), declared in the manifest and sent in `organization.entitled` / `organization.entitlement_changed`, and readable through the API.
 - Usage reporting for metered features (`POST …/usage`, scope `usage.report`), e.g. AI tokens in AppForge.
 
-### G7. Scoped permissions and org units don't reach applications (P2)
+### G7. Scoped permissions and org units don't reach applications (P2): **done**
 
 **Now.** The kit enforces role assignments scoped to an organization, unit or resource (`lib/scopes.ts`). The `permissions` claim and the members API carry tenant-wide permissions only (`lib/oidc/accounts.ts`), so an application can't honour a unit-scoped grant. Product integrations expose people and groups but not organizations and units.
 
@@ -122,6 +122,8 @@ Notification and audit event types are declared in the manifest, so organization
 - A `scoped_permissions` claim (and members API field): `[{ permission, scopeType, scopeId }]`, application permissions only.
 - `GET …/organizations/{id}/org-units` and unit membership under `members.read`.
 - `unit.*` user events (membership changed) for applications that take user events.
+
+**Done.** The `scoped_permissions` claim (also in tokens made on a person's behalf), the members API's `scopedPermissions` and `memberOf` (with an `orgUnitId` filter), and `GET …/org-units` (under `members.read`) are in place. So are the user events `user.units_changed` and `units.changed`, with scoped changes in `user.permissions_changed`. The TypeScript client's `allows()` applies them the way the platform does. See [Scoped permissions and units](../PRODUCT_INTEGRATION.md#scoped-permissions-and-units).
 
 ### G8. No shared way to refer to another application's records (P3)
 
@@ -138,7 +140,7 @@ Notification and audit event types are declared in the manifest, so organization
 1. ~~**G3** platform services for applications~~ (done: notifications and audit)
 2. ~~**G1** application-to-application tokens~~ (done)
 3. ~~**G2** kinds, dependencies, bundles~~ (done)
-4. **G7** scoped permissions and org units
+4. ~~**G7** scoped permissions and org units~~ (done)
 5. **G5** embedding contract
 6. **G4** application events
 7. **G6** per-application billing and usage

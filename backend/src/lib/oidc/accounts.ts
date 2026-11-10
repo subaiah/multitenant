@@ -13,7 +13,7 @@
 import { controlDb } from '../prisma.js';
 import { dbForTenant } from '../tenant-db.js';
 import { getEnhancedUserPermissions } from '../../utils/authorization.js';
-import { permissionMatches } from '../../utils/permissions.js';
+import { applicationAccess } from '../application-access.js';
 
 export const accountIdFor = (tenantId: string, userId: string) => `${tenantId}.${userId}`;
 
@@ -95,11 +95,14 @@ export async function claimsFor(sub: string, record: AccountRecord, applicationI
   if (scopes.has('roles')) {
     const data = await getEnhancedUserPermissions(user.id, tenant.id, user.userType);
     // The permissions this application declares (Applications page) that the person holds
-    const declared = await controlDb.permission.findMany({ where: { applicationId }, select: { name: true }, orderBy: { name: 'asc' } });
+    const declared = await controlDb.permission.findMany({ where: { applicationId }, select: { name: true } });
+    const access = applicationAccess(data, declared.map((p) => p.name));
     Object.assign(claims, {
       roles: [...new Set([...data.sources.directRoles, ...data.sources.groupRoles])].sort(),
-      // Sorted here, not by the database, so the order doesn't depend on its collation
-      permissions: declared.map((p) => p.name).filter((p) => permissionMatches(data.permissions, p)).sort(),
+      permissions: access.permissions,
+      // Held only in part of the organization (lib/application-access.ts)
+      // (the same objects as the members API's scopedPermissions)
+      scoped_permissions: access.scopedPermissions,
     });
   }
   return claims;

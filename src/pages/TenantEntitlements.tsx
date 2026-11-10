@@ -50,8 +50,8 @@ function DependencyNote({ app, onKeys }: { app?: Application; onKeys: Set<string
 function DataAccessNote({ access, before = false }: { access?: Application['dataAccess']; before?: boolean }) {
   if (!access || (!access.peopleAndGroups && !access.toldWhenPeopleChange)) return null;
   const parts = [
-    access.peopleAndGroups && 'read your people and groups: names, email addresses, groups, roles, and which of its own permissions each person has',
-    access.toldWhenPeopleChange && 'be told when someone is added, changed, deactivated or removed, or their permissions for it change',
+    access.peopleAndGroups && 'read your people, groups and units: names, email addresses, groups, units, roles, and which of its own permissions each person has and where',
+    access.toldWhenPeopleChange && 'be told when someone is added, changed, deactivated or removed, or their units or permissions for it change',
   ].filter(Boolean) as string[];
   return (
     <p className="flex items-start gap-1.5 mt-2 text-xs text-slate-600 dark:text-slate-300">

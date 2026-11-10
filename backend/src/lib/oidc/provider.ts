@@ -67,7 +67,7 @@ export const CLAIMS: Record<string, string[]> = {
   email: ['email'],
   profile: ['name', 'updated_at'],
   organization: ['tenant_id', 'tenant_slug', 'tenant_name'],
-  roles: ['roles', 'permissions'],
+  roles: ['roles', 'permissions', 'scoped_permissions'],
 };
 
 const trimmed = (url: string) => url.replace(/\/+$/, '');

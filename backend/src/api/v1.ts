@@ -253,9 +253,32 @@ SCHEMAS.ProductMember = obj({
   userType: { type: 'string', enum: USER_TYPES }, status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
   groups: arrayOf(obj({ id: uuid, name: { type: 'string' } })),
   roles: arrayOf({ type: 'string' }),
-  permissions: arrayOf({ type: 'string', description: 'This product’s own permissions the person holds now (empty unless ACTIVE)' }),
+  permissions: arrayOf({ type: 'string', description: 'This product’s own permissions the person holds now across the whole organization (empty unless ACTIVE)' }),
+  scopedPermissions: { ...arrayOf(ref('ScopedPermission')), description: 'This product’s own permissions the person holds only in part of the organization (not repeated if held everywhere). As the scoped_permissions claim.' },
+  memberOf: obj({
+    organizations: arrayOf({ ...uuid, description: 'The organization’s own organizations they are directly in' }),
+    units: arrayOf({ ...uuid, description: 'Units they are directly in (not the units above)' }),
+  }, undefined, { description: 'From GET …/org-units' }),
   lastLoginAt: nullable(dateTime), createdAt: dateTime, updatedAt: dateTime,
 });
+
+SCHEMAS.ScopedPermission = obj({
+  permission: { type: 'string' },
+  scopeType: { type: 'string', enum: ['ORGANIZATION', 'ORG_UNIT', 'RESOURCE'], description: 'ORGANIZATION: one of the organization’s own organizations; ORG_UNIT: that unit and every unit below it; RESOURCE: one record' },
+  scopeId: { type: 'string', description: 'An id from GET …/org-units, or a resource id' },
+}, undefined, { description: 'A permission held in part of the organization only' });
+
+SCHEMAS.ProductOrgUnits = obj({
+  organizations: arrayOf(obj({
+    id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string' },
+    memberCount: { type: 'integer', description: 'People directly in it (not through a unit)' }, createdAt: dateTime, updatedAt: dateTime,
+  })),
+  units: arrayOf(obj({
+    id: uuid, organizationId: uuid, parentUnitId: nullable(uuid), unitType: { type: 'string', description: 'DIVISION, DEPARTMENT, TEAM, LOCATION' },
+    name: { type: 'string' }, description: nullable({ type: 'string' }), memberCount: { type: 'integer', description: 'People directly in it' },
+    createdAt: dateTime, updatedAt: dateTime,
+  })),
+}, undefined, { description: 'All of the organization’s own organizations and units: units form a tree by parentUnitId' });
 
 SCHEMAS.ProductGroup = obj({
   id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
@@ -306,6 +329,7 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       ...productPage,
       status: { type: 'string', enum: ['ACTIVE', 'INACTIVE', 'PENDING'] },
       groupId: { ...uuid, description: 'Only people in this group now' },
+      orgUnitId: { ...uuid, description: 'Only people directly in this unit' },
       updatedSince: { ...dateTime, description: 'Only people whose account changed since (not group or role changes)' },
       search: { type: 'string', description: 'In email and name' },
     },
@@ -314,6 +338,9 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
     summary: 'An organization’s groups, by name. Only while it has the product turned on.', scope: 'members.read',
     query: { ...productPage, status: { type: 'string', enum: ACTIVE_INACTIVE } },
     responses: { 200: listOf('groups', 'ProductGroup') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/org-units', operationId: 'listProductOrgUnits', tag: 'Products',
+    summary: 'An organization’s own organizations and units (the tree scoped permissions refer to). Only while it has the product turned on.', scope: 'members.read',
+    responses: { 200: ref('ProductOrgUnits') } },
   { method: 'GET', path: '/product-integrations/events', operationId: 'listProductEvents', tag: 'Products',
     summary: 'The product’s lifecycle events, oldest first: to catch up on any it missed', scope: 'organizations.read',
     query: {
