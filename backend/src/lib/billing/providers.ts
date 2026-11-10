@@ -83,6 +83,12 @@ export interface Provider {
   /** Where the customer manages cards and sees invoices (Stripe's portal) */
   portalUrl?(customerId: string, returnUrl: string): Promise<string>;
   verifyWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): WebhookEvent;
+  /**
+   * An amount on the subscription's next invoice (an application's price or
+   * usage for the period just ended: lib/billing/app-charges.ts). Razorpay: a
+   * subscription add-on; Stripe: an invoice item. Returns the provider's id.
+   */
+  addCharge(sub: { id: string; customerId: string | null }, c: { amount: number; currency: string; description: string; idempotencyKey: string }): Promise<string>;
 }
 
 export class ProviderError extends AppError {
@@ -190,6 +196,14 @@ function razorpay(cfg: NonNullable<typeof config.billing.razorpay>): Provider {
         paidAt: fromUnix(i.paid_at),
         createdAt: fromUnix(i.date) ?? fromUnix(i.created_at) ?? new Date(),
       }));
+    },
+    async addCharge(sub, c) {
+      // Razorpay has no idempotency key: the charge row is marked ADDED right after, and only PENDING or FAILED ones are sent
+      const addon = await call('POST', `/subscriptions/${encodeURIComponent(sub.id)}/addons`, {
+        item: { name: c.description.slice(0, 120), amount: c.amount, currency: c.currency.toUpperCase(), description: c.description.slice(0, 2048) },
+        quantity: 1,
+      });
+      return addon.id as string;
     },
     verifyWebhook(rawBody, headers) {
       const signature = header(headers, 'x-razorpay-signature') ?? '';
@@ -329,6 +343,17 @@ function stripe(cfg: NonNullable<typeof config.billing.stripe>): Provider {
         paidAt: fromUnix(i.status_transitions?.paid_at),
         createdAt: fromUnix(i.created) ?? new Date(),
       }));
+    },
+    async addCharge(sub, c) {
+      if (!sub.customerId) throw new ProviderError('STRIPE', 'the subscription has no customer to charge');
+      const item = await call('POST', '/invoiceitems', {
+        customer: sub.customerId,
+        subscription: sub.id,
+        amount: c.amount,
+        currency: c.currency.toLowerCase(),
+        description: c.description.slice(0, 500),
+      }, c.idempotencyKey);
+      return item.id as string;
     },
     async portalUrl(customerId, returnUrl) {
       const session = await call('POST', '/billing_portal/sessions', { customer: customerId, return_url: returnUrl });

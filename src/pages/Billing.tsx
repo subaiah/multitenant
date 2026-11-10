@@ -34,6 +34,53 @@ interface Overview {
   };
   plans: Plan[];
   invoices: { id: string; number: string | null; amount: number; currency: string; status: string; url: string | null; periodStart: string | null; periodEnd: string | null; paidAt: string | null; createdAt: string }[];
+  /** Applications charged on the subscription (backend lib/billing/app-charges.ts) */
+  applications?: {
+    estimate: null | { periodStart: string; periodEnd: string; total: number; currency: string; lines: { applicationId: string; kind: string; meterKey: string; amount: number; currency: string; description: string }[] };
+    charges: { id: string; description: string; amount: number; currency: string; periodEnd: string; status: 'ADDED' | 'PENDING' | 'FAILED' }[];
+  };
+}
+
+const CHARGE_STATUS = { ADDED: 'On your next invoice', PENDING: 'Being added', FAILED: "Couldn't be added: the platform team will look" } as const;
+
+/** What applications cost on top of the plan: this period so far, and charges already made */
+function ApplicationCharges({ a }: { a: NonNullable<Overview['applications']> }) {
+  if (!a.estimate?.lines.length && !a.charges.length) return null;
+  return (
+    <Card title="Applications" description="Some applications are charged on top of your plan. Each period's charges go on the invoice after it ends." className="min-w-0">
+      {a.estimate && a.estimate.lines.length > 0 && (
+        <div>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            This period so far (until {formatDate(a.estimate.periodEnd)}): <strong className="text-slate-800 dark:text-white tabular-nums">{formatMoney(a.estimate.total, a.estimate.currency)}</strong>
+          </p>
+          <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-700 text-sm">
+            {a.estimate.lines.map((l) => (
+              <li key={`${l.applicationId}-${l.kind}-${l.meterKey}`} className="py-1.5 flex justify-between gap-4">
+                <span className="text-slate-700 dark:text-slate-200 min-w-0">{l.description}</span>
+                <span className="tabular-nums text-slate-800 dark:text-white whitespace-nowrap">{formatMoney(l.amount, l.currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {a.charges.length > 0 && (
+        <div className={a.estimate?.lines.length ? 'mt-4' : ''}>
+          <h3 className="text-sm font-medium text-slate-800 dark:text-white">Charged</h3>
+          <ul className="mt-1 divide-y divide-slate-100 dark:divide-slate-700 text-sm">
+            {a.charges.map((c) => (
+              <li key={c.id} className="py-1.5 flex flex-wrap justify-between gap-x-4">
+                <span className="text-slate-700 dark:text-slate-200 min-w-0">{c.description}</span>
+                <span className="text-right">
+                  <span className="tabular-nums text-slate-800 dark:text-white">{formatMoney(c.amount, c.currency)}</span>
+                  <span className={`block text-xs ${c.status === 'FAILED' ? 'text-red-600 dark:text-red-400' : 'text-slate-500'}`}>{CHARGE_STATUS[c.status]}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 const LIVE = ['ACTIVE', 'PAST_DUE', 'UNPAID'];
@@ -348,6 +395,8 @@ function Content({ o, canManage, busy, error, notice, interval, setInterval, cur
           </p>
         )}
       </section>
+
+      {o.applications && <ApplicationCharges a={o.applications} />}
 
       <Card title="Invoices" className="min-w-0">
         {o.invoices.length === 0 ? (

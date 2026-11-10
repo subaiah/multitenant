@@ -16,7 +16,7 @@ Version 2 adds what an application needs to work **with other applications** in 
 | `requires`, `integratesWith` | Implemented: enforced when organizations turn applications on and off, never turned on automatically; plus bundles ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#dependencies-and-bundles)) |
 | `embeds` | Implemented, with the embeds list, branding and the application launcher ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#embedding-another-application)) |
 | `events` (emits, subscribes) | Implemented, with `events.publish` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#events-between-applications)) |
-| `limits`, `usage` | Implemented: values per plan, sent with lifecycle events and told again when they change; usage reported with `usage.report` and totalled per month ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#plans-limits-and-usage)). Charging per application is next. |
+| `limits`, `usage` | Implemented: values per plan, sent with lifecycle events and told again when they change; usage reported with `usage.report` and totalled per month ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#plans-limits-and-usage)). Charged per application with prices staff set ([Prices](../PRODUCT_INTEGRATION.md#prices)). |
 | `resources`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
 
 Also implemented:

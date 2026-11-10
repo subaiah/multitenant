@@ -5,11 +5,12 @@
  * organizations on that plan are told. backend/src/routes/application-limits.ts.
  */
 import { useEffect, useState } from 'react';
-import { Gauge } from 'lucide-react';
+import { Gauge, Plus, Trash2 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPut } from '../lib/api-client';
 import { invalidateApi } from '../lib/query';
-import { Card, inputClass, secondaryButtonClass } from './ui';
+import { Card, inputClass, primaryButtonClass, secondaryButtonClass, selectClass } from './ui';
+import { formatMoney, fromMinorUnits, toMinorUnits } from '../lib/money';
 
 type Value = number | boolean | null;
 interface Limit { key: string; label: string; type: 'integer' | 'boolean'; unlimited: boolean; unit: string | null; default: Value; values: Record<string, Value> }
@@ -95,19 +96,134 @@ function LimitRow({ l, plans, applicationId }: { l: Limit; plans: LimitsInfo['pl
   );
 }
 
+interface PricesInfo {
+  currencies: string[];
+  prices: { currency: string; interval: 'MONTH' | 'YEAR'; model: 'flat' | 'per_seat'; unitAmount: number }[];
+  meters: { key: string; label: string; unit: string; prices: { currency: string; unitAmount: number; perQuantity: number; includedQuantity: number }[] }[];
+}
+/** The shared input style without its full width, for inputs in a row */
+const narrow = inputClass.replace('w-full ', '');
+type PriceRow = { currency: string; interval: 'MONTH' | 'YEAR'; model: 'flat' | 'per_seat'; amount: string };
+type MeterRow = { key: string; currency: string; amount: string; perQuantity: string; included: string };
+
+/** What organizations pay for it on their subscription, and for its meters (backend lib/billing/app-charges.ts) */
+function Prices({ applicationId }: { applicationId: string }) {
+  const path = `/applications/${applicationId}/prices`;
+  const info = useApi<PricesInfo>(path);
+  const [rows, setRows] = useState<PriceRow[] | null>(null);
+  const [meterRows, setMeterRows] = useState<MeterRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    if (!info.data) return;
+    setRows(info.data.prices.map((p) => ({ currency: p.currency, interval: p.interval, model: p.model, amount: String(fromMinorUnits(p.unitAmount, p.currency)) })));
+    setMeterRows(info.data.meters.flatMap((m) => m.prices.map((p) => ({ key: m.key, currency: p.currency, amount: String(fromMinorUnits(p.unitAmount, p.currency)), perQuantity: String(p.perQuantity), included: String(p.includedQuantity) }))));
+  }, [info.data]);
+  if (!info.data || !rows || !meterRows) return null;
+  const currencies = info.data.currencies.length ? info.data.currencies : ['INR', 'USD'];
+  const meters = info.data.meters;
+
+  const save = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await apiPut(path, {
+        prices: rows.map((r) => ({ currency: r.currency, interval: r.interval, model: r.model, unitAmount: toMinorUnits(Number(r.amount || 0), r.currency) })),
+        meters: meterRows.map((r) => ({ key: r.key, currency: r.currency, unitAmount: toMinorUnits(Number(r.amount || 0), r.currency), perQuantity: Number(r.perQuantity || 1), includedQuantity: Number(r.included || 0) })),
+      });
+      await invalidateApi(path);
+      setMessage({ ok: true, text: 'Saved. Organizations are charged from the end of their current period.' });
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : 'Saving failed' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const setRow = (i: number, change: Partial<PriceRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...change } : r)));
+  const setMeter = (i: number, change: Partial<MeterRow>) => setMeterRows(meterRows.map((r, j) => (j === i ? { ...r, ...change } : r)));
+
+  return (
+    <div>
+      <h3 className="text-sm font-medium text-slate-800 dark:text-slate-100">Prices</h3>
+      <p className="text-xs text-slate-500 mt-0.5">Charged on organizations' subscriptions, for each period they had it on (not trials), on the next invoice.</p>
+      <ul className="mt-2 space-y-2">
+        {rows.map((r, i) => (
+          <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
+            <select aria-label="Currency" value={r.currency} onChange={(e) => setRow(i, { currency: e.target.value })} className={selectClass}>
+              {[...new Set([...currencies, r.currency])].map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} className={`${narrow} w-28`} />
+            <select aria-label="How it's charged" value={r.model} onChange={(e) => setRow(i, { model: e.target.value as PriceRow['model'] })} className={selectClass}>
+              <option value="flat">per organization</option>
+              <option value="per_seat">per user</option>
+            </select>
+            <select aria-label="Period" value={r.interval} onChange={(e) => setRow(i, { interval: e.target.value as PriceRow['interval'] })} className={selectClass}>
+              <option value="MONTH">a month</option>
+              <option value="YEAR">a year</option>
+            </select>
+            <button type="button" aria-label="Remove price" className="p-2 text-slate-400 hover:text-red-600" onClick={() => setRows(rows.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400" onClick={() => setRows([...rows, { currency: currencies[0], interval: 'MONTH', model: 'flat', amount: '' }])}>
+        <Plus size={14} aria-hidden /> Add a price
+      </button>
+      {meters.length > 0 && (
+        <>
+          <h4 className="mt-4 text-sm font-medium text-slate-800 dark:text-slate-100">Usage</h4>
+          <ul className="mt-2 space-y-2">
+            {meterRows.map((r, i) => {
+              const m = meters.find((x) => x.key === r.key);
+              return (
+                <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                  <select aria-label="Meter" value={r.key} onChange={(e) => setMeter(i, { key: e.target.value })} className={selectClass}>
+                    {meters.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+                  </select>
+                  <select aria-label="Currency" value={r.currency} onChange={(e) => setMeter(i, { currency: e.target.value })} className={selectClass}>
+                    {[...new Set([...currencies, r.currency])].map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                  <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setMeter(i, { amount: e.target.value })} className={`${narrow} w-24`} />
+                  <span className="text-slate-500">per</span>
+                  <input aria-label="Per how many" type="number" min={1} step={1} value={r.perQuantity} onChange={(e) => setMeter(i, { perQuantity: e.target.value })} className={`${narrow} w-24`} />
+                  <span className="text-slate-500">{m?.unit}, first</span>
+                  <input aria-label="Included each period" type="number" min={0} value={r.included} onChange={(e) => setMeter(i, { included: e.target.value })} className={`${narrow} w-24`} />
+                  <span className="text-slate-500">free</span>
+                  <button type="button" aria-label="Remove usage price" className="p-2 text-slate-400 hover:text-red-600" onClick={() => setMeterRows(meterRows.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
+                </li>
+              );
+            })}
+          </ul>
+          <button type="button" className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400" onClick={() => setMeterRows([...meterRows, { key: meters[0].key, currency: currencies[0], amount: '', perQuantity: '1', included: '0' }])}>
+            <Plus size={14} aria-hidden /> Add a usage price
+          </button>
+        </>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" className={primaryButtonClass} disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save prices'}</button>
+        {message && <p role={message.ok ? 'status' : 'alert'} className={`text-sm ${message.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{message.text}</p>}
+      </div>
+      {rows.length > 0 && (
+        <p className="mt-2 text-xs text-slate-500">
+          {rows.filter((r) => r.amount).map((r) => `${formatMoney(toMinorUnits(Number(r.amount), r.currency), r.currency)} ${r.model === 'per_seat' ? 'per user ' : ''}a ${r.interval === 'YEAR' ? 'year' : 'month'}`).join(' · ')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ApplicationPlans({ applicationId, applicationName }: { applicationId: string; applicationName: string }) {
   const limits = useApi<LimitsInfo>(`/applications/${applicationId}/limits`);
   const usage = useApi<UsageInfo>(`/applications/${applicationId}/usage`);
   const ls = limits.data?.limits ?? [];
   const meters = usage.data?.meters ?? [];
-  if (!ls.length && !meters.length) return null;
   const plans = limits.data?.plans ?? [];
 
   return (
     <Card className="mt-6" title="Plans and usage"
-      description={`What each plan allows in ${applicationName} (from its manifest), and what organizations used this month. Organizations are told when their limits change.`}>
+      description={`What ${applicationName} costs, what each plan allows in it (from its manifest), and what organizations used this month.`}>
+      <Prices applicationId={applicationId} />
       {ls.length > 0 && (
-        <div className="relative overflow-x-auto -mx-1 px-1">
+        <div className="relative overflow-x-auto -mx-1 px-1 mt-5">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500">

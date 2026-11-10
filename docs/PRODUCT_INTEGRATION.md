@@ -659,6 +659,18 @@ Report them from the server: `POST …/organizations/{id}/usage` (scope `usage.r
 
 `GET …/organizations/{id}/usage?month=YYYY-MM` gives the month's totals per meter (calendar months, UTC). Administrators see this month's totals on Application Entitlements ("Used this month"). Platform staff see them per organization under Plans and usage.
 
+### Prices
+
+Platform staff can charge for an application on the organization's own subscription. No second subscription is needed, and the application doesn't handle payments.
+
+- **The application's price** is set per currency and period, under **Plans and usage → Prices**: either per organization, or per user (times the subscription's users).
+- **Usage prices:** each meter can have its own price: an amount per so many units, after some included free each period. For example, ₹100 per 1,000 tokens after the first 1,000.
+- **Charged in arrears.** When an organization's billing period ends, each application it had **turned on** during that period (not a trial) is charged its price, and each priced meter is charged for that period's usage. The charges go on the **next invoice**: a subscription add-on at Razorpay, an invoice item at Stripe.
+- **Once each.** Each charge is recorded once per organization, application, period and kind before it's sent. A failed one is retried by the hourly billing pass. Stripe calls carry an idempotency key. Razorpay has none, so a charge cut off mid-call isn't sent again automatically: staff check it, so nobody is charged twice.
+- Administrators see **Applications** on their Billing page: this period's estimate so far, and what was charged.
+
+The application only has to report usage accurately (`idempotencyKey` on every record).
+
 ## Events between applications
 
 An application can announce what happens in it (a deal won, a workflow finished), for the organization's other applications and for its own webhooks. It doesn't need to know who listens.

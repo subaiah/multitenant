@@ -16,6 +16,7 @@
  * changed at the provider when they differ. Stripe prorates straight away;
  * Razorpay applies the new count from the next billing cycle.
  */
+import { sendCharges, settlePeriod } from './app-charges.js';
 import { scheduleLimitsCheck } from '../product-limits.js';
 import { config } from '../../config/env.js';
 import { controlDb } from '../prisma.js';
@@ -101,6 +102,10 @@ export async function applySubscription(name: ProviderName, ps: ProviderSubscrip
   if (Object.keys(tenantData).length) await controlDb.tenant.update({ where: { id: tenantId }, data: tenantData });
   // Another plan: its applications' limits may differ (lib/product-limits.ts)
   if (tenantData.plan) scheduleLimitsCheck({ tenantId });
+  // A period ended (the provider moved it on): its applications are charged on the next invoice (app-charges.ts)
+  if (sameSub && current?.currentPeriodEnd && ps.currentPeriodEnd && ps.currentPeriodEnd > current.currentPeriodEnd && LIVE.includes(ps.status)) {
+    await settlePeriod(saved, current.currentPeriodEnd).catch((err) => console.error(`Charging applications for ${tenantId} failed`, err));
+  }
 
   // The audit trail (and, through it, notifications)
   const system = { type: 'SYSTEM' } as const;
@@ -303,7 +308,7 @@ export async function syncSeats(tenantId: string): Promise<'unchanged' | 'change
 
 /** The hourly pass: grace periods running out, seats, and subscriptions we may have missed news of */
 export async function runBillingMaintenance(now = new Date()) {
-  const result = { checked: 0, readOnly: 0, seats: { changed: 0, failed: 0 }, errors: [] as string[] };
+  const result = { checked: 0, readOnly: 0, seats: { changed: 0, failed: 0 }, applicationCharges: 0, errors: [] as string[] };
   const subs = await controlDb.subscription.findMany({ where: { status: { in: [...LIVE, 'INCOMPLETE'] } }, select: { tenantId: true, provider: true, providerSubscriptionId: true, status: true, createdAt: true } });
   for (const s of subs) {
     const name = s.provider as ProviderName;
@@ -322,6 +327,8 @@ export async function runBillingMaintenance(now = new Date()) {
       result.errors.push(`${s.tenantId}: ${(err as Error).message}`);
     }
   }
+  // Application charges that didn't reach the provider yet
+  result.applicationCharges = await sendCharges().catch((err) => (result.errors.push(`application charges: ${(err as Error).message}`), 0));
   result.readOnly = await controlDb.tenant.count({ where: { paymentRequiredSince: { not: null } } });
   return result;
 }

@@ -74,6 +74,67 @@ export const applicationLimitRoutes: FastifyPluginAsync = async (fastify) => {
     return { key, values: body.values };
   });
 
+  // Prices: what organizations are charged for it on their subscription (lib/billing/app-charges.ts)
+  fastify.get('/:id/prices', {
+    config: { permission: 'app-registry:manage' },
+    schema: { tags: ['applications'], summary: 'The application’s prices, and its meters’ prices' },
+  }, async (request) => {
+    const { id } = params.parse(request.params);
+    const [prices, meters, currencies] = await Promise.all([
+      controlDb.applicationPrice.findMany({ where: { applicationId: id }, orderBy: [{ currency: 'asc' }, { interval: 'asc' }] }),
+      controlDb.productUsageMeter.findMany({ where: { applicationId: id, retiredAt: null }, include: { prices: { orderBy: { currency: 'asc' } } }, orderBy: { position: 'asc' } }),
+      controlDb.billingPrice.findMany({ where: { active: true }, select: { currency: true }, distinct: ['currency'] }),
+    ]);
+    return {
+      /** The currencies plans are sold in: price the application in each */
+      currencies: currencies.map((c) => c.currency.toUpperCase()).sort(),
+      prices: prices.map((p) => ({ currency: p.currency, interval: p.interval, model: p.model, unitAmount: p.unitAmount })),
+      meters: meters.map((m) => ({ key: m.key, label: m.label, unit: m.unit, prices: m.prices.map((p) => ({ currency: p.currency, unitAmount: p.unitAmount, perQuantity: p.perQuantity, includedQuantity: p.includedQuantity })) })),
+    };
+  });
+
+  fastify.put('/:id/prices', {
+    config: { permission: 'app-registry:manage' },
+    schema: { tags: ['applications'], summary: 'Replace the application’s prices and its meters’ prices' },
+  }, async (request) => {
+    const { id } = params.parse(request.params);
+    const currency = z.string().regex(/^[A-Za-z]{3}$/, 'A three-letter currency code').transform((c) => c.toUpperCase());
+    const amount = z.number().int().min(0).max(100_000_000);
+    const body = z.object({
+      prices: z.array(z.object({ currency, interval: z.enum(['MONTH', 'YEAR']), model: z.enum(['flat', 'per_seat']), unitAmount: amount })).max(20),
+      meters: z.array(z.object({
+        key: z.string().max(100), currency, unitAmount: amount,
+        perQuantity: z.number().int().min(1).max(1_000_000_000).default(1),
+        includedQuantity: z.number().min(0).max(1e12).default(0),
+      })).max(60).default([]),
+    }).parse(request.body);
+    const app = await controlDb.applicationRegistry.findUnique({ where: { id }, select: { name: true, usageMeters: { where: { retiredAt: null }, select: { id: true, key: true } } } });
+    if (!app) throw new AppError('Application not found', 404);
+    const seen = new Set<string>();
+    for (const p of body.prices) {
+      const k = `${p.currency} ${p.interval}`;
+      if (seen.has(k)) throw new AppError(`Two prices for ${k}`, 400, true, 'INVALID_PRICE');
+      seen.add(k);
+    }
+    const meterId = new Map(app.usageMeters.map((m) => [m.key, m.id]));
+    for (const m of body.meters) {
+      if (!meterId.has(m.key)) throw new AppError(`"${m.key}" isn't one of this application's meters`, 400, true, 'INVALID_PRICE');
+      const k = `${m.key} ${m.currency}`;
+      if (seen.has(k)) throw new AppError(`Two prices for ${m.key} in ${m.currency}`, 400, true, 'INVALID_PRICE');
+      seen.add(k);
+    }
+    await controlDb.$transaction(async (tx) => {
+      await tx.applicationPrice.deleteMany({ where: { applicationId: id } });
+      if (body.prices.length) await tx.applicationPrice.createMany({ data: body.prices.map((p) => ({ applicationId: id, ...p })) });
+      await tx.meterPrice.deleteMany({ where: { meterId: { in: [...meterId.values()] } } });
+      if (body.meters.length) {
+        await tx.meterPrice.createMany({ data: body.meters.map((m) => ({ meterId: meterId.get(m.key)!, currency: m.currency, unitAmount: m.unitAmount, perQuantity: m.perQuantity, includedQuantity: m.includedQuantity })) });
+      }
+    });
+    await audit(request, 'application.prices_changed', { resource: { type: 'application', id, label: app.name }, details: { prices: body.prices, meters: body.meters } });
+    return { prices: body.prices, meters: body.meters };
+  });
+
   // Usage reported for a month, per organization and meter
   fastify.get('/:id/usage', {
     config: { permission: 'app-registry:manage' },

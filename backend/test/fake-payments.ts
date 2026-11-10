@@ -25,6 +25,8 @@ export interface FakePayments {
     /** A new billing cycle: scheduled changes apply, an invoice is paid */
     renew: (subId: string) => void;
     setStatus: (subId: string, status: string) => void;
+    /** Add-ons put on subscriptions' next invoices */
+    addons: Any[];
   };
   stripe: {
     prices: Map<string, Any>;
@@ -33,6 +35,10 @@ export interface FakePayments {
     /** The customer pays at Checkout: a subscription is made */
     complete: (sessionId: string) => Any;
     setStatus: (subId: string, status: string) => void;
+    /** A new billing period: the item's period end moves on a month */
+    renew: (subId: string) => void;
+    /** Invoice items put on subscriptions' next invoices */
+    invoiceItems: Any[];
   };
 }
 
@@ -42,8 +48,8 @@ export async function startFakePayments(port = 0): Promise<FakePayments> {
   const run = Math.random().toString(36).slice(2, 8);
   const id = (prefix: string) => `${prefix}_${run}${(++n).toString().padStart(4, '0')}`;
   const calls: FakePayments['calls'] = [];
-  const rz = { plans: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[] };
-  const st = { prices: new Map<string, Any>(), sessions: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[] };
+  const rz = { plans: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[], addons: [] as Any[] };
+  const st = { prices: new Map<string, Any>(), sessions: new Map<string, Any>(), subs: new Map<string, Any>(), invoices: [] as Any[], invoiceItems: [] as Any[], idempotent: new Map<string, Any>() };
   let base = '';
 
   const rzInvoice = (sub: Any) => {
@@ -151,6 +157,14 @@ export async function startFakePayments(port = 0): Promise<FakePayments> {
           else sub.status = 'cancelled';
           return json(200, sub);
         }
+        if ((m = path.match(/^\/v1\/subscriptions\/([^/]+)\/addons$/)) && req.method === 'POST') {
+          const sub = rz.subs.get(m[1]);
+          if (!sub) return json(400, { error: { description: 'The id provided does not exist' } });
+          if (!['authenticated', 'active'].includes(sub.status)) return json(400, { error: { description: 'Addons can be created only for active subscriptions' } });
+          const addon = { id: id('ao'), entity: 'addon', subscription_id: sub.id, item: body.item, quantity: body.quantity ?? 1, invoice_id: null };
+          rz.addons.push(addon);
+          return json(200, addon);
+        }
         if (req.method === 'GET' && path === '/v1/invoices') {
           return json(200, { entity: 'collection', items: rz.invoices.filter((i) => i.subscription_id === url.searchParams.get('subscription_id')) });
         }
@@ -198,6 +212,16 @@ export async function startFakePayments(port = 0): Promise<FakePayments> {
             return json(200, sub);
           }
         }
+        if (req.method === 'POST' && path === '/v1/invoiceitems') {
+          // Stripe replays the first answer for a repeated idempotency key
+          const key = String(req.headers['idempotency-key'] ?? '');
+          if (key && st.idempotent.has(key)) return json(200, st.idempotent.get(key));
+          if (!body.customer) return json(400, { error: { message: 'Missing required param: customer.' } });
+          const item = { id: id('ii'), object: 'invoiceitem', customer: body.customer, subscription: body.subscription, amount: Number(body.amount), currency: body.currency, description: body.description };
+          st.invoiceItems.push(item);
+          if (key) st.idempotent.set(key, item);
+          return json(200, item);
+        }
         if (req.method === 'GET' && path === '/v1/invoices') return json(200, { object: 'list', data: st.invoices.filter((i) => i.subscription === url.searchParams.get('subscription')) });
         if (req.method === 'POST' && path === '/v1/billing_portal/sessions') return json(200, { id: id('bps'), url: `${base}/stripe/portal/${body.customer}` });
         return json(404, { error: { message: `No fake for ${req.method} ${path}` } });
@@ -221,12 +245,15 @@ export async function startFakePayments(port = 0): Promise<FakePayments> {
         if (sub.scheduled) Object.assign(sub, sub.scheduled);
         sub.scheduled = null;
         if (sub.cancel_at_cycle_end) sub.status = 'cancelled';
-        Object.assign(sub, { current_start: now(), current_end: now() + 30 * 86400 });
+        // The next period starts where the last ended
+        const start = sub.current_end ?? now();
+        Object.assign(sub, { current_start: start, current_end: start + 30 * 86400 });
         rzInvoice(sub);
       },
       setStatus(subId, status) {
         rz.subs.get(subId)!.status = status;
       },
+      addons: rz.addons,
     },
     stripe: {
       prices: st.prices,
@@ -236,6 +263,13 @@ export async function startFakePayments(port = 0): Promise<FakePayments> {
       setStatus(subId, status) {
         st.subs.get(subId)!.status = status;
       },
+      renew(subId) {
+        const sub = st.subs.get(subId)!;
+        const item = sub.items.data[0];
+        item.current_period_end += 30 * 86400;
+        stInvoice(sub);
+      },
+      invoiceItems: st.invoiceItems,
     },
   };
 }
