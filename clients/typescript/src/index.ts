@@ -34,6 +34,7 @@ export type ProductEmbed = Schemas['ProductEmbed'];
 export type ProductBranding = Schemas['ProductBranding'];
 export type ProductLauncher = Schemas['ProductLauncher'];
 export type ProductPublished = Schemas['ProductPublished'];
+export type ResourceType = Schemas['ResourceType'];
 export type ProductGroup = Schemas['ProductGroup'];
 export type ProductEvent = Schemas['ProductEvent'];
 
@@ -111,3 +112,6 @@ export { allows, permissionMatches, unitTree, type Access, type ScopedPermission
 
 // Applications inside each other's pages (docs/hub/HUB_GAPS.md G5)
 export { themeCss, launcherScriptUrl } from './embeds.js';
+
+// Records in other applications (docs/hub/HUB_GAPS.md G8)
+export { parseResourceUri, formatResourceUri, checkAccess, createAccessCheckHandler, type AccessCheckRequest, type AccessCheckResult } from './records.js';

@@ -15,6 +15,7 @@ import { RateLimited, sendProductNotification, writeProductAuditEvent } from '..
 import { brandingOf, embedsFor, launcherFor } from '../lib/product-embeds.js';
 import { publishProductEvent } from '../lib/product-events.js';
 import { reportUsage, usageForApplication } from '../lib/product-usage.js';
+import { resolveResource, resourceTypes } from '../lib/product-resources.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
@@ -152,6 +153,14 @@ export async function productV1Routes(fastify: FastifyInstance) {
     const { organizationId } = request.params as { organizationId: string };
     const { month } = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() }).parse(request.query);
     return usageForApplication(request.service!, organizationId, month);
+  });
+
+  // Other applications' records (docs/hub/HUB_GAPS.md G8): the types, and an identifier as a link
+  fastify.get('/product-integrations/resource-types', { config: { serviceScope: 'organizations.read' } }, async () => resourceTypes());
+  fastify.get('/product-integrations/organizations/:organizationId/resources/resolve', { config: { serviceScope: 'organizations.read' }, schema: { params: orgParams } }, async (request) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const { uri } = z.object({ uri: z.string().max(400) }).parse(request.query);
+    return resolveResource(request.service!.applicationId, organizationId, uri);
   });
 
   // The result of setting an organization up, after answering organization.entitled with 202 (lib/product-lifecycle.ts)

@@ -150,9 +150,16 @@ See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage).
 
 **Done.** The `scoped_permissions` claim (also in tokens made on a person's behalf), the members API's `scopedPermissions` and `memberOf` (with an `orgUnitId` filter), and `GET …/org-units` (under `members.read`) are in place. So are the user events `user.units_changed` and `units.changed`, with scoped changes in `user.permissions_changed`. The TypeScript client's `allows()` applies them the way the platform does. See [Scoped permissions and units](../PRODUCT_INTEGRATION.md#scoped-permissions-and-units).
 
-### G8. No shared way to refer to another application's records (P3)
+### G8. No shared way to refer to another application's records (P3): **done**
 
 **Needed.** A resource identifier convention, `mt://<productId>/<type>/<id>` (tenant implied by the token), and an exposed scope `<productId>.records:check` with `POST /access-check` on each application that owns records. Hearth record threads and document attachments use it to ask the owning application whether a person can see a record.
+
+**Done.**
+- Manifest `resources` (with `api.accessCheckPath`). A manifest with resources must expose `records:check`.
+- `GET …/resource-types` and `GET …/organizations/{id}/resources/resolve`.
+- The TypeScript client's `parseResourceUri`, `formatResourceUri`, `checkAccess` and `createAccessCheckHandler`.
+
+See [Records in other applications](../PRODUCT_INTEGRATION.md#records-in-other-applications).
 
 ### G9. No application health or deployment view (P3)
 

@@ -27,6 +27,7 @@ interface ImportResult {
   embeds?: { tags: string[] } | { leftAlone: true };
   events?: { emits: number; subscribes: number; notDeclaredYet: string[] } | { leftAlone: true };
   limits?: { added: string[]; updated: string[]; retired: string[]; meters: number } | { leftAlone: true };
+  resources?: { types: string[] } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -65,6 +66,7 @@ function Plan({ plan }: { plan: ImportResult }) {
       <DependenciesLine dependencies={plan.dependencies} />
       <EventsLine events={plan.events} />
       <LimitsLine limits={plan.limits} />
+      <ResourcesLine resources={plan.resources} />
       <EmbedsLine embeds={plan.embeds} />
     </div>
   );
@@ -135,6 +137,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         <DependenciesLine dependencies={result.dependencies} />
         <EventsLine events={result.events} />
         <LimitsLine limits={result.limits} />
+        <ResourcesLine resources={result.resources} />
         <EmbedsLine embeds={result.embeds} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
@@ -273,6 +276,16 @@ function LimitsLine({ limits }: { limits?: ImportResult['limits'] }) {
   return (
     <p className="text-sm text-slate-600 dark:text-slate-300">
       Plan limits: {added.length} added, {updated.length} updated{retired.length ? `, ${retired.length} no longer listed (kept)` : ''}. Set each plan's values in Plans and usage. Reports usage of {meters} feature{meters === 1 ? '' : 's'}.
+    </p>
+  );
+}
+
+/** Record types other applications can refer to */
+function ResourcesLine({ resources }: { resources?: ImportResult['resources'] }) {
+  if (!resources || 'leftAlone' in resources || !resources.types.length) return null;
+  return (
+    <p className="text-sm text-slate-600 dark:text-slate-300">
+      Records other applications can refer to: <span className="font-mono text-xs break-all">{resources.types.join(', ')}</span>
     </p>
   );
 }
