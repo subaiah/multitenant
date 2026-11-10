@@ -312,6 +312,13 @@ SCHEMAS.ProductLauncher = obj({
   })),
 }, undefined, { description: 'What <mt-app-launcher> shows: the organization’s applications this person can open, as the portal’s menu shows them' });
 
+SCHEMAS.ProductPublished = obj({
+  id: { type: 'string', description: 'evt_…: every copy carries it as data.eventId (webhooks: id); deduplicate on it' },
+  applications: { type: 'integer', description: 'Applications it was queued for' },
+  webhooks: { type: 'integer', description: 'The organization’s webhook endpoints it was queued for' },
+  duplicate: { type: 'boolean', description: 'The idempotencyKey was used before: this is that result, nothing new was sent' },
+});
+
 SCHEMAS.ProductGroup = obj({
   id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
   memberCount: { type: 'integer', description: 'People in it now' }, createdAt: dateTime, updatedAt: dateTime,
@@ -421,6 +428,20 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       details: { type: 'object', additionalProperties: true, description: 'At most 4000 characters as JSON' },
     }, ['type']),
     responses: { 201: obj({ seq: { type: 'integer', description: 'The entry’s position in the organization’s log' } }) } },
+  { method: 'POST', path: '/product-integrations/organizations/:organizationId/events', operationId: 'publishProductEvent', tag: 'Products',
+    summary: 'Publish one of the product’s declared events for an organization: sent to the applications it has on that subscribe to it, and to its webhook endpoints that want it. 202 when published; 200 for an idempotencyKey already used.',
+    scope: 'events.publish',
+    body: obj({
+      type: { type: 'string', description: 'One of the product’s declared events (manifest events.emits)' },
+      data: { type: 'object', additionalProperties: true, description: 'The event’s content, at most 64 KB as JSON (described by the type’s schemaUrl)' },
+      subject: { type: 'string', description: 'The person it’s about, if any: <organization id>.<user id>' },
+      occurredAt: { ...dateTime, description: 'When it happened (default: now)' },
+      idempotencyKey: { type: 'string', maxLength: 200, description: 'Publishing again with the same key for the organization does nothing' },
+    }, ['type', 'data']),
+    responses: {
+      202: ref('ProductPublished'),
+      200: ref('ProductPublished'),
+    } },
 ];
 
 const productErrors: Record<string, string> = {

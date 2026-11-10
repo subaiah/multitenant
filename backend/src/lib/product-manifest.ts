@@ -84,9 +84,19 @@ const v2Fields = {
     attributes: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,49}$/, 'A lowercase attribute name (letters, digits, hyphens)')).max(10).default([]),
     description: z.string().trim().min(1).max(200),
   })).max(20).default([]),
+  // Events it publishes for other applications and the organization's webhooks, and ones it wants (lib/product-events.ts)
+  events: z.object({
+    emits: z.array(z.object({
+      type: declaredName,
+      label: z.string().trim().min(1).max(100),
+      description: z.string().trim().max(200).optional(),
+      schemaUrl: uri.optional(),
+    })).max(50).default([]),
+    subscribes: z.array(z.object({ type: z.string().max(100), reason: z.string().trim().min(1).max(200) })).max(50).default([]),
+  }).default({ emits: [], subscribes: [] }),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['events', 'resources', 'limits', 'usage', 'health'] as const;
+export const V2_NOT_YET = ['resources', 'limits', 'usage', 'health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -104,15 +114,24 @@ export const manifestSchema = z
   .superRefine((m, ctx) => {
     if (m.manifestVersion === 2) {
       const seen = new Set<string>();
-      const lists = [['notifications', m.platformServices.notifications], ['auditEvents', m.platformServices.auditEvents]] as const;
-      for (const [list, items] of lists) {
+      const lists = [[['platformServices', 'notifications'], m.platformServices.notifications], [['platformServices', 'auditEvents'], m.platformServices.auditEvents], [['events', 'emits'], m.events.emits]] as const;
+      for (const [at, items] of lists) {
         items.forEach((t, i) => {
           const problem = declaredTypeProblem(m.productId, t.type);
-          if (problem) ctx.addIssue({ code: 'custom', path: ['platformServices', list, i, 'type'], message: `"${t.type}" ${problem}` });
-          if (seen.has(t.type)) ctx.addIssue({ code: 'custom', path: ['platformServices', list, i, 'type'], message: `"${t.type}" is declared twice` });
+          if (problem) ctx.addIssue({ code: 'custom', path: [...at, i, 'type'], message: `"${t.type}" ${problem}` });
+          if (seen.has(t.type)) ctx.addIssue({ code: 'custom', path: [...at, i, 'type'], message: `"${t.type}" is declared twice` });
           seen.add(t.type);
         });
       }
+      // Subscriptions: another application's event types, each once
+      const wanted = new Set<string>();
+      m.events.subscribes.forEach((sub, i) => {
+        const owner = /^([a-z0-9][a-z0-9-]*)\.[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/.exec(sub.type)?.[1];
+        if (!owner) ctx.addIssue({ code: 'custom', path: ['events', 'subscribes', i, 'type'], message: `"${sub.type}": not an event type (<productId>.<name>)` });
+        else if (owner === m.productId) ctx.addIssue({ code: 'custom', path: ['events', 'subscribes', i, 'type'], message: `"${sub.type}" is this application's own event` });
+        if (wanted.has(sub.type)) ctx.addIssue({ code: 'custom', path: ['events', 'subscribes', i, 'type'], message: `"${sub.type}" is listed twice` });
+        wanted.add(sub.type);
+      });
       // Exposed scopes: named like permissions, under the product's key
       const scopeNames = new Set<string>();
       m.api.scopes.forEach((sc, i) => {
@@ -206,6 +225,8 @@ export interface ImportResult {
   api: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
   /** Applications it requires or works with (manifest v2); a version 1 manifest leaves them alone */
   dependencies: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
+  /** Events it publishes (also in platformServices' added/updated/retired) and subscribes to (manifest v2); a version 1 manifest leaves them alone */
+  events: { emits: number; subscribes: number; notDeclaredYet: string[] } | { leftAlone: true };
   /** Web Components it offers (manifest v2); a version 1 manifest leaves them alone */
   embeds: { tags: string[] } | { leftAlone: true };
   menuItems: number;
@@ -246,7 +267,8 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
   const declared = services ? [
     ...services.notifications.map((t) => ({ kind: 'notification', type: t.type, label: t.label, description: t.description ?? null, defaultInApp: t.defaultChannels.includes('in_app'), defaultEmail: t.defaultChannels.includes('email') })),
     ...services.auditEvents.map((t) => ({ kind: 'audit', type: t.type, label: t.label, description: null, defaultInApp: true, defaultEmail: false })),
-  ].map((t, position) => ({ ...t, position })) : [];
+    ...(m.manifestVersion === 2 ? m.events.emits : []).map((t) => ({ kind: 'event', type: t.type, label: t.label, description: t.description ?? null, defaultInApp: false, defaultEmail: false, schemaUrl: t.schemaUrl ?? null })),
+  ].map((t) => ({ schemaUrl: null as string | null, ...t })).map((t, position) => ({ ...t, position })) : [];
   const takenTypes = await controlDb.productDeclaredType.findMany({
     where: { type: { in: declared.map((t) => t.type) }, NOT: { application: { key: m.productId } } },
     select: { type: true },
@@ -345,7 +367,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
           if (!old) {
             await tx.productDeclaredType.create({ data: { applicationId: app.id, ...t } });
             ps.added.push(t.type);
-          } else if (old.retiredAt || old.kind !== t.kind || old.label !== t.label || old.description !== t.description || old.defaultInApp !== t.defaultInApp || old.defaultEmail !== t.defaultEmail) {
+          } else if (old.retiredAt || old.kind !== t.kind || old.label !== t.label || old.description !== t.description || old.defaultInApp !== t.defaultInApp || old.defaultEmail !== t.defaultEmail || old.schemaUrl !== t.schemaUrl) {
             await tx.productDeclaredType.update({ where: { id: old.id }, data: { ...t, retiredAt: null } });
             ps.updated.push(t.type);
           } else if (old.position !== t.position) {
@@ -410,6 +432,17 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         dependencies = { requires: m.requires.length, integratesWith: m.integratesWith.length, notRegisteredYet: rows.map((r) => r.productKey).filter((k) => !known.has(k)) };
       }
 
+      // Event subscriptions: replaced. Types no application declares yet are a warning (declared later is fine)
+      let events: ImportResult['events'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        await tx.productEventSubscription.deleteMany({ where: { applicationId: app.id } });
+        if (m.events.subscribes.length) {
+          await tx.productEventSubscription.createMany({ data: m.events.subscribes.map((sub, position) => ({ applicationId: app.id, type: sub.type, reason: sub.reason, position })) });
+        }
+        const declaredNow = new Set((await tx.productDeclaredType.findMany({ where: { kind: 'event', type: { in: m.events.subscribes.map((sub) => sub.type) }, retiredAt: null }, select: { type: true } })).map((t) => t.type));
+        events = { emits: m.events.emits.length, subscribes: m.events.subscribes.length, notDeclaredYet: m.events.subscribes.map((sub) => sub.type).filter((t) => !declaredNow.has(t)) };
+      }
+
       // Embeds: replaced. A tag is the product's (it starts with its key), so it can't clash with another's
       let embeds: ImportResult['embeds'] = { leftAlone: true };
       if (m.manifestVersion === 2) {
@@ -452,6 +485,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         platformServices,
         api,
         dependencies,
+        events,
         embeds,
         menuItems: m.menu.length,
       };
@@ -490,6 +524,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       consumedScopes: { orderBy: { position: 'asc' } },
       dependencies: { orderBy: { position: 'asc' } },
       embeds: { orderBy: { position: 'asc' } },
+      eventSubscriptions: { orderBy: { position: 'asc' } },
     },
   });
   if (!app) throw new AppError('Application not found', 404);
@@ -535,6 +570,12 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
     ...(app.consumedScopes.length && { consumes: app.consumedScopes.map((c) => ({ scope: c.scope, reason: c.reason })) }),
     ...(app.dependencies.some((d) => d.kind === 'requires') && { requires: app.dependencies.filter((d) => d.kind === 'requires').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
     ...(app.dependencies.some((d) => d.kind === 'integrates') && { integratesWith: app.dependencies.filter((d) => d.kind === 'integrates').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
+    ...((app.declaredTypes.some((t) => t.kind === 'event') || app.eventSubscriptions.length) && {
+      events: {
+        emits: app.declaredTypes.filter((t) => t.kind === 'event' && !t.retiredAt).map((t) => ({ type: t.type, label: t.label, ...(t.description && { description: t.description }), ...(t.schemaUrl && { schemaUrl: t.schemaUrl }) })),
+        subscribes: app.eventSubscriptions.map((sub) => ({ type: sub.type, reason: sub.reason })),
+      },
+    }),
     ...(app.embeds.length && { embeds: app.embeds.map((e) => ({ tag: e.tag, scriptUrl: e.scriptUrl, attributes: e.attributes, description: e.description })) }),
   } as ProductManifest;
 }

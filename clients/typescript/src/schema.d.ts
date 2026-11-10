@@ -600,6 +600,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/product-integrations/organizations/{organizationId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish one of the product’s declared events for an organization: sent to the applications it has on that subscribe to it, and to its webhook endpoints that want it. 202 when published; 200 for an idempotencyKey already used.
+         * @description For external products, with a service access token that has the `events.publish` scope.
+         */
+        post: operations["publishProductEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     event: {
@@ -1072,6 +1092,16 @@ export interface components {
                     icon: string | null;
                 }[];
             }[];
+        };
+        ProductPublished: {
+            /** @description evt_…: every copy carries it as data.eventId (webhooks: id); deduplicate on it */
+            id: string;
+            /** @description Applications it was queued for */
+            applications: number;
+            /** @description The organization’s webhook endpoints it was queued for */
+            webhooks: number;
+            /** @description The idempotencyKey was used before: this is that result, nothing new was sent */
+            duplicate: boolean;
         };
         ProductGroup: {
             /** Format: uuid */
@@ -3719,6 +3749,111 @@ export interface operations {
                         /** @description The entry’s position in the organization’s log */
                         seq: number;
                     };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    publishProductEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description One of the product’s declared events (manifest events.emits) */
+                    type: string;
+                    /** @description The event’s content, at most 64 KB as JSON (described by the type’s schemaUrl) */
+                    data: {
+                        [key: string]: unknown;
+                    };
+                    /** @description The person it’s about, if any: <organization id>.<user id> */
+                    subject?: string;
+                    /**
+                     * Format: date-time
+                     * @description When it happened (default: now)
+                     */
+                    occurredAt?: string;
+                    /** @description Publishing again with the same key for the organization does nothing */
+                    idempotencyKey?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPublished"];
+                };
+            };
+            /** @description OK */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPublished"];
                 };
             };
             /** @description The request is not valid */

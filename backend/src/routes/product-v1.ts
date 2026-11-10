@@ -13,6 +13,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { RateLimited, sendProductNotification, writeProductAuditEvent } from '../lib/product-services.js';
 import { brandingOf, embedsFor, launcherFor } from '../lib/product-embeds.js';
+import { publishProductEvent } from '../lib/product-events.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
@@ -131,6 +132,13 @@ export async function productV1Routes(fastify: FastifyInstance) {
     const { organizationId } = request.params as { organizationId: string };
     const written = await writeProductAuditEvent(request.service!, organizationId, request.body, { ip: request.ip, requestId: request.id }).catch((err) => throttled(reply, err));
     return reply.status(201).send(written);
+  });
+
+  // Events for other applications and the organization's webhooks (docs/hub/HUB_GAPS.md G4)
+  fastify.post('/product-integrations/organizations/:organizationId/events', { config: { serviceScope: 'events.publish' }, schema: { params: orgParams } }, async (request, reply) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const published = await publishProductEvent(request.service!, organizationId, request.body).catch((err) => throttled(reply, err));
+    return reply.status(published.duplicate ? 200 : 202).send(published);
   });
 
   // The result of setting an organization up, after answering organization.entitled with 202 (lib/product-lifecycle.ts)

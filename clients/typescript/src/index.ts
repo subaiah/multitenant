@@ -33,6 +33,7 @@ export type ProductOrgUnits = Schemas['ProductOrgUnits'];
 export type ProductEmbed = Schemas['ProductEmbed'];
 export type ProductBranding = Schemas['ProductBranding'];
 export type ProductLauncher = Schemas['ProductLauncher'];
+export type ProductPublished = Schemas['ProductPublished'];
 export type ProductGroup = Schemas['ProductGroup'];
 export type ProductEvent = Schemas['ProductEvent'];
 

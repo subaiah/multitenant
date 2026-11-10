@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Bundles from '../components/Bundles';
 import AppConnections from '../components/AppConnections';
+import AppEvents from '../components/AppEvents';
 import { usePermissions } from '../hooks/usePermissions';
 import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye, Link2 } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
@@ -284,6 +285,7 @@ export default function TenantEntitlements() {
 
       <Bundles canManage={hasPermission('applications:manage')} onChanged={fetchData} />
       <AppConnections canManage={hasPermission('applications:manage')} />
+      <AppEvents />
 
       {/* Add Entitlement Modal */}
       {showAddModal && (

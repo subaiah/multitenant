@@ -315,6 +315,7 @@ An application can have several credentials at once.
 | `lifecycle.report` | [Reporting setup results](#answering-and-setting-the-organization-up) |
 | `notifications.send` | [Sending its declared notifications](#notifications) to people in those organizations |
 | `audit.write` | [Writing its declared audit events](#audit-events) to those organizations' audit logs |
+| `events.publish` | [Publishing its declared events](#events-between-applications) to other applications and webhooks in those organizations |
 | `launcher.read` | [Which applications a person can open](#the-application-launcher), for the launcher |
 
 ### Getting a token
@@ -620,6 +621,66 @@ On **Application Entitlements**, **Connections between applications** lists ever
 - how often the connection was used.
 
 Connections are allowed by default. Administrators (`applications:manage`) can **Block** one, which stops new tokens at once, and **Allow** it again. Both go into the audit log. Platform staff see each application's connections and use on the **Integrations** page.
+
+## Events between applications
+
+An application can announce what happens in it (a deal won, a workflow finished), for the organization's other applications and for its own webhooks. It doesn't need to know who listens.
+
+### Declaring them
+
+In the manifest (version 2):
+
+```json
+"events": {
+  "emits": [
+    { "type": "crm.deal.won", "label": "Deal won", "description": "A deal was closed as won",
+      "schemaUrl": "https://crm.example.com/schemas/deal.won.json" }
+  ],
+  "subscribes": [
+    { "type": "appforge.workflow.finished", "reason": "Update the deal when its workflow ends" }
+  ]
+}
+```
+
+- **`emits`:** types named `<productId>.<name>`, like your audit types (one name can't be both). Leaving one out retires it: it stays known, but it can't be published any more. `schemaUrl` is where receivers find the shape of `data`. The platform doesn't check `data` against it.
+- **`subscribes`:** other applications' types, each with the reason, shown to the organization's administrators. A type nobody publishes yet is accepted with a warning.
+
+### Publishing
+
+`POST /api/v1/product-integrations/organizations/{id}/events` (scope `events.publish`), for an organization that has your application turned on:
+
+```json
+{ "type": "crm.deal.won", "data": { "dealId": "D-42", "amount": 1200 },
+  "subject": "<organization id>.<user id>", "idempotencyKey": "won-D-42" }
+```
+
+- `data` is an object of at most 64 KB as JSON. Keep personal data out of it unless receivers need it.
+- `subject` (optional) is the person it's about, in that organization.
+- `occurredAt` (optional) says when it happened, if that wasn't just now.
+- `idempotencyKey` (optional): publishing again with the same key for the organization does nothing, and answers `200` with the first result (`duplicate: true`).
+- The answer is `202` with `{ id, applications, webhooks }`: the event's id and how many receivers it was queued for. Up to 600 a minute per credential.
+
+### Receiving
+
+An application that subscribes receives the event at its **callback address**, like lifecycle events: signed with its own signing secret, in order per organization, retried with backoff, and in its event history and `GET …/events` catch-up feed. It gets it only for organizations that have **both** applications on, and once it has set the organization up.
+
+`data` holds:
+- `organization`;
+- `eventId`, the same in every copy: deduplicate on it;
+- `source`: `{ productId, name }`, the publisher;
+- `subject` and `occurredAt`;
+- `schemaUrl`, when the type has one;
+- `event`: the publisher's `data`.
+
+Answer `2xx` once it's stored, and do the work afterwards.
+
+### Organizations' webhooks
+
+The types appear in the organization's webhook catalog (Developers page, category **application**), next to its audit events. An endpoint that subscribes to a type, or to everything (`*`), gets each event with the usual signing and retries. `data` holds `application`, `subject` and `event`.
+
+### What organizations see
+
+On **Application Entitlements**, **Events between applications** lists each event their applications publish. For each, it shows which of their other applications receive it and why, how many of their webhook endpoints do, and how often it was published in the last 30 days.
 
 ## Embedding another application
 

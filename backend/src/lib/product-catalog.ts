@@ -1,6 +1,7 @@
 /**
  * The notification and audit event types external products declare in their
- * manifests (platformServices; docs/hub/MANIFEST_V2.md), next to the kit's
+ * manifests (platformServices; docs/hub/MANIFEST_V2.md), and the events they
+ * publish (events.emits; lib/product-events.ts), next to the kit's
  * and the embedded product's (kit/notification-types.ts, kit/audit-events.ts).
  *
  * - Stored in product_declared_types; kept in memory here, because the
@@ -19,10 +20,11 @@ import type { AuditEventDefinition } from '../kit/audit-events.js';
 import type { NotificationType, NotifyEvent } from '../kit/notification-types.js';
 
 export interface DeclaredType {
-  kind: 'notification' | 'audit';
+  kind: 'notification' | 'audit' | 'event';
   type: string;
   label: string;
   description: string | null;
+  schemaUrl: string | null;
   defaultInApp: boolean;
   defaultEmail: boolean;
   retired: boolean;
@@ -46,6 +48,7 @@ async function load() {
     type: r.type,
     label: r.label,
     description: r.description,
+    schemaUrl: r.schemaUrl,
     defaultInApp: r.defaultInApp,
     defaultEmail: r.defaultEmail,
     retired: !!r.retiredAt,
@@ -103,6 +106,11 @@ export function productAuditEvents(): Record<string, AuditEventDefinition> {
     if (t.kind === 'audit') out[t.type] = { label: `${t.productName}: ${t.label}`, category: 'application', scope: 'tenant' };
   }
   return out;
+}
+
+/** Events applications publish (lib/product-events.ts), for organizations' webhooks (lib/webhooks.ts) */
+export function productEventTypes(): { type: string; label: string; category: string }[] {
+  return [...types.values()].filter((t) => t.kind === 'event').map((t) => ({ type: t.type, label: `${t.productName}: ${t.label}`, category: 'application' }));
 }
 
 /** The product types an organization doesn't see: those of products it hasn't turned on */

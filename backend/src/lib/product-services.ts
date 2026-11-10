@@ -30,7 +30,7 @@ import { AppError } from '../middleware/error-handler.js';
 // Rate limits (per server; each server counts its own)
 // ---------------------------------------------------------------------------
 
-export const LIMITS = { notifications: 120, audit: 600 } as const;
+export const LIMITS = { notifications: 120, audit: 600, events: 600 } as const;
 
 export class RateLimited extends AppError {
   constructor(message: string, readonly retryAfter: number) {
@@ -39,7 +39,7 @@ export class RateLimited extends AppError {
 }
 const windows = new Map<string, { start: number; count: number }>();
 
-function limit(kind: keyof typeof LIMITS, credentialId: string) {
+export function limit(kind: keyof typeof LIMITS, credentialId: string) {
   const key = `${kind}:${credentialId}`;
   const now = Date.now();
   const w = windows.get(key);
@@ -53,7 +53,7 @@ function limit(kind: keyof typeof LIMITS, credentialId: string) {
 }
 
 /** One of this product's declared types, of this kind, still declared */
-async function ownType(caller: ServiceCaller, kind: 'notification' | 'audit', type: string) {
+export async function ownType(caller: ServiceCaller, kind: 'notification' | 'audit' | 'event', type: string) {
   await refreshProductCatalog();
   let t = declaredType(type);
   if (!t) {
@@ -61,14 +61,15 @@ async function ownType(caller: ServiceCaller, kind: 'notification' | 'audit', ty
     t = declaredType(type);
   }
   if (!t || t.kind !== kind || t.applicationId !== caller.applicationId) {
-    throw new AppError(`"${type}" isn't one of this application's declared ${kind === 'notification' ? 'notification types' : 'audit event types'} (manifest platformServices)`, 400, true, 'UNKNOWN_TYPE');
+    const what = { notification: 'notification types (manifest platformServices)', audit: 'audit event types (manifest platformServices)', event: 'events (manifest events.emits)' }[kind];
+    throw new AppError(`"${type}" isn't one of this application's declared ${what}`, 400, true, 'UNKNOWN_TYPE');
   }
   if (t.retired) throw new AppError(`"${type}" is no longer in this application's manifest`, 400, true, 'RETIRED_TYPE');
   return t;
 }
 
 /** <organization id>.<user id> subjects in this organization: their user ids */
-function userIdsOf(tenantId: string, subjects: string[]): string[] {
+export function userIdsOf(tenantId: string, subjects: string[]): string[] {
   const prefix = `${tenantId}.`;
   const wrong = subjects.filter((s) => !s.startsWith(prefix) || s.length === prefix.length);
   if (wrong.length) throw new AppError(`Not people in this organization: ${wrong.slice(0, 5).join(', ')}${wrong.length > 5 ? '…' : ''}`, 400, true, 'UNKNOWN_RECIPIENTS');
