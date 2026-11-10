@@ -28,3 +28,13 @@ export function toMinorUnits(value: number, currency: string): number {
 }
 
 export const intervalLabel = (interval: string) => (interval === 'YEAR' ? 'year' : 'month');
+
+/** An amount in the smallest unit as typed in the currency (49900 paise → 499) */
+export function fromMinorUnits(amount: number, currency: string): number {
+  try {
+    const digits = new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.toUpperCase() }).resolvedOptions().maximumFractionDigits ?? 2;
+    return amount / 10 ** digits;
+  } catch {
+    return amount / 100;
+  }
+}

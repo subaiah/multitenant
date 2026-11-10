@@ -325,6 +325,7 @@ model ApplicationRegistry {
   limits             ProductLimit[]
   usageMeters        ProductUsageMeter[]
   usageRecords       ProductUsageRecord[]
+  prices             ApplicationPrice[]
   bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
@@ -1271,6 +1272,7 @@ model ProductUsageMeter {
   createdAt     DateTime            @default(now()) @map("created_at")
 
   application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  prices        MeterPrice[]
 
   @@index([applicationId])
   @@map("product_usage_meters")
@@ -1293,6 +1295,70 @@ model ProductUsageRecord {
   @@index([tenantId, meterKey, occurredAt])
   @@index([applicationId, occurredAt])
   @@map("product_usage_records")
+}
+
+/// An application's price, charged per billing period on the organization's subscription (lib/billing/app-charges.ts)
+model ApplicationPrice {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  currency      String
+  interval      BillingInterval
+  /// flat (per organization) or per_seat (times the subscription's seats)
+  model         String
+  /// In the currency's smallest unit
+  unitAmount    Int                 @map("unit_amount")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, currency, interval])
+  @@map("application_prices")
+}
+
+/// A price for usage of an application's meter: unitAmount per perQuantity, after includedQuantity a period
+model MeterPrice {
+  id               String            @id @default(uuid())
+  meterId          String            @map("meter_id")
+  currency         String
+  unitAmount       Int               @map("unit_amount")
+  perQuantity      Int               @default(1) @map("per_quantity")
+  includedQuantity Float             @default(0) @map("included_quantity")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  meter            ProductUsageMeter @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@unique([meterId, currency])
+  @@map("meter_prices")
+}
+
+/// What an organization is charged for an application in a billing period, added to its next invoice
+model ApplicationCharge {
+  id               String          @id @default(uuid())
+  tenantId         String          @map("tenant_id")
+  applicationId    String          @map("application_id")
+  provider         BillingProvider
+  subscriptionId   String          @map("subscription_id")
+  periodStart      DateTime        @map("period_start")
+  periodEnd        DateTime        @map("period_end")
+  /// base (the application's price) or usage (a meter); meterKey is "" for base
+  kind             String
+  meterKey         String          @default("") @map("meter_key")
+  quantity         Float
+  amount           Int
+  currency         String
+  description      String
+  /// PENDING (not at the provider yet), ADDED, FAILED (tried; retried hourly)
+  status           String          @default("PENDING")
+  attempts         Int             @default(0)
+  providerChargeId String?         @map("provider_charge_id")
+  error            String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  @@unique([tenantId, applicationId, periodEnd, kind, meterKey], map: "application_charges_once")
+  @@index([status])
+  @@index([tenantId, periodEnd])
+  @@map("application_charges")
 }
 
 model Bundle {

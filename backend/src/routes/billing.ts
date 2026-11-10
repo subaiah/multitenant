@@ -15,6 +15,7 @@
  * organization's own people with billing:manage, not platform staff in a
  * support session.
  */
+import { applicationBilling } from '../lib/billing/app-charges.js';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config/env.js';
@@ -80,6 +81,8 @@ export async function billingOverview(tenantId: string) {
           .map((x) => ({ currency: x.currency, interval: x.interval, unitAmount: x.unitAmount, provider: x.provider })),
       })),
     invoices: invoices.map((i) => ({ id: i.id, number: i.number, amount: i.amount, currency: i.currency, status: i.status, url: i.url, periodStart: i.periodStart, periodEnd: i.periodEnd, paidAt: i.paidAt, createdAt: i.createdAt })),
+    /** Applications charged on the subscription (G6): this period's estimate, and past charges */
+    applications: await applicationBilling(tenantId),
   };
 }
 

@@ -122,7 +122,7 @@ See [Events between applications](../PRODUCT_INTEGRATION.md#events-between-appli
 
 See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-application).
 
-### G6. Billing is per tenant, not per application (P2): **limits and usage done**; prices next
+### G6. Billing is per tenant, not per application (P2): **done** (real-provider checks pending keys)
 
 **Now.** One `Subscription` per tenant, priced per seat. `BillingPlan` limits cover users, organizations, groups, SSO and custom domain only. Entitlement events carry state and dates, not limits.
 
@@ -135,7 +135,9 @@ See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-
 - Limits per application and plan: declared in the manifest, values set by platform staff, sent in `organization.entitled` and `organization.entitlement_changed`, readable on the organization, and told again when they change.
 - Usage reporting (`usage.report`, idempotent), with monthly totals for the application, platform staff and administrators.
 
-See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage). **Next:** per-application prices and add-ons on the subscription, and charging for metered usage.
+- Per-application prices (flat or per user) and usage prices, charged in arrears on the organization's own subscription: Razorpay subscription add-ons and Stripe invoice items on the next invoice, once each, with retries.
+
+See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage). Built and tested against the payment stand-ins. **Pending:** a run against Razorpay and Stripe test accounts once the keys are set.
 
 ### G7. Scoped permissions and org units don't reach applications (P2): **done**
 
@@ -166,7 +168,7 @@ See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage).
 4. ~~**G7** scoped permissions and org units~~ (done)
 5. ~~**G5** embedding contract~~ (done)
 6. ~~**G4** application events~~ (done)
-7. **G6** per-application billing and usage
+7. ~~**G6** per-application billing and usage~~ (done; real-provider check pending keys)
 8. **G8**, **G9**
 
 All of it ships as **manifest version 2** ([MANIFEST_V2.md](MANIFEST_V2.md)). Version 1 manifests keep working unchanged.
