@@ -53,7 +53,7 @@ function LimitRow({ l, plans, applicationId }: { l: Limit; plans: LimitsInfo['pl
 
   return (
     <tr className="align-top">
-      <th scope="row" className="py-2 pr-3 text-left font-normal">
+      <th scope="row" className="py-2 pr-3 text-left font-normal min-w-[9.5rem]">
         <span className="font-medium text-slate-800 dark:text-slate-100">{l.label}</span>
         <span className="block font-mono text-xs text-slate-500 break-all">{l.key}</span>
         <span className="block text-xs text-slate-500">Default: {show(l, l.default)}</span>
@@ -107,7 +107,7 @@ export default function ApplicationPlans({ applicationId, applicationName }: { a
     <Card className="mt-6" title="Plans and usage"
       description={`What each plan allows in ${applicationName} (from its manifest), and what organizations used this month. Organizations are told when their limits change.`}>
       {ls.length > 0 && (
-        <div className="overflow-x-auto -mx-1 px-1">
+        <div className="relative overflow-x-auto -mx-1 px-1">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500">
