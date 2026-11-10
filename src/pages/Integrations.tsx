@@ -24,6 +24,7 @@ interface Integration {
   events: { pending: number; failed: number; lastDeliveredAt: string | null; pendingSince: string | null };
   logouts: { pending: number; failed: number; lastDeliveredAt: string | null };
   attention: string[];
+  health: { status: 'UP' | 'DEGRADED' | 'DOWN' | null; version: string | null; responseMs: number | null; checkedAt: string | null; since: string | null; error: string | null } | null;
 }
 
 export default function Integrations() {
@@ -87,6 +88,19 @@ function IntegrationCard({ a }: { a: Integration }) {
       )}
 
       <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+        <Item label="Health">
+          {!a.health ? 'No health address in its manifest' : !a.health.checkedAt ? 'Not checked yet' : (
+            <>
+              <span className={a.health.status === 'UP' ? 'text-emerald-700 dark:text-emerald-400' : a.health.status ? 'text-amber-700 dark:text-amber-400' : ''}>
+                {a.health.status === 'UP' ? 'Up' : a.health.status === 'DEGRADED' ? 'Degraded' : a.health.status === 'DOWN' ? 'Down' : 'Unknown'}
+              </span>
+              {a.health.version && ` · v${a.health.version}`}{a.health.responseMs !== null && ` · ${a.health.responseMs} ms`}
+              <span className="block text-xs text-slate-500">
+                Checked {formatRelative(a.health.checkedAt)}{a.health.since ? ` · since ${formatRelative(a.health.since)}` : ''}{a.health.error ? ` · ${a.health.error}` : ''}
+              </span>
+            </>
+          )}
+        </Item>
         <Item label="Sign-in">
           {a.signIn ? (
             <>

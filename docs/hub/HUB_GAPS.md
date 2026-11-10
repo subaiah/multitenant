@@ -161,11 +161,18 @@ See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage).
 
 See [Records in other applications](../PRODUCT_INTEGRATION.md#records-in-other-applications).
 
-### G9. No application health or deployment view (P3)
+### G9. No application health or deployment view (P3): **done** for health
 
 **Now.** The Deployments and Infrastructure pages show sample data (`PREVIEW_FEATURES`).
 
 **Needed.** Manifest `health.url`; the platform polls it and shows version, status and response time on the Integrations page, and can warn organizations when an application they use is degraded.
+
+**Done.**
+- Manifest `health.url`, polled every minute: up, degraded, or down after three failures in a row.
+- Version, status, response time and last error on the Integrations page, with changes audited.
+- Organizations see "having problems" on Application Entitlements.
+
+See [Health checks](../PRODUCT_INTEGRATION.md#health-checks). The Deployments and Infrastructure pages still show sample data. That's a separate piece of work (real deployment data), not part of the hub.
 
 ## Order of work
 
@@ -176,6 +183,6 @@ See [Records in other applications](../PRODUCT_INTEGRATION.md#records-in-other-a
 5. ~~**G5** embedding contract~~ (done)
 6. ~~**G4** application events~~ (done)
 7. ~~**G6** per-application billing and usage~~ (done; real-provider check pending keys)
-8. **G8**, **G9**
+8. ~~**G8**, **G9**~~ (done)
 
 All of it ships as **manifest version 2** ([MANIFEST_V2.md](MANIFEST_V2.md)). Version 1 manifests keep working unchanged.

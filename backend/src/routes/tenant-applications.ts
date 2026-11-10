@@ -119,6 +119,8 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
               description: true,
               version: true,
               status: true,
+              healthStatus: true,
+              healthChangedAt: true,
               _count: {
                 select: { permissions: true },
               },
@@ -134,7 +136,10 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     const deps = await dependenciesOf(tenantApplications.map((t) => t.applicationId));
     const plans = await planAndUsageOf(request.tenant.id, tenantApplications.map((t) => t.applicationId));
     return {
-      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId), ...deps.get(t.applicationId), ...plans.get(t.applicationId) } })),
+      tenantApplications: tenantApplications.map(({ application: { healthStatus, healthChangedAt, ...application }, ...t }) => ({ ...t, application: { ...application,
+        // Having problems right now (lib/product-health.ts): no details
+        health: healthStatus === 'DOWN' || healthStatus === 'DEGRADED' ? { problem: healthStatus === 'DOWN' ? 'down' : 'degraded', since: healthChangedAt } : null,
+        dataAccess: access.get(t.applicationId), ...deps.get(t.applicationId), ...plans.get(t.applicationId) } })),
       pagination: {
         page: paging.page,
         limit: paging.limit,

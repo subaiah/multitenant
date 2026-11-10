@@ -6,6 +6,7 @@
  * Every job is safe with several servers running it: each takes an advisory
  * lock or claims its rows, so one server does each piece of work.
  */
+import { startHealthChecks, stopHealthChecks } from './product-health.js';
 import { startLimitsSweep, stopLimitsSweep } from './product-limits.js';
 import { config } from '../config/env.js';
 import { resumeProvisioning } from './provisioning.js';
@@ -87,6 +88,7 @@ export async function startJobs(log: JobLogger) {
   startLifecycleEvents(failed);
   startUserEventSweep(failed);
   startLimitsSweep(failed);
+  startHealthChecks(failed);
   startLogouts(failed);
   log.info('Background jobs started');
 }
@@ -101,6 +103,7 @@ export async function stopJobs() {
   stopLifecycleEvents();
   stopUserEventSweep();
   stopLimitsSweep();
+  stopHealthChecks();
   stopLogouts();
   if (oidcTimer) clearInterval(oidcTimer);
   oidcTimer = undefined;

@@ -115,11 +115,13 @@ const v2Fields = {
     label: z.string().trim().min(1).max(100),
     urlTemplate: relativePath.refine((p) => p.includes('{id}'), 'Must contain {id}'),
   })).max(50).default([]),
+  // Where the platform checks it's up (lib/product-health.ts)
+  health: z.object({ url: uri }).optional(),
   // Metered features it reports (lib/product-usage.ts)
   usage: z.array(z.object({ key: declaredName, label: z.string().trim().min(1).max(100), unit: z.string().trim().min(1).max(30) })).max(20).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['health'] as const;
+export const V2_NOT_YET = [] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -160,6 +162,12 @@ export const manifestSchema = z
       m.limits.forEach((l, i) => {
         if (l.type === 'integer' && l.default === null && !l.unlimited) ctx.addIssue({ code: 'custom', path: ['limits', i, 'default'], message: 'null (no limit) needs "unlimited": true' });
       });
+      // Health: on its own host
+      if (m.health) {
+        try {
+          if (new URL(m.health.url).host !== new URL(m.baseUrl).host) ctx.addIssue({ code: 'custom', path: ['health', 'url'], message: "must be on the application's own host" });
+        } catch { /* the uri rule reports it */ }
+      }
       // Record types: each once; others ask about them through its records:check scope
       const types = new Set<string>();
       m.resources.forEach((r, i) => {
@@ -500,7 +508,15 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         if (m.resources.length) {
           await tx.productResourceType.createMany({ data: m.resources.map((r, position) => ({ applicationId: app.id, type: r.type, label: r.label, urlTemplate: r.urlTemplate, position })) });
         }
-        await tx.applicationRegistry.update({ where: { id: app.id }, data: { accessCheckPath: m.api.accessCheckPath ?? null } });
+        await tx.applicationRegistry.update({
+          where: { id: app.id },
+          data: {
+            accessCheckPath: m.api.accessCheckPath ?? null,
+            healthUrl: m.health?.url ?? null,
+            // A new address starts unknown; none: nothing to show
+            ...(existing?.healthUrl !== (m.health?.url ?? null) && { healthStatus: null, healthFailures: 0, healthError: null, healthCheckedAt: null }),
+          },
+        });
         resources = { types: m.resources.map((r) => r.type) };
       }
 
@@ -685,6 +701,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
         subscribes: app.eventSubscriptions.map((sub) => ({ type: sub.type, reason: sub.reason })),
       },
     }),
+    ...(app.healthUrl && { health: { url: app.healthUrl } }),
     ...(app.resourceTypes.length && { resources: app.resourceTypes.map((r) => ({ type: r.type, label: r.label, urlTemplate: r.urlTemplate })) }),
     ...(app.limits.length && {
       limits: app.limits.map((l) => l.type === 'integer'
