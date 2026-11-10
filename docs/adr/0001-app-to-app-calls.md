@@ -1,6 +1,6 @@
 # ADR-0001: Application-to-application calls
 
-**Status:** Proposed
+**Status:** Accepted, implemented 11 Nov 2026 (see [Implementation notes](#implementation-notes))
 **Date:** 9 Nov 2026
 **Gap:** G1 in [HUB_GAPS.md](../hub/HUB_GAPS.md)
 
@@ -95,6 +95,19 @@ Lifetime: 5 minutes. No refresh token; the caller exchanges again.
 - Positive: one standard mechanism for every pair of applications; generic applications never trust callers blindly; the hub keeps control (entitlements, blocking, revocation) without sitting in the request path.
 - Negative: token endpoint grows (`audience`, `organization_id`, token exchange); every exposed API must verify JWTs (provide a small verifier in `clients/typescript`).
 - Follow-ups: introspection endpoint; SDK helpers `createAppClient(target)` and `verifyAppToken()`; Integrations page shows connections and their use; contract tests that a token for one organization can't read another's data in the target.
+
+## Implementation notes
+
+- **Where.**
+  - Machine calls: `lib/oidc/provider.ts`, through the provider's resource indicators.
+  - Token exchange: `lib/oidc/token-exchange.ts`, a custom grant type.
+  - Connections, blocking and counts: `lib/app-connections.ts` and `app_connection_states`.
+  - The client: `clients/typescript` (`createAppTokens`, `createAppTokenVerifier`).
+- **`organization_id`** is read from the token request's body. oidc-provider's `extraParams` cover authorization requests only.
+- **Credentials.** Any of the caller's service credentials can get app tokens; what it may ask for comes from the manifests, not the credential's service scopes.
+- **Scopes not allowed:** client credentials leaves them out of the token (the provider's behaviour); token exchange refuses them (`invalid_scope`).
+- **Counting.** Exchange tokens are counted per connection (`tokensIssued`, `lastIssuedAt`), and so are machine tokens. Blocking and allowing are audited as `app_connection.blocked` and `app_connection.allowed`.
+- **Introspection** isn't added yet. The short lifetimes are the cut-off for now.
 
 ## Not decided here
 

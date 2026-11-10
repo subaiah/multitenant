@@ -59,12 +59,35 @@ await platform.POST('/product-integrations/operations/{operationId}/result', {
 const { data: events } = await platform.GET('/product-integrations/events', { params: { query: { after: savedPosition } } });
 ```
 
+## Calling another application
+
+`createAppTokens` gets tokens addressed to another application:
+- for a machine call, for one organization, cached until shortly before it expires;
+- on behalf of a person, by exchanging their access token.
+
+`createAppTokenVerifier` checks the tokens an application is called with. See [Calling other applications](../../docs/PRODUCT_INTEGRATION.md#calling-other-applications).
+
+```ts
+import { createAppTokens, createAppTokenVerifier } from '@multitenant/api-client';
+
+const tokens = createAppTokens({ tokenUrl, clientId, clientSecret });
+await fetch('https://hearth.example.com/api/threads', {
+  method: 'POST',
+  headers: { authorization: `Bearer ${await tokens.forOrganization('hearth', organizationId, ['hearth.threads:write'])}` },
+  body: JSON.stringify({ resource: 'mt://crmforge/deal/42' }),
+});
+
+// In Hearth
+const verify = createAppTokenVerifier({ issuer: 'https://app.example.com/api/oidc', productId: 'hearth' });
+const { tenantId, person } = await verify(req.headers.authorization);
+```
+
 ## Using it
 
 It isn't published to a registry. Either:
 
 - build it and depend on the folder: `npm run build` here, then `npm install ../path/to/clients/typescript`; or
-- copy `src/` into your project; it needs only `openapi-fetch`.
+- copy `src/` into your project; it needs `openapi-fetch` and `jose`.
 
 ## When the API changes
 

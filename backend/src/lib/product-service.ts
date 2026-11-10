@@ -25,6 +25,7 @@ import { decryptSecret, secretContext } from './secrets.js';
 import { signingKeys } from './oidc/keys.js';
 import { issuer } from './oidc/provider.js';
 import { SERVICE_SCOPES, isServiceScope, type ServiceScope } from './service-scopes.js';
+import { TOKEN_EXCHANGE } from './app-connections.js';
 
 export { SERVICE_SCOPES, isServiceScope, type ServiceScope };
 
@@ -38,7 +39,7 @@ export const newServiceClientId = () => `${SERVICE_CLIENT_PREFIX}${randomBytes(1
 export const newServiceSecret = () => randomBytes(32).toString('base64url');
 
 /** A service credential that can get tokens: not revoked, its product active */
-async function activeCredential(clientId: string) {
+export async function activeCredential(clientId: string) {
   const c = await controlDb.productServiceCredential.findUnique({
     where: { clientId },
     include: { application: { select: { id: true, key: true, name: true, status: true } } },
@@ -55,7 +56,8 @@ export async function serviceClientMetadata(clientId: string): Promise<Record<st
     client_name: `${c.application.name} (service: ${c.name})`,
     client_secret: decryptSecret(c.serviceClientSecret, secretContext('serviceClientSecret')),
     token_endpoint_auth_method: 'client_secret_basic',
-    grant_types: ['client_credentials'],
+    // Machine calls, and calls to another application on behalf of a person (lib/oidc/token-exchange.ts)
+    grant_types: ['client_credentials', TOKEN_EXCHANGE],
     response_types: [],
     redirect_uris: [],
   };

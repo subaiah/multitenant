@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import AppConnections from '../components/AppConnections';
+import { usePermissions } from '../hooks/usePermissions';
 import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
@@ -40,6 +42,7 @@ interface TenantApplication {
 }
 
 export default function TenantEntitlements() {
+  const { hasPermission } = usePermissions();
   const apps = useApi<{ applications: Application[] }>('/applications');
   const entitlements = useApi<{ tenantApplications: TenantApplication[] }>('/tenant-applications');
   const availableApps = apps.data?.applications ?? [];
@@ -234,6 +237,8 @@ export default function TenantEntitlements() {
           )}
         </div>
       </div>
+
+      <AppConnections canManage={hasPermission('applications:manage')} />
 
       {/* Add Entitlement Modal */}
       {showAddModal && (

@@ -20,6 +20,8 @@ interface ImportResult {
   permissions: { added: string[]; updated: string[]; notInManifest: string[] };
   /** Declared notification and audit event types (manifest v2) */
   platformServices?: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
+  /** Scopes exposed to and consumed from other applications (manifest v2) */
+  api?: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -54,6 +56,7 @@ function Plan({ plan }: { plan: ImportResult }) {
         Permissions: {p.added.length} added, {p.updated.length} updated{p.notInManifest.length ? `, ${p.notInManifest.length} no longer listed (kept)` : ''}. Menu entries: {plan.menuItems}.
       </p>
       <ServicesLine services={plan.platformServices} />
+      <ApiLine api={plan.api} />
     </div>
   );
 }
@@ -119,6 +122,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
           Version {result.application.version}. {p.added.length} permission{p.added.length === 1 ? '' : 's'} added, {p.updated.length} updated; {result.menuItems} menu entr{result.menuItems === 1 ? 'y' : 'ies'}.
         </p>
         <ServicesLine services={result.platformServices} />
+        <ApiLine api={result.api} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
           <CopyBox value={result.clientId} label="Client ID" />
@@ -194,5 +198,22 @@ function ServicesLine({ services }: { services?: ImportResult['platformServices'
     <p className="text-sm text-slate-600 dark:text-slate-300">
       Notification and audit event types: {added.length} added, {updated.length} updated{retired.length ? `, ${retired.length} no longer listed (kept, can't be used)` : ''}.
     </p>
+  );
+}
+
+/** Scopes exposed to other applications, and consumed from them */
+function ApiLine({ api }: { api?: ImportResult['api'] }) {
+  if (!api || 'leftAlone' in api) return null;
+  const { added, updated, retired, consumes, notExposedYet } = api;
+  if (!added.length && !updated.length && !retired.length && !consumes) return null;
+  return (
+    <div className="text-sm text-slate-600 dark:text-slate-300">
+      <p>
+        Exposed scopes: {added.length} added, {updated.length} updated{retired.length ? `, ${retired.length} no longer listed (kept, can't be used)` : ''}. Consumes {consumes} from other applications.
+      </p>
+      {notExposedYet.length > 0 && (
+        <p className="mt-1 text-amber-700 dark:text-amber-400">No registered application exposes these yet: <span className="font-mono text-xs">{notExposedYet.join(', ')}</span></p>
+      )}
+    </div>
   );
 }

@@ -17,7 +17,7 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
   }, async () => {
     const now = new Date();
     const stuckBefore = new Date(now.getTime() - STUCK_MS);
-    const [apps, setups, events, oldestPending, logouts, credentials] = await Promise.all([
+    const [apps, setups, events, oldestPending, logouts, credentials, exposedScopes, consumedScopes, connectionUse] = await Promise.all([
       controlDb.applicationRegistry.findMany({
         where: { OR: [{ manifestImportedAt: { not: null } }, { signIn: { isNot: null } }, { provisioningCallbackUrl: { not: null } }] },
         select: {
@@ -35,7 +35,11 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
       controlDb.productEvent.groupBy({ by: ['applicationId'], where: { status: 'PENDING' }, _min: { createdAt: true } }),
       controlDb.oidcLogoutDelivery.groupBy({ by: ['applicationId', 'status'], _count: { _all: true }, _max: { deliveredAt: true } }),
       controlDb.productServiceCredential.groupBy({ by: ['applicationId'], where: { revokedAt: null }, _count: { _all: true }, _max: { lastUsedAt: true } }),
+      controlDb.productApiScope.groupBy({ by: ['applicationId'], where: { retiredAt: null }, _count: { _all: true } }),
+      controlDb.productConsumedScope.groupBy({ by: ['applicationId'], _count: { _all: true } }),
+      controlDb.appConnectionState.groupBy({ by: ['callerApplicationId'], _sum: { tokensIssued: true }, _max: { lastIssuedAt: true } }),
     ]);
+    const blockedFor = await controlDb.appConnectionState.groupBy({ by: ['callerApplicationId'], where: { blockedAt: { not: null } }, _count: { _all: true } });
 
     const count = <T extends { applicationId: string; _count: { _all: number } }>(rows: T[], id: string, pick: (r: T) => boolean = () => true) =>
       rows.filter((r) => r.applicationId === id && pick(r)).reduce((n, r) => n + r._count._all, 0);
@@ -79,6 +83,14 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
           },
           lifecycle: { callback: !!a.provisioningCallbackUrl, userEvents: a.userEvents && !!a.provisioningCallbackUrl },
           credentials: { active: cred?._count._all ?? 0, lastUsedAt: cred?._max.lastUsedAt ?? null },
+          // Calls between applications (docs/adr/0001-app-to-app-calls.md)
+          appToApp: {
+            exposes: count(exposedScopes, a.id),
+            consumes: count(consumedScopes, a.id),
+            tokensIssued: connectionUse.find((u) => u.callerApplicationId === a.id)?._sum.tokensIssued ?? 0,
+            lastIssuedAt: connectionUse.find((u) => u.callerApplicationId === a.id)?._max.lastIssuedAt ?? null,
+            blockedBy: blockedFor.find((b) => b.callerApplicationId === a.id)?._count._all ?? 0,
+          },
           organizations,
           events: eventStats,
           logouts: logoutStats,

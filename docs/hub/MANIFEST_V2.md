@@ -1,6 +1,6 @@
 # Manifest version 2 (proposal)
 
-**Status:** Partly implemented: `kind` and `platformServices` (10 Nov 2026). The rest is a proposal.
+**Status:** Partly implemented: `kind` and `platformServices` (10 Nov 2026), `api` and `consumes` (11 Nov 2026). The rest is a proposal.
 **Date:** 9 Nov 2026
 **Builds on:** manifest v1 in [PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#the-manifest)
 
@@ -12,7 +12,8 @@ Version 2 adds what an application needs to work **with other applications** in 
 | --- | --- |
 | `manifestVersion: 2`, `kind` | Implemented |
 | `platformServices.notifications`, `platformServices.auditEvents` | Implemented, with `notifications.send` and `audit.write` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#using-the-platforms-services)) |
-| `requires`, `integratesWith`, `api`, `consumes`, `embeds`, `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
+| `api` (scopes, openApiUrl), `consumes` | Implemented, with application-to-application tokens ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#calling-other-applications)) |
+| `requires`, `integratesWith`, `embeds`, `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
 
 Also implemented:
 - A version 1 manifest with a version 2 field is refused (`kind: needs "manifestVersion": 2`), for the same reason.

@@ -300,6 +300,8 @@ model ApplicationRegistry {
   kind             String  @default("specific")
   /// The manifest version it was last imported with
   manifestVersion  Int     @default(1) @map("manifest_version")
+  /// Where its exposed API is described (manifest v2 api.openApiUrl)
+  apiOpenApiUrl    String? @map("api_open_api_url")
   /// Also tell it when people in an organization change (lib/product-user-events.ts)
   userEvents       Boolean @default(false) @map("user_events")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -314,6 +316,10 @@ model ApplicationRegistry {
   memberStates       ProductMemberState[]
   logoutDeliveries   OidcLogoutDelivery[]
   declaredTypes      ProductDeclaredType[]
+  apiScopes          ProductApiScope[]
+  consumedScopes     ProductConsumedScope[]
+  callingConnections AppConnectionState[] @relation("ConnectionCaller")
+  calledConnections  AppConnectionState[] @relation("ConnectionTarget")
 
   @@index([status])
   @@map("application_registries")
@@ -1058,4 +1064,61 @@ model ProductDeclaredType {
 
   @@index([applicationId])
   @@map("product_declared_types")
+}
+
+/// Scopes an application exposes to other applications (manifest v2
+/// api.scopes; docs/adr/0001-app-to-app-calls.md). Its audience is always
+/// urn:mt:app:<productId>. Kept when they leave the manifest (retired).
+model ProductApiScope {
+  id               String              @id @default(uuid())
+  applicationId    String              @map("application_id")
+  /// <productId>[.<thing>]:<action>, unique across the platform
+  name             String              @unique
+  description      String
+  allowsOnBehalfOf Boolean             @default(false) @map("allows_on_behalf_of")
+  position         Int                 @default(0)
+  retiredAt        DateTime?           @map("retired_at")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  application      ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("product_api_scopes")
+}
+
+/// Scopes an application needs from other applications (manifest v2
+/// consumes), with the reason shown to organizations. Replaced on import.
+model ProductConsumedScope {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  scope         String
+  reason        String
+  position      Int                 @default(0)
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, scope])
+  @@map("product_consumed_scopes")
+}
+
+/// One organization's view of one application calling another
+/// (lib/app-connections.ts): blocked by its administrators, and how many
+/// tokens were issued for it
+model AppConnectionState {
+  tenantId            String              @map("tenant_id")
+  callerApplicationId String              @map("caller_application_id")
+  targetApplicationId String              @map("target_application_id")
+  blockedAt           DateTime?           @map("blocked_at")
+  blockedByEmail      String?             @map("blocked_by_email")
+  tokensIssued        Int                 @default(0) @map("tokens_issued")
+  lastIssuedAt        DateTime?           @map("last_issued_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  caller              ApplicationRegistry @relation("ConnectionCaller", fields: [callerApplicationId], references: [id], onDelete: Cascade)
+  target              ApplicationRegistry @relation("ConnectionTarget", fields: [targetApplicationId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, callerApplicationId, targetApplicationId])
+  @@index([tenantId])
+  @@map("app_connection_states")
 }

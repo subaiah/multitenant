@@ -18,7 +18,9 @@
  */
 import crypto from 'node:crypto';
 import Provider, { errors, interactionPolicy, type Configuration, type KoaContextWithOIDC } from 'oidc-provider';
-import { API_RESOURCE, isServiceClientId, serviceResourceServer, serviceTokenClaims } from '../product-service.js';
+import { API_RESOURCE, activeCredential, isServiceClientId, serviceResourceServer, serviceTokenClaims } from '../product-service.js';
+import { APP_TOKEN_TTL_SECONDS, ConnectionRefused, checkConnection, countIssued, isAppAudience } from '../app-connections.js';
+import { registerTokenExchange } from './token-exchange.js';
 import { config } from '../../config/env.js';
 import { OidcAdapter } from './adapter.js';
 import { signingKeys } from './keys.js';
@@ -26,6 +28,38 @@ import { accountIdFor, checkAccount, claimsFor } from './accounts.js';
 
 /** Access tokens for applications last this long unless their sign-in settings say otherwise (seconds) */
 export const DEFAULT_ACCESS_TOKEN_LIFETIME = 15 * 60;
+
+type AppTokenContext = KoaContextWithOIDC & { appConnection?: { tenantId: string; callerApplicationId: string; targetApplicationId: string } };
+
+/** The token endpoint's errors for a refused connection */
+export function connectionError(err: unknown): Error {
+  if (!(err instanceof ConnectionRefused)) return err as Error;
+  if (err.error === 'invalid_target') return new errors.InvalidTarget(err.message);
+  if (err.error === 'invalid_scope') return new errors.InvalidScope(err.message, '');
+  if (err.error === 'invalid_request') return new errors.InvalidRequest(err.message);
+  return new errors.AccessDenied(err.message);
+}
+
+/** Another application as a resource server for a machine call: the scopes its manifest lets the caller have, for one organization */
+async function appResourceServer(ctx: KoaContextWithOIDC, resource: string, clientId: string) {
+  const cred = await activeCredential(clientId);
+  if (!cred) throw new errors.InvalidClient();
+  // A token request's own parameter (extraParams covers authorization requests only)
+  const tenantId = ((ctx.oidc.params?.organization_id ?? (ctx.oidc.body as Record<string, unknown> | undefined)?.organization_id) as string | undefined) || undefined;
+  try {
+    const { caller, target, scopes } = await checkConnection({ callerApplicationId: cred.application.id, targetResource: resource, tenantId, onBehalfOf: false });
+    (ctx as AppTokenContext).appConnection = { tenantId: tenantId!, callerApplicationId: caller.id, targetApplicationId: target.id };
+    return {
+      scope: scopes.map((s) => s.name).join(' '),
+      audience: resource,
+      accessTokenTTL: APP_TOKEN_TTL_SECONDS,
+      accessTokenFormat: 'jwt' as const,
+      jwt: { sign: { alg: 'RS256' as const } },
+    };
+  } catch (err) {
+    throw connectionError(err);
+  }
+}
 
 export const SCOPES = ['openid', 'offline_access', 'email', 'profile', 'organization', 'roles'] as const;
 export const CLAIMS: Record<string, string[]> = {
@@ -132,10 +166,20 @@ export async function createProvider({ readSession, endSession }: { readSession:
     },
     // Refresh tokens only when asked for (offline_access); each use returns a new one
     // Which product a service token belongs to
-    extraTokenClaims: async (_ctx, token) => {
+    extraTokenClaims: async (ctx, token) => {
       const clientId = (token as { clientId?: string }).clientId;
-      return clientId && isServiceClientId(clientId) ? serviceTokenClaims(clientId) : undefined;
+      if (!clientId || !isServiceClientId(clientId)) return undefined;
+      const claims = await serviceTokenClaims(clientId);
+      // A token for another application: which organization it's for; counted for the connection
+      const connection = (ctx as AppTokenContext).appConnection;
+      if (connection) {
+        await countIssued(connection.tenantId, connection.callerApplicationId, connection.targetApplicationId);
+        return { ...claims, tenant_id: connection.tenantId };
+      }
+      return claims;
     },
+    // organization_id: which organization a token for another application is for
+    extraParams: ['organization_id'],
     issueRefreshToken: async (_ctx, client, code) => client.grantTypeAllowed('refresh_token') && code.scopes.has('offline_access'),
     rotateRefreshToken: true,
     features: {
@@ -146,8 +190,11 @@ export async function createProvider({ readSession, endSession }: { readSession:
         enabled: true,
         // A service credential's tokens are for API v1, asked for or not
         defaultResource: async (_ctx, client, oneOf) => (client && isServiceClientId(client.clientId) ? API_RESOURCE : oneOf) as never,
-        getResourceServerInfo: async (_ctx, resource, client) => {
-          const info = resource === API_RESOURCE && isServiceClientId(client.clientId) ? await serviceResourceServer(client.clientId) : null;
+        getResourceServerInfo: async (ctx, resource, client) => {
+          if (!isServiceClientId(client.clientId)) throw new errors.InvalidTarget();
+          // Another application, for a machine call (docs/adr/0001-app-to-app-calls.md)
+          if (isAppAudience(resource)) return appResourceServer(ctx, resource, client.clientId);
+          const info = resource === API_RESOURCE ? await serviceResourceServer(client.clientId) : null;
           if (!info) throw new errors.InvalidTarget();
           return info;
         },
@@ -213,6 +260,8 @@ export async function createProvider({ readSession, endSession }: { readSession:
   };
 
   const provider = new Provider(iss.href.replace(/\/$/, ''), configuration);
+  // Calls on behalf of a person to another application (RFC 8693)
+  registerTokenExchange(provider, connectionError, issuer);
   // Headers are pinned to the issuer by the mount (routes/oidc.ts), so this is safe
   provider.proxy = true;
 

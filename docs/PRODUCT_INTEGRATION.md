@@ -38,6 +38,7 @@ There are two ways to build on the platform:
 | **Integrations page** for platform staff | Available | [The Integrations page](#the-integrations-page) |
 | **Manifest version 2**: `kind` and declared notification and audit event types (more v2 fields to come) | Available (partly) | [hub/MANIFEST_V2.md](hub/MANIFEST_V2.md) |
 | **The platform's services**: send notifications to an organization's people, write to its audit log | Available | [Using the platform's services](#using-the-platforms-services) |
+| **Calling other applications**, as itself or on behalf of the person using it; organizations see and block connections | Available | [Calling other applications](#calling-other-applications) |
 
 ## Rules
 
@@ -473,6 +474,110 @@ The answer is `201`, with `seq`, the entry's position in the organization's log.
 - `details` can be up to 4000 characters as JSON. `outcome` is `SUCCESS` (the default) or `FAILURE`.
 - **At most 600 a minute** per service credential.
 
+## Calling other applications
+
+One application can call another application's own API, for example CRMForge creating a conversation in Hearth. The platform issues the token, addressed to the target, and checks the organization ([ADR-0001](adr/0001-app-to-app-calls.md)). Both applications need **manifest version 2**.
+
+**The target exposes scopes** (`api.scopes`). Names follow the permission rule, under its own key. A scope with `allowsOnBehalfOf` can also be used on behalf of a person. The target's audience is always `urn:mt:app:<productId>`.
+
+```json
+"api": {
+  "scopes": [
+    { "name": "hearth.threads:read",  "description": "Read record threads",        "allowsOnBehalfOf": true },
+    { "name": "hearth.threads:write", "description": "Start and post to threads",  "allowsOnBehalfOf": true },
+    { "name": "hearth.messages:post", "description": "Post messages as a bot" }
+  ],
+  "openApiUrl": "https://hearth.example.com/openapi.json"
+}
+```
+
+**The caller consumes them** (`consumes`), with a reason. Organizations' administrators read the reason. Consuming a scope no registered application exposes yet only gives a warning on import (`api.notExposedYet`).
+
+```json
+"consumes": [
+  { "scope": "hearth.threads:read",  "reason": "Show the conversation on a deal" },
+  { "scope": "hearth.threads:write", "reason": "Start a conversation when a deal is created" }
+]
+```
+
+### Getting a token
+
+Any of the caller's service credentials can get one. It doesn't need a particular service scope: what it may ask for comes from the two manifests.
+
+- **A machine call**, for one organization:
+
+  ```
+  POST /api/oidc/token   (Basic: the caller's service credential)
+  grant_type=client_credentials&resource=urn:mt:app:hearth&organization_id=<id>&scope=hearth.threads:write
+  ```
+
+  The token is a JWT (`typ: at+jwt`, 10 minutes) with `aud` (the target), `tenant_id`, `product_id` (the caller), `client_id` and `scope`. Scopes asked for that the connection doesn't allow are left out.
+
+- **On behalf of a person**, exchanging the access token they got signing in to the caller ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)):
+
+  ```
+  POST /api/oidc/token   (Basic: the caller's service credential)
+  grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+  &subject_token=<their access token for the caller>
+  &subject_token_type=urn:ietf:params:oauth:token-type:access_token
+  &resource=urn:mt:app:hearth            (audience= works too)
+  &scope=hearth.threads:read             (optional: every scope that allows it)
+  ```
+
+  The token lasts 5 minutes, with no refresh token: exchange again when you need one. It adds:
+  - `sub`, the person;
+  - `act: { sub, product_id }`, who is acting;
+  - `permissions`, **the person's permissions in the target application**, as when they sign in to it.
+
+  A scope without `allowsOnBehalfOf` is refused (`invalid_scope`). So is a subject token issued to another application, or for a person who can't use the caller any more (`invalid_grant`).
+
+A token is issued only when **all** of these hold:
+- both applications are active;
+- the organization has both turned on and set up;
+- the caller consumes a scope the target exposes;
+- the organization hasn't blocked the connection.
+
+Otherwise the answer is `access_denied`, `invalid_target`, `invalid_scope` or `invalid_request`, with a description.
+
+### Checking a token, in the target
+
+- Check the signature against the platform's keys (`jwks_uri`), and `iss`, `aud` (your own `urn:mt:app:<productId>`), `exp` and `typ: at+jwt`.
+- **Scope every query by `tenant_id`.**
+- On behalf of a person, authorize with the token's `sub` and `permissions`, never the caller's, and record `act.sub` in your own audit entries.
+
+The TypeScript client does both sides:
+
+```ts
+import { createAppTokens, createAppTokenVerifier } from '@multitenant/api-client';
+
+// The caller
+const tokens = createAppTokens({ tokenUrl, clientId, clientSecret });
+const machine = await tokens.forOrganization('hearth', organizationId, ['hearth.threads:write']);
+const asPerson = await tokens.onBehalfOf(personAccessToken, 'hearth', ['hearth.threads:read']);
+
+// The target
+const verify = createAppTokenVerifier({ issuer: 'https://app.example.com/api/oidc', productId: 'hearth' });
+const caller = await verify(request.headers.authorization);   // { tenantId, productId, scopes, person }
+```
+
+Tokens are short-lived, so changes cut off **new** tokens at once:
+- a credential revoked;
+- an application made inactive;
+- an entitlement removed;
+- a connection blocked;
+- a person deactivated.
+
+Tokens already issued run out on their own (5 or 10 minutes).
+
+### What organizations see
+
+On **Application Entitlements**, **Connections between applications** lists every pair of applications the organization has on where one calls the other. For each, it shows:
+- what the caller may do in the target, and why;
+- which actions are done "as the person using it";
+- how often the connection was used.
+
+Connections are allowed by default. Administrators (`applications:manage`) can **Block** one, which stops new tokens at once, and **Allow** it again. Both go into the audit log. Platform staff see each application's connections and use on the **Integrations** page.
+
 ## Ending access at once
 
 Three things together mean a person who loses access loses it in the application too, without waiting:
@@ -499,6 +604,7 @@ Products that need attention come first: a failed setup, events given up or wait
 - [ ] People read from the platform are keyed by `subject`; user events (or a periodic full pass) catch group, role and removal changes.
 - [ ] User events, if taken, end a person's sessions on `user.deactivated` and `user.removed`, and unknown event types are answered `2xx`.
 - [ ] Notifications and audit events, if used, are declared in the manifest (version 2), and links in notifications point to the application's own pages.
+- [ ] Calls to other applications use tokens from the platform (never shared secrets), and an application that exposes scopes checks `aud`, `tenant_id` and, on behalf of a person, the token's `permissions`.
 - [ ] A back-channel logout address is registered; its handler verifies the logout token (signature, `iss`, `aud`, `exp`, `events`), ends that person's sessions and answers `200`.
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
