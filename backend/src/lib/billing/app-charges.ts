@@ -49,7 +49,7 @@ export interface ChargeLine {
 }
 
 /** What the organization owes for applications in [start, end), as lines (nothing priced: none) */
-export async function chargesFor(sub: Sub, start: Date, end: Date): Promise<ChargeLine[]> {
+export async function chargesFor(sub: Sub, start: Date, end: Date, usageUntil: Date = end): Promise<ChargeLine[]> {
   const currency = sub.currency.toUpperCase();
   const entitled = await controlDb.tenantApplication.findMany({
     where: { tenantId: sub.tenantId, state: 'ENABLED', validFrom: { lt: end }, OR: [{ validTo: null }, { validTo: { gt: start } }] },
@@ -60,7 +60,7 @@ export async function chargesFor(sub: Sub, start: Date, end: Date): Promise<Char
   const [prices, meterPrices, totals] = await Promise.all([
     controlDb.applicationPrice.findMany({ where: { applicationId: { in: appIds }, currency, interval: sub.interval as 'MONTH' | 'YEAR' } }),
     controlDb.meterPrice.findMany({ where: { currency }, include: { meter: { select: { applicationId: true, key: true, label: true, unit: true, application: { select: { name: true } } } } } }),
-    usageTotals({ tenantId: sub.tenantId }, start, end),
+    usageTotals({ tenantId: sub.tenantId }, start, usageUntil),
   ]);
   const period = `${start.toISOString().slice(0, 10)} to ${new Date(end.getTime() - 1).toISOString().slice(0, 10)}`;
   const lines: ChargeLine[] = [];
@@ -86,7 +86,8 @@ export async function chargesFor(sub: Sub, start: Date, end: Date): Promise<Char
       description: `${mp.meter.application.name}: ${used.toLocaleString('en')} ${mp.meter.unit} (${mp.meter.label}), ${period}`,
     });
   }
-  return lines;
+  // Each application's lines together: its price, then its usage
+  return lines.sort((a, b) => a.application.localeCompare(b.application) || (a.kind === b.kind ? a.meterKey.localeCompare(b.meterKey) : a.kind === 'base' ? -1 : 1));
 }
 
 /** Settle a period that just ended: record its charges once, then send them */
@@ -150,7 +151,8 @@ export async function applicationBilling(tenantId: string) {
   let estimate: { periodStart: string; periodEnd: string; lines: ChargeLine[]; total: number; currency: string } | null = null;
   if (live) {
     const start = periodBefore(sub.currentPeriodEnd!, sub.interval);
-    const lines = await chargesFor(sub, start, new Date(Math.min(Date.now() + DAY, sub.currentPeriodEnd!.getTime())));
+    // The whole period, with usage so far
+    const lines = await chargesFor(sub, start, sub.currentPeriodEnd!, new Date(Math.min(Date.now() + DAY, sub.currentPeriodEnd!.getTime())));
     estimate = { periodStart: start.toISOString(), periodEnd: sub.currentPeriodEnd!.toISOString(), lines, total: lines.reduce((n, l) => n + l.amount, 0), currency: sub.currency.toUpperCase() };
   }
   const past = await controlDb.applicationCharge.findMany({ where: { tenantId }, orderBy: [{ periodEnd: 'desc' }, { createdAt: 'asc' }], take: 50 });

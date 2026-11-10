@@ -47,7 +47,7 @@ const CHARGE_STATUS = { ADDED: 'On your next invoice', PENDING: 'Being added', F
 function ApplicationCharges({ a }: { a: NonNullable<Overview['applications']> }) {
   if (!a.estimate?.lines.length && !a.charges.length) return null;
   return (
-    <Card title="Applications" description="Some applications are charged on top of your plan, for the period just ended. The charges go on your next invoice." className="min-w-0">
+    <Card title="Applications" description="Some applications are charged on top of your plan. Each period's charges go on the invoice after it ends." className="min-w-0">
       {a.estimate && a.estimate.lines.length > 0 && (
         <div>
           <p className="text-sm text-slate-600 dark:text-slate-300">

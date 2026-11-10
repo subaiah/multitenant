@@ -101,6 +101,8 @@ interface PricesInfo {
   prices: { currency: string; interval: 'MONTH' | 'YEAR'; model: 'flat' | 'per_seat'; unitAmount: number }[];
   meters: { key: string; label: string; unit: string; prices: { currency: string; unitAmount: number; perQuantity: number; includedQuantity: number }[] }[];
 }
+/** The shared input style without its full width, for inputs in a row */
+const narrow = inputClass.replace('w-full ', '');
 type PriceRow = { currency: string; interval: 'MONTH' | 'YEAR'; model: 'flat' | 'per_seat'; amount: string };
 type MeterRow = { key: string; currency: string; amount: string; perQuantity: string; included: string };
 
@@ -147,15 +149,15 @@ function Prices({ applicationId }: { applicationId: string }) {
       <ul className="mt-2 space-y-2">
         {rows.map((r, i) => (
           <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
-            <select aria-label="Currency" value={r.currency} onChange={(e) => setRow(i, { currency: e.target.value })} className={`${selectClass} w-auto`}>
+            <select aria-label="Currency" value={r.currency} onChange={(e) => setRow(i, { currency: e.target.value })} className={selectClass}>
               {[...new Set([...currencies, r.currency])].map((c) => <option key={c}>{c}</option>)}
             </select>
-            <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} className={`${inputClass} w-28`} />
-            <select aria-label="How it's charged" value={r.model} onChange={(e) => setRow(i, { model: e.target.value as PriceRow['model'] })} className={`${selectClass} w-auto`}>
+            <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setRow(i, { amount: e.target.value })} className={`${narrow} w-28`} />
+            <select aria-label="How it's charged" value={r.model} onChange={(e) => setRow(i, { model: e.target.value as PriceRow['model'] })} className={selectClass}>
               <option value="flat">per organization</option>
               <option value="per_seat">per user</option>
             </select>
-            <select aria-label="Period" value={r.interval} onChange={(e) => setRow(i, { interval: e.target.value as PriceRow['interval'] })} className={`${selectClass} w-auto`}>
+            <select aria-label="Period" value={r.interval} onChange={(e) => setRow(i, { interval: e.target.value as PriceRow['interval'] })} className={selectClass}>
               <option value="MONTH">a month</option>
               <option value="YEAR">a year</option>
             </select>
@@ -174,17 +176,17 @@ function Prices({ applicationId }: { applicationId: string }) {
               const m = meters.find((x) => x.key === r.key);
               return (
                 <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                  <select aria-label="Meter" value={r.key} onChange={(e) => setMeter(i, { key: e.target.value })} className={`${selectClass} w-auto`}>
+                  <select aria-label="Meter" value={r.key} onChange={(e) => setMeter(i, { key: e.target.value })} className={selectClass}>
                     {meters.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
                   </select>
-                  <select aria-label="Currency" value={r.currency} onChange={(e) => setMeter(i, { currency: e.target.value })} className={`${selectClass} w-auto`}>
+                  <select aria-label="Currency" value={r.currency} onChange={(e) => setMeter(i, { currency: e.target.value })} className={selectClass}>
                     {[...new Set([...currencies, r.currency])].map((c) => <option key={c}>{c}</option>)}
                   </select>
-                  <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setMeter(i, { amount: e.target.value })} className={`${inputClass} w-24`} />
+                  <input aria-label="Amount" type="number" min={0} step="0.01" value={r.amount} onChange={(e) => setMeter(i, { amount: e.target.value })} className={`${narrow} w-24`} />
                   <span className="text-slate-500">per</span>
-                  <input aria-label="Per how many" type="number" min={1} step={1} value={r.perQuantity} onChange={(e) => setMeter(i, { perQuantity: e.target.value })} className={`${inputClass} w-24`} />
+                  <input aria-label="Per how many" type="number" min={1} step={1} value={r.perQuantity} onChange={(e) => setMeter(i, { perQuantity: e.target.value })} className={`${narrow} w-24`} />
                   <span className="text-slate-500">{m?.unit}, first</span>
-                  <input aria-label="Included each period" type="number" min={0} value={r.included} onChange={(e) => setMeter(i, { included: e.target.value })} className={`${inputClass} w-24`} />
+                  <input aria-label="Included each period" type="number" min={0} value={r.included} onChange={(e) => setMeter(i, { included: e.target.value })} className={`${narrow} w-24`} />
                   <span className="text-slate-500">free</span>
                   <button type="button" aria-label="Remove usage price" className="p-2 text-slate-400 hover:text-red-600" onClick={() => setMeterRows(meterRows.filter((_, j) => j !== i))}><Trash2 size={15} /></button>
                 </li>
