@@ -18,7 +18,7 @@ Version 2 adds what an application needs to work **with other applications** in 
 | `events` (emits, subscribes) | Implemented, with `events.publish` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#events-between-applications)) |
 | `limits`, `usage` | Implemented: values per plan, sent with lifecycle events and told again when they change; usage reported with `usage.report` and totalled per month ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#plans-limits-and-usage)). Charged per application with prices staff set ([Prices](../PRODUCT_INTEGRATION.md#prices)). |
 | `resources` | Implemented, with `api.accessCheckPath`, the record-type catalogue and identifier resolution ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#records-in-other-applications)) |
-| `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
+| `health` | Implemented ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#health-checks)) |
 
 Also implemented:
 - A version 1 manifest with any version 2 field, supported or not yet, is refused (`kind: needs "manifestVersion": 2`), for the same reason.
@@ -173,7 +173,7 @@ Also implemented:
 | `resources` | No | Up to 50 record types the application owns: `type`, `label`, `urlTemplate` (relative path with `{id}`). Identifiers: `mt://<productId>/<type>/<id>`. Needs `<productId>.records:check` in `api.scopes`; access is checked at `api.accessCheckPath` (default `/access-check`). |
 | `limits` | No | Up to 50. `key` named `<productId>.<name>`, `label`, `type` (`integer` or `boolean`), `default` (for plans without a value; `null` is no limit and needs `unlimited`), integer only: `unlimited` (whether a plan may set no limit) and `unit`. Values are set per plan by platform staff and sent in `organization.entitled` and `organization.entitlement_changed` (`data.limits`). |
 | `usage` | No | Up to 20 metered features: `key` (named like limits, not the same as one), `label`, `unit`. Reported with `usage.report`. |
-| `health.url` | No | An `https://` address on the same host answering `200` with `{ "status": "ok", "version": "…" }`. Polled every minute; shown on the Integrations page. |
+| `health.url` | No | An `https://` address on the same host answering `200` with `{ "status": "ok" | "degraded", "version": "…" }` within 5 seconds. Polled every minute; shown on the Integrations page; organizations see when it's having problems. |
 
 ## New service scopes
 

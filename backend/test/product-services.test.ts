@@ -118,7 +118,7 @@ test('manifest version 2: kind and declared types; exported as they were; future
   };
   const v1 = { ...manifest(key), manifestVersion: 1 };
   assert.match(await problems(v1), /platformServices: needs "manifestVersion": 2/);
-  assert.match(await problems(manifest(key, { health: {} })), /health: not supported by this platform yet/);
+  assert.match(await problems(manifest(key, { health: {} })), /health.url/);
   const badName = manifest(key);
   (badName.platformServices.auditEvents as { type: string; label: string }[]).push({ type: 'other.thing', label: 'X' }, { type: `${key}.Bad Name`, label: 'Y' });
   const msg = await problems(badName);

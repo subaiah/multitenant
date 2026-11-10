@@ -23,6 +23,7 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
         where: { OR: [{ manifestImportedAt: { not: null } }, { signIn: { isNot: null } }, { provisioningCallbackUrl: { not: null } }] },
         select: {
           id: true, key: true, name: true, status: true, version: true, manifestImportedAt: true, provisioningCallbackUrl: true, userEvents: true,
+          healthUrl: true, healthStatus: true, healthVersion: true, healthResponseMs: true, healthCheckedAt: true, healthChangedAt: true, healthError: true,
           signIn: { select: { enabled: true, clientType: true, backchannelLogoutUri: true, accessTokenLifetime: true } },
         },
         orderBy: { name: 'asc' },
@@ -76,6 +77,8 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
           pendingSince && pendingSince < stuckBefore && 'Events waiting for over an hour',
           logoutStats.failed > 0 && `${logoutStats.failed} logout${logoutStats.failed === 1 ? '' : 's'} given up`,
           a.status !== 'ACTIVE' && organizations.total > 0 && 'Not active, but organizations have it on',
+          a.healthStatus === 'DOWN' && 'Not answering its health checks',
+          a.healthStatus === 'DEGRADED' && 'Health checks say it’s degraded',
           missingDeps.get(a.id) && `${missingDeps.get(a.id)} organization${missingDeps.get(a.id) === 1 ? ' has' : 's have'} it without something it requires`,
         ].filter((x): x is string => !!x);
         return {
@@ -94,6 +97,8 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
             lastIssuedAt: connectionUse.find((u) => u.callerApplicationId === a.id)?._max.lastIssuedAt ?? null,
             blockedBy: blockedFor.find((b) => b.callerApplicationId === a.id)?._count._all ?? 0,
           },
+          // Health checks (lib/product-health.ts)
+          health: a.healthUrl ? { status: a.healthStatus, version: a.healthVersion, responseMs: a.healthResponseMs, checkedAt: a.healthCheckedAt, since: a.healthChangedAt, error: a.healthError } : null,
           organizations,
           events: eventStats,
           logouts: logoutStats,

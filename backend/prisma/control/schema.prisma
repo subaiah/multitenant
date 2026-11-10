@@ -304,6 +304,17 @@ model ApplicationRegistry {
   apiOpenApiUrl    String? @map("api_open_api_url")
   /// Where others check access to its records (manifest v2 api.accessCheckPath; default /access-check)
   accessCheckPath  String? @map("access_check_path")
+  /// Health checks (manifest v2 health; lib/product-health.ts)
+  healthUrl        String?   @map("health_url")
+  /// UP, DEGRADED or DOWN; null until checked
+  healthStatus     String?   @map("health_status")
+  healthVersion    String?   @map("health_version")
+  healthResponseMs Int?      @map("health_response_ms")
+  healthCheckedAt  DateTime? @map("health_checked_at")
+  /// When the status last changed
+  healthChangedAt  DateTime? @map("health_changed_at")
+  healthError      String?   @map("health_error")
+  healthFailures   Int       @default(0) @map("health_failures")
   /// Also tell it when people in an organization change (lib/product-user-events.ts)
   userEvents       Boolean @default(false) @map("user_events")
   createdAt   DateTime @default(now()) @map("created_at")

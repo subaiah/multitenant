@@ -881,6 +881,29 @@ Three things together mean a person who loses access loses it in the application
 2. **User events** ([above](#user-events)). The application learns about permission changes, and about deactivations and removals, even for people with no session.
 3. **Short access tokens** (`signIn.accessTokenLifetime`, 15 minutes by default). Each refresh checks the person again.
 
+## Health checks
+
+Give a health address in the manifest (version 2), on the application's own host:
+
+```json
+"health": { "url": "https://appforge.example.com/health" }
+```
+
+Every minute the platform asks it, and expects `200` with `{ "status": "ok", "version": "1.4.2" }` within 5 seconds.
+
+| Result | Status |
+| --- | --- |
+| Answered `ok` | **Up** |
+| Answered `"status": "degraded"`, or took more than 2 seconds | **Degraded** |
+| Three checks in a row failed (no answer, an error, not `200`, or no known status) | **Down** |
+
+One failed check doesn't change the status, so a blip doesn't alarm anyone.
+
+- **Platform staff** see the status, version, response time and last error on the Integrations page. Degraded and down are listed under what needs attention, and every change is in the platform audit log.
+- **Organizations** that have the application on see **Having problems right now** (or **Not reachable right now**) next to it on Application Entitlements, without the details.
+
+Keep the check cheap: say whether the application can serve requests (its database, say), not how every dependency is doing.
+
 ## The Integrations page
 
 Platform staff see every external product on one page (**Customers → Integrations**), with a link to each one's panels:

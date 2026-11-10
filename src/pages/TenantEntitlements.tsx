@@ -3,7 +3,7 @@ import Bundles from '../components/Bundles';
 import AppConnections from '../components/AppConnections';
 import AppEvents from '../components/AppEvents';
 import { usePermissions } from '../hooks/usePermissions';
-import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye, Link2 } from 'lucide-react';
+import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye, Link2, AlertTriangle } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
@@ -25,6 +25,8 @@ interface Application {
   /** What the organization's plan allows in it, and its usage this month (backend lib/product-limits.ts, lib/product-usage.ts) */
   limits?: { key: string; label: string; type: string; unit: string | null; value: number | boolean | null }[];
   usage?: { month: string; meters: { key: string; label: string; unit: string; total: number }[] };
+  /** Having problems right now (backend lib/product-health.ts) */
+  health?: { problem: 'down' | 'degraded'; since: string | null } | null;
 }
 
 const amount = (n: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(n);
@@ -228,10 +230,17 @@ export default function TenantEntitlements() {
                         <Package className="text-blue-600 dark:text-blue-400" size={24} />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-medium text-slate-900 dark:text-white">
                             {entitlement.application.name}
                           </h3>
+                          {entitlement.application.health && (
+                            <span role="status" className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+                              title={entitlement.application.health.since ? `Since ${new Date(entitlement.application.health.since).toLocaleString()}` : undefined}>
+                              <AlertTriangle size={12} aria-hidden />
+                              {entitlement.application.health.problem === 'down' ? 'Not reachable right now' : 'Having problems right now'}
+                            </span>
+                          )}
                           <span
                             className={`px-2 py-0.5 text-xs rounded ${
                               entitlement.state === 'ENABLED' && !expired
