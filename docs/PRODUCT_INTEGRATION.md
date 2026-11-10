@@ -310,11 +310,12 @@ An application can have several credentials at once.
 
 | Scope | Allows |
 | --- | --- |
-| `organizations.read` | Seeing the organizations that have the application, their setup status, and the application's lifecycle events |
-| `members.read` | Seeing the people and groups in those organizations, while they have it on |
+| `organizations.read` | Seeing the organizations that have the application, their setup status, branding and the components other applications offer, and the application's lifecycle events |
+| `members.read` | Seeing the people, groups and units in those organizations, while they have it on |
 | `lifecycle.report` | [Reporting setup results](#answering-and-setting-the-organization-up) |
 | `notifications.send` | [Sending its declared notifications](#notifications) to people in those organizations |
 | `audit.write` | [Writing its declared audit events](#audit-events) to those organizations' audit logs |
+| `launcher.read` | [Which applications a person can open](#the-application-launcher), for the launcher |
 
 ### Getting a token
 
@@ -619,6 +620,77 @@ On **Application Entitlements**, **Connections between applications** lists ever
 - how often the connection was used.
 
 Connections are allowed by default. Administrators (`applications:manage`) can **Block** one, which stops new tokens at once, and **Allow** it again. Both go into the audit log. Platform staff see each application's connections and use on the **Integrations** page.
+
+## Embedding another application
+
+One application can show part of another inside its own pages: a CRM shows the chat about a deal, a document panel or a workflow's status. The platform never puts one application in a frame. Its own pages keep `frame-ancestors 'none'`, and nobody signs in inside a frame. Instead, an application offers **Web Components**, and another loads them like any script.
+
+### Offering components
+
+List them in the manifest (version 2):
+
+```json
+"embeds": [
+  { "tag": "hearth-record-thread", "scriptUrl": "https://hearth.example.com/embed/v1/hearth.js",
+    "attributes": ["resource"], "description": "A conversation attached to a record" }
+]
+```
+
+- `tag` starts with your product id, so it can't clash with another application's.
+- `scriptUrl` is on your own host.
+- `attributes` are what a host page sets.
+
+Each component also needs a token for your API, made on the person's behalf, so also expose a scope with `allowsOnBehalfOf` ([Calling other applications](#calling-other-applications)). The component asks its host for the token: a `tokenProvider` property, a function that returns a promise of an access token. It calls the function again when the token expires (after 5 minutes). Check the token like any other on-behalf token: `aud` is yours, scope every query by `tenant_id`, and authorize with the person's `sub` and permissions.
+
+### Using another application's components
+
+1. Find what the organization's other applications offer: `GET /api/v1/product-integrations/organizations/{id}/embeds` (`organizations.read`). Each item gives `tag`, `scriptUrl`, `attributes` and `audience`, plus `usable`: whether you can get its token for this organization now (both on, a consumed scope that allows acting on behalf of a person, not blocked). When it's `false`, `reason` says why.
+2. Consume the scope it needs in your manifest (`consumes`).
+3. Give the component a token from **your server**, exchanged for the signed-in person:
+
+```ts
+// Your server: an endpoint your page calls (the person's session gives their access token)
+app.get('/embed-token/:productId', async (req, reply) => {
+  return { token: await tokens.onBehalfOf(req.session.accessToken, req.params.productId) };
+});
+```
+
+```html
+<script type="module" src="https://hearth.example.com/embed/v1/hearth.js"></script>
+<hearth-record-thread resource="mt://crm/deal/42"></hearth-record-thread>
+<script type="module">
+  document.querySelector('hearth-record-thread').tokenProvider = () =>
+    fetch('/embed-token/hearth').then((r) => r.json()).then((d) => d.token);
+</script>
+```
+
+Your page's Content-Security-Policy has to allow the component's script (`script-src`) and its API (`connect-src`).
+
+### Branding
+
+`GET …/organizations/{id}/branding` (`organizations.read`) gives the organization's `name`, `logoUrl` and `primaryColor`, and `theme`: CSS custom properties to set on your pages.
+
+| Property | What |
+| --- | --- |
+| `--mt-color-primary` | The organization's colour |
+| `--mt-color-on-primary` | Black or white, whichever reads better on it |
+| `--mt-radius` | Corner radius |
+| `--mt-font-family` | Font stack |
+
+Set them once (`themeCss(branding.theme)` in the TypeScript client gives the CSS). The launcher and well-behaved components read them, so every application looks like the same product.
+
+### The application launcher
+
+`<mt-app-launcher>` is a button for your header that lists the organization's applications the person can open, plus a link back to the portal. It's the same list as the portal's menu, with the current application marked.
+
+1. Load it from the platform: `<script type="module" src="https://<platform>/api/embed/v1/launcher.js"></script>`. It has no dependencies and is cacheable.
+2. Give it the list from your server. Call `GET …/organizations/{id}/members/{subject}/applications` (scope `launcher.read`) for the signed-in person, and serve it at an address of your own:
+
+```html
+<mt-app-launcher src="/platform/launcher"></mt-app-launcher>
+```
+
+or set the element's `data` property to the answer. The launcher never calls the platform itself and holds no token. It only follows `http(s)` links, and it closes with Escape or a click outside.
 
 ## Dependencies and bundles
 

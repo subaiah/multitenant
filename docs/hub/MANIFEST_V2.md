@@ -14,7 +14,8 @@ Version 2 adds what an application needs to work **with other applications** in 
 | `platformServices.notifications`, `platformServices.auditEvents` | Implemented, with `notifications.send` and `audit.write` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#using-the-platforms-services)) |
 | `api` (scopes, openApiUrl), `consumes` | Implemented, with application-to-application tokens ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#calling-other-applications)) |
 | `requires`, `integratesWith` | Implemented: enforced when organizations turn applications on and off, never turned on automatically; plus bundles ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#dependencies-and-bundles)) |
-| `embeds`, `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
+| `embeds` | Implemented, with the embeds list, branding and the application launcher ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#embedding-another-application)) |
+| `events`, `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
 
 Also implemented:
 - A version 1 manifest with any version 2 field, supported or not yet, is refused (`kind: needs "manifestVersion": 2`), for the same reason.
@@ -161,7 +162,7 @@ Also implemented:
 | `api.scopes` | No | Up to 50. `name` follows the permission rule (`<productId>[.<thing>]:<action>`); `description` up to 200 characters; `allowsOnBehalfOf` (default `false`). The audience is always `urn:mt:app:<productId>`. |
 | `api.openApiUrl` | No | Where the exposed API's OpenAPI document lives. Shown to developers on the platform's Developers page. |
 | `consumes` | No | Up to 50 `{ scope, reason }`. Each scope must be exposed by another registered application (a warning, not an error, if that application isn't registered yet). Shown to organization administrators; they can block a connection ([ADR-0001](../adr/0001-app-to-app-calls.md)). |
-| `embeds` | No | Up to 20. `tag` is a custom element name starting with `<productId>-`; `scriptUrl` same address rules as `baseUrl` and on the same host; `attributes` up to 10 names. |
+| `embeds` | No | Up to 20. `tag` is a custom element name starting with `<productId>-`; `scriptUrl` same address rules as `baseUrl` and on the same host; `attributes` up to 10 lowercase names; `description` (shown to other applications). |
 | `platformServices.notifications` | No | Up to 50 types named `<productId>.<name>`, with `label` and `defaultChannels` (`in_app`, `email`). Appear in organization notification rules and personal preferences. Needs the `notifications.send` service scope to send. |
 | `platformServices.auditEvents` | No | Up to 100 types named `<productId>.<name>`, with `label`. Appear in the audit log filter and as webhook event types. Needs `audit.write`. |
 | `events.emits` | No | Up to 100 types named `<productId>.<name>`, each with an optional JSON Schema URL. Needs `events.publish`. |

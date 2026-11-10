@@ -24,6 +24,7 @@ interface ImportResult {
   api?: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
   /** Applications it requires or works with (manifest v2) */
   dependencies?: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
+  embeds?: { tags: string[] } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -60,6 +61,7 @@ function Plan({ plan }: { plan: ImportResult }) {
       <ServicesLine services={plan.platformServices} />
       <ApiLine api={plan.api} />
       <DependenciesLine dependencies={plan.dependencies} />
+      <EmbedsLine embeds={plan.embeds} />
     </div>
   );
 }
@@ -127,6 +129,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         <ServicesLine services={result.platformServices} />
         <ApiLine api={result.api} />
         <DependenciesLine dependencies={result.dependencies} />
+        <EmbedsLine embeds={result.embeds} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
           <CopyBox value={result.clientId} label="Client ID" />
@@ -232,5 +235,15 @@ function DependenciesLine({ dependencies }: { dependencies?: ImportResult['depen
       <p>Requires {requires} application{requires === 1 ? '' : 's'}; works with {integratesWith}.</p>
       {notRegisteredYet.length > 0 && <p className="mt-1 text-amber-700 dark:text-amber-400">Not registered yet: <span className="font-mono text-xs">{notRegisteredYet.join(', ')}</span></p>}
     </div>
+  );
+}
+
+/** Web Components it offers other applications */
+function EmbedsLine({ embeds }: { embeds?: ImportResult['embeds'] }) {
+  if (!embeds || 'leftAlone' in embeds || !embeds.tags.length) return null;
+  return (
+    <p className="text-sm text-slate-600 dark:text-slate-300">
+      Offers {embeds.tags.length} component{embeds.tags.length === 1 ? '' : 's'} for other applications' pages: <span className="font-mono text-xs break-all">{embeds.tags.map((t) => `<${t}>`).join(', ')}</span>
+    </p>
   );
 }

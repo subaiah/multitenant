@@ -8,6 +8,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
 import { audit } from '../lib/audit.js';
 import { PREVIEW_MENU_PATHS, previewEnabled } from '../lib/preview.js';
+import { productSections } from '../lib/product-menu.js';
 
 const createMenuItemSchema = z.object({
   portal: z.enum(['PLATFORM', 'TENANT']),
@@ -396,48 +397,3 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     return { message: 'Menu items reordered successfully' };
   });
 };
-
-/** Menu sections for the external products an organization has on now, with the entries this person may use */
-async function productSections(tenantId: string, granted: Set<string>) {
-  const now = new Date();
-  const apps = await controlDb.applicationRegistry.findMany({
-    where: {
-      status: 'ACTIVE',
-      baseUrl: { not: null },
-      menuItems: { some: {} },
-      // Once it has set the organization up (lib/product-lifecycle.ts)
-      tenantApplications: { some: { tenantId, state: { in: ['ENABLED', 'TRIAL'] }, provisioningStatus: { in: ['READY', 'NOT_REQUIRED'] }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } },
-    },
-    include: { menuItems: { orderBy: { order: 'asc' } } },
-    orderBy: { name: 'asc' },
-  });
-  return apps
-    .map((app, n) => ({
-      id: `app:${app.id}`,
-      portal: 'TENANT' as const,
-      parentId: null,
-      label: app.name,
-      path: `#app-${app.key}`,
-      icon: 'Package',
-      permission: null,
-      order: n,
-      isActive: true,
-      children: app.menuItems
-        .filter((i) => !i.permission || permissionMatches(granted, i.permission))
-        .map((i) => ({
-          id: `app-item:${i.id}`,
-          portal: 'TENANT' as const,
-          parentId: `app:${app.id}`,
-          label: i.label,
-          // Opens in the product, which signs the person in with this account
-          path: `${app.baseUrl}${i.path}`,
-          external: true,
-          icon: i.icon,
-          permission: i.permission,
-          order: i.order,
-          isActive: true,
-        })),
-    }))
-    .filter((section) => section.children.length > 0);
-}
-
