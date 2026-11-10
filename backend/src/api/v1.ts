@@ -327,6 +327,13 @@ SCHEMAS.ProductUsageRecordInput = obj({
   idempotencyKey: { type: 'string', maxLength: 200, description: 'Reporting the same key again for the organization is skipped' },
 }, ['key', 'quantity']);
 
+SCHEMAS.ResourceType = obj({
+  productId: { type: 'string' }, application: { type: 'string' }, type: { type: 'string' }, label: { type: 'string' },
+  urlTemplate: { type: 'string', description: 'Absolute, with {id}' },
+  accessCheckUrl: { type: 'string', description: 'POST { subject, resources } with an application token for checkScope; answers { results: [{ resource, allowed }] }' },
+  checkScope: { type: 'string', description: '<productId>.records:check: consume it to ask' },
+}, undefined, { description: 'A record type an application owns' });
+
 SCHEMAS.ProductGroup = obj({
   id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
   memberCount: { type: 'integer', description: 'People in it now' }, createdAt: dateTime, updatedAt: dateTime,
@@ -436,6 +443,14 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       details: { type: 'object', additionalProperties: true, description: 'At most 4000 characters as JSON' },
     }, ['type']),
     responses: { 201: obj({ seq: { type: 'integer', description: 'The entry’s position in the organization’s log' } }) } },
+  { method: 'GET', path: '/product-integrations/resource-types', operationId: 'listResourceTypes', tag: 'Products',
+    summary: 'Every active application’s record types (mt://<productId>/<type>/<id>), with where to check access to them', scope: 'organizations.read',
+    responses: { 200: obj({ types: arrayOf(ref('ResourceType')) }) } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/resources/resolve', operationId: 'resolveResource', tag: 'Products',
+    summary: 'A record identifier as a link, for an organization that has its application on (404 otherwise). Says nothing about whether a person may see it: ask the owner (POST accessCheckUrl).',
+    scope: 'organizations.read',
+    query: { uri: { type: 'string', description: 'mt://<productId>/<type>/<id>' } },
+    responses: { 200: obj({ resource: { type: 'string' }, productId: { type: 'string' }, application: { type: 'string' }, type: { type: 'string' }, label: { type: 'string' }, id: { type: 'string' }, url: { type: 'string' } }) } },
   { method: 'POST', path: '/product-integrations/organizations/:organizationId/usage', operationId: 'reportProductUsage', tag: 'Products',
     summary: 'Report usage of the product’s metered features (manifest usage) in an organization that has it on: one record, or { records: [...] } (up to 100). A record with an idempotencyKey already reported is skipped.',
     scope: 'usage.report',

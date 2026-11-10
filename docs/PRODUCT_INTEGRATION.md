@@ -731,6 +731,51 @@ The types appear in the organization's webhook catalog (Developers page, categor
 
 On **Application Entitlements**, **Events between applications** lists each event their applications publish. For each, it shows which of their other applications receive it and why, how many of their webhook endpoints do, and how often it was published in the last 30 days.
 
+## Records in other applications
+
+Applications often refer to each other's records: a conversation about a deal, a document attached to an invoice, a workflow run for an order.
+
+### Identifiers
+
+A record is named `mt://<productId>/<type>/<id>`, for example `mt://crmforge/deal/42` (encode the id with `encodeURIComponent`). The organization isn't part of it: it's always the one your token is for. Store identifiers as they are.
+
+### Owning records
+
+Declare the types in the manifest (version 2), and expose `<productId>.records:check`:
+
+```json
+"api": {
+  "scopes": [ { "name": "crmforge.records:check", "description": "Check whether a person can see a record" } ],
+  "accessCheckPath": "/platform/access-check"
+},
+"resources": [
+  { "type": "deal", "label": "Deal", "urlTemplate": "/deals/{id}" }
+]
+```
+
+Then answer `POST <baseUrl><accessCheckPath>` (default `/access-check`):
+- **Request:** an application token for you with `records:check`, and `{ "subject": "<organization id>.<user id>", "resources": ["mt://crmforge/deal/42", …] }`.
+- **Answer:** `{ "results": [ { "resource": "…", "allowed": true } ] }`.
+- **You decide**, with your own rules. Answer `false` for anything that isn't yours, and for people outside the token's organization.
+
+The TypeScript client's `createAccessCheckHandler()` handles the token, the scope and those rules, and calls your `canSee()`.
+
+### Showing another application's records
+
+1. Consume `<owner>.records:check` in your manifest.
+2. Find the types and where to ask: `GET /api/v1/product-integrations/resource-types` (`organizations.read`) gives each type's `urlTemplate`, `accessCheckUrl` and `checkScope`.
+3. Before showing a record to someone, ask the owner from your server:
+
+```ts
+const token = await tokens.forOrganization('crmforge', organizationId, ['crmforge.records:check']);
+const allowed = await checkAccess(accessCheckUrl, token, { subject, resources: [dealUri] });
+if (allowed.get(dealUri)) { /* show it */ }
+```
+
+Anything not answered `allowed: true` counts as no, including when the owner can't be reached.
+
+4. To link to a record, `GET …/organizations/{id}/resources/resolve?uri=…` gives its label and address. The answer is `404` when the organization doesn't have the owner on. It says nothing about who may see the record: that's what the check is for.
+
 ## Embedding another application
 
 One application can show part of another inside its own pages: a CRM shows the chat about a deal, a document panel or a workflow's status. The platform never puts one application in a frame. Its own pages keep `frame-ancestors 'none'`, and nobody signs in inside a frame. Instead, an application offers **Web Components**, and another loads them like any script.

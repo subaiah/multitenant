@@ -73,6 +73,8 @@ const v2Fields = {
       allowsOnBehalfOf: z.boolean().default(false),
     })).max(50).default([]),
     openApiUrl: uri.optional(),
+    /** Where other applications check access to its records (resources): a path on baseUrl */
+    accessCheckPath: relativePath.optional(),
   }).default({ scopes: [] }),
   consumes: z.array(z.object({ scope: z.string().max(100), reason: z.string().trim().min(1).max(200) })).max(50).default([]),
   // Other applications it needs, or works with (lib/app-dependencies.ts)
@@ -107,11 +109,17 @@ const v2Fields = {
     }),
     z.object({ key: declaredName, label: z.string().trim().min(1).max(100), type: z.literal('boolean'), default: z.boolean() }),
   ])).max(50).default([]),
+  // Record types it owns, which others refer to as mt://<productId>/<type>/<id> (lib/product-resources.ts)
+  resources: z.array(z.object({
+    type: z.string().regex(/^[a-z][a-z0-9_-]{0,49}$/, 'Lowercase letters, digits, _ and -, starting with a letter'),
+    label: z.string().trim().min(1).max(100),
+    urlTemplate: relativePath.refine((p) => p.includes('{id}'), 'Must contain {id}'),
+  })).max(50).default([]),
   // Metered features it reports (lib/product-usage.ts)
   usage: z.array(z.object({ key: declaredName, label: z.string().trim().min(1).max(100), unit: z.string().trim().min(1).max(30) })).max(20).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['resources', 'health'] as const;
+export const V2_NOT_YET = ['health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -152,6 +160,15 @@ export const manifestSchema = z
       m.limits.forEach((l, i) => {
         if (l.type === 'integer' && l.default === null && !l.unlimited) ctx.addIssue({ code: 'custom', path: ['limits', i, 'default'], message: 'null (no limit) needs "unlimited": true' });
       });
+      // Record types: each once; others ask about them through its records:check scope
+      const types = new Set<string>();
+      m.resources.forEach((r, i) => {
+        if (types.has(r.type)) ctx.addIssue({ code: 'custom', path: ['resources', i, 'type'], message: `"${r.type}" is listed twice` });
+        types.add(r.type);
+      });
+      if (m.resources.length && !m.api.scopes.some((sc) => sc.name === `${m.productId}.records:check`)) {
+        ctx.addIssue({ code: 'custom', path: ['resources'], message: `Expose the scope "${m.productId}.records:check" in api.scopes, so other applications can check access to these records` });
+      }
       // Subscriptions: another application's event types, each once
       const wanted = new Set<string>();
       m.events.subscribes.forEach((sub, i) => {
@@ -256,6 +273,8 @@ export interface ImportResult {
   dependencies: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
   /** Events it publishes (also in platformServices' added/updated/retired) and subscribes to (manifest v2); a version 1 manifest leaves them alone */
   events: { emits: number; subscribes: number; notDeclaredYet: string[] } | { leftAlone: true };
+  /** Record types it owns (manifest v2); a version 1 manifest leaves them alone */
+  resources: { types: string[] } | { leftAlone: true };
   /** Plan limits and usage meters (manifest v2); a version 1 manifest leaves them alone */
   limits: { added: string[]; updated: string[]; retired: string[]; meters: number } | { leftAlone: true };
   /** Web Components it offers (manifest v2); a version 1 manifest leaves them alone */
@@ -474,6 +493,17 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         events = { emits: m.events.emits.length, subscribes: m.events.subscribes.length, notDeclaredYet: m.events.subscribes.map((sub) => sub.type).filter((t) => !declaredNow.has(t)) };
       }
 
+      // Record types: replaced (an identifier names the type, not a row here)
+      let resources: ImportResult['resources'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        await tx.productResourceType.deleteMany({ where: { applicationId: app.id } });
+        if (m.resources.length) {
+          await tx.productResourceType.createMany({ data: m.resources.map((r, position) => ({ applicationId: app.id, type: r.type, label: r.label, urlTemplate: r.urlTemplate, position })) });
+        }
+        await tx.applicationRegistry.update({ where: { id: app.id }, data: { accessCheckPath: m.api.accessCheckPath ?? null } });
+        resources = { types: m.resources.map((r) => r.type) };
+      }
+
       // Limits: like declared types (retired, not removed: plans may hold values). Usage meters: the same
       let limits: ImportResult['limits'] = { leftAlone: true };
       if (m.manifestVersion === 2) {
@@ -557,6 +587,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         api,
         dependencies,
         events,
+        resources,
         limits,
         embeds,
         menuItems: m.menu.length,
@@ -599,6 +630,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       dependencies: { orderBy: { position: 'asc' } },
       embeds: { orderBy: { position: 'asc' } },
       eventSubscriptions: { orderBy: { position: 'asc' } },
+      resourceTypes: { orderBy: { position: 'asc' } },
       limits: { where: { retiredAt: null }, orderBy: { position: 'asc' } },
       usageMeters: { where: { retiredAt: null }, orderBy: { position: 'asc' } },
     },
@@ -641,6 +673,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       api: {
         scopes: app.apiScopes.map((sc) => ({ name: sc.name, description: sc.description, allowsOnBehalfOf: sc.allowsOnBehalfOf })),
         ...(app.apiOpenApiUrl && { openApiUrl: app.apiOpenApiUrl }),
+        ...(app.accessCheckPath && { accessCheckPath: app.accessCheckPath }),
       },
     }),
     ...(app.consumedScopes.length && { consumes: app.consumedScopes.map((c) => ({ scope: c.scope, reason: c.reason })) }),
@@ -652,6 +685,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
         subscribes: app.eventSubscriptions.map((sub) => ({ type: sub.type, reason: sub.reason })),
       },
     }),
+    ...(app.resourceTypes.length && { resources: app.resourceTypes.map((r) => ({ type: r.type, label: r.label, urlTemplate: r.urlTemplate })) }),
     ...(app.limits.length && {
       limits: app.limits.map((l) => l.type === 'integer'
         ? { key: l.key, label: l.label, type: 'integer' as const, unlimited: l.unlimited, default: (l.defaultValue as { v: number | null }).v, ...(l.unit && { unit: l.unit }) }

@@ -302,6 +302,8 @@ model ApplicationRegistry {
   manifestVersion  Int     @default(1) @map("manifest_version")
   /// Where its exposed API is described (manifest v2 api.openApiUrl)
   apiOpenApiUrl    String? @map("api_open_api_url")
+  /// Where others check access to its records (manifest v2 api.accessCheckPath; default /access-check)
+  accessCheckPath  String? @map("access_check_path")
   /// Also tell it when people in an organization change (lib/product-user-events.ts)
   userEvents       Boolean @default(false) @map("user_events")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -326,6 +328,7 @@ model ApplicationRegistry {
   usageMeters        ProductUsageMeter[]
   usageRecords       ProductUsageRecord[]
   prices             ApplicationPrice[]
+  resourceTypes      ProductResourceType[]
   bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
@@ -1359,6 +1362,22 @@ model ApplicationCharge {
   @@index([status])
   @@index([tenantId, periodEnd])
   @@map("application_charges")
+}
+
+/// A record type an application owns (manifest v2 resources; lib/product-resources.ts)
+model ProductResourceType {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  type          String
+  label         String
+  /// A path on the application with {id}
+  urlTemplate   String              @map("url_template")
+  position      Int                 @default(0)
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, type])
+  @@map("product_resource_types")
 }
 
 model Bundle {

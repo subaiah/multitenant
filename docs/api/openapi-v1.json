@@ -4079,6 +4079,229 @@
         }
       }
     },
+    "/product-integrations/resource-types": {
+      "get": {
+        "operationId": "listResourceTypes",
+        "tags": [
+          "Products"
+        ],
+        "summary": "Every active application’s record types (mt://<productId>/<type>/<id>), with where to check access to them",
+        "description": "For external products, with a service access token that has the `organizations.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "organizations.read"
+            ]
+          }
+        ],
+        "x-scope": "organizations.read",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "types": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ResourceType"
+                      }
+                    }
+                  },
+                  "required": [
+                    "types"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/resources/resolve": {
+      "get": {
+        "operationId": "resolveResource",
+        "tags": [
+          "Products"
+        ],
+        "summary": "A record identifier as a link, for an organization that has its application on (404 otherwise). Says nothing about whether a person may see it: ask the owner (POST accessCheckUrl).",
+        "description": "For external products, with a service access token that has the `organizations.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "organizations.read"
+            ]
+          }
+        ],
+        "x-scope": "organizations.read",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "uri",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "mt://<productId>/<type>/<id>"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resource": {
+                      "type": "string"
+                    },
+                    "productId": {
+                      "type": "string"
+                    },
+                    "application": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "resource",
+                    "productId",
+                    "application",
+                    "type",
+                    "label",
+                    "id",
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/product-integrations/organizations/{organizationId}/usage": {
       "post": {
         "operationId": "reportProductUsage",
@@ -6261,6 +6484,45 @@
           "key",
           "quantity"
         ]
+      },
+      "ResourceType": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "application": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "urlTemplate": {
+            "type": "string",
+            "description": "Absolute, with {id}"
+          },
+          "accessCheckUrl": {
+            "type": "string",
+            "description": "POST { subject, resources } with an application token for checkScope; answers { results: [{ resource, allowed }] }"
+          },
+          "checkScope": {
+            "type": "string",
+            "description": "<productId>.records:check: consume it to ask"
+          }
+        },
+        "required": [
+          "productId",
+          "application",
+          "type",
+          "label",
+          "urlTemplate",
+          "accessCheckUrl",
+          "checkScope"
+        ],
+        "description": "A record type an application owns"
       },
       "ProductGroup": {
         "type": "object",
