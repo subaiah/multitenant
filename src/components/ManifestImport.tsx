@@ -22,6 +22,8 @@ interface ImportResult {
   platformServices?: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
   /** Scopes exposed to and consumed from other applications (manifest v2) */
   api?: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
+  /** Applications it requires or works with (manifest v2) */
+  dependencies?: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -57,6 +59,7 @@ function Plan({ plan }: { plan: ImportResult }) {
       </p>
       <ServicesLine services={plan.platformServices} />
       <ApiLine api={plan.api} />
+      <DependenciesLine dependencies={plan.dependencies} />
     </div>
   );
 }
@@ -123,6 +126,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         </p>
         <ServicesLine services={result.platformServices} />
         <ApiLine api={result.api} />
+        <DependenciesLine dependencies={result.dependencies} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
           <CopyBox value={result.clientId} label="Client ID" />
@@ -214,6 +218,19 @@ function ApiLine({ api }: { api?: ImportResult['api'] }) {
       {notExposedYet.length > 0 && (
         <p className="mt-1 text-amber-700 dark:text-amber-400">No registered application exposes these yet: <span className="font-mono text-xs">{notExposedYet.join(', ')}</span></p>
       )}
+    </div>
+  );
+}
+
+/** Applications it requires or works with */
+function DependenciesLine({ dependencies }: { dependencies?: ImportResult['dependencies'] }) {
+  if (!dependencies || 'leftAlone' in dependencies) return null;
+  const { requires, integratesWith, notRegisteredYet } = dependencies;
+  if (!requires && !integratesWith) return null;
+  return (
+    <div className="text-sm text-slate-600 dark:text-slate-300">
+      <p>Requires {requires} application{requires === 1 ? '' : 's'}; works with {integratesWith}.</p>
+      {notRegisteredYet.length > 0 && <p className="mt-1 text-amber-700 dark:text-amber-400">Not registered yet: <span className="font-mono text-xs">{notRegisteredYet.join(', ')}</span></p>}
     </div>
   );
 }

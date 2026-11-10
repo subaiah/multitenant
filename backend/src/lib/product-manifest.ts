@@ -74,9 +74,12 @@ const v2Fields = {
     openApiUrl: uri.optional(),
   }).default({ scopes: [] }),
   consumes: z.array(z.object({ scope: z.string().max(100), reason: z.string().trim().min(1).max(200) })).max(50).default([]),
+  // Other applications it needs, or works with (lib/app-dependencies.ts)
+  requires: z.array(z.object({ productId: z.string().max(50), reason: z.string().trim().min(1).max(200) })).max(10).default([]),
+  integratesWith: z.array(z.object({ productId: z.string().max(50), reason: z.string().trim().min(1).max(200) })).max(20).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['requires', 'integratesWith', 'embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
+export const V2_NOT_YET = ['embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -120,6 +123,16 @@ export const manifestSchema = z
         if (consumed.has(c.scope)) ctx.addIssue({ code: 'custom', path: ['consumes', i, 'scope'], message: `"${c.scope}" is listed twice` });
         consumed.add(c.scope);
       });
+      // Dependencies: other applications, each once
+      const others = new Set<string>();
+      for (const [list, items] of [['requires', m.requires], ['integratesWith', m.integratesWith]] as const) {
+        items.forEach((d, i) => {
+          if (!/^[a-z0-9][a-z0-9-]{1,49}$/.test(d.productId)) ctx.addIssue({ code: 'custom', path: [list, i, 'productId'], message: `"${d.productId}": not a product id` });
+          else if (d.productId === m.productId) ctx.addIssue({ code: 'custom', path: [list, i, 'productId'], message: 'an application can’t depend on itself' });
+          if (others.has(d.productId)) ctx.addIssue({ code: 'custom', path: [list, i, 'productId'], message: `"${d.productId}" is listed twice (in requires or integratesWith)` });
+          others.add(d.productId);
+        });
+      }
     }
     const names = new Set<string>();
     m.permissions.forEach((p, i) => {
@@ -143,7 +156,8 @@ export function manifestProblems(input: unknown): string[] | null {
   if (input && typeof input === 'object') {
     const raw = input as Record<string, unknown>;
     // Refused rather than silently dropped, so nobody thinks they're in effect
-    const v2Only = ['kind', 'platformServices', ...V2_NOT_YET].filter((k) => k in raw);
+    // Every version 2 field, supported or not yet (from the schema, so a newly supported one stays on the list)
+    const v2Only = [...Object.keys(v2Fields), ...V2_NOT_YET].filter((k) => k in raw);
     if (raw.manifestVersion === 1 && v2Only.length) extra.push(...v2Only.map((k) => `${k}: needs "manifestVersion": 2`));
     if (raw.manifestVersion === 2) {
       extra.push(...V2_NOT_YET.filter((k) => k in raw).map((k) => `${k}: not supported by this platform yet (docs/hub/MANIFEST_V2.md); leave it out for now`));
@@ -169,6 +183,8 @@ export interface ImportResult {
   platformServices: { added: string[]; updated: string[]; retired: string[] } | { leftAlone: true };
   /** Scopes exposed to other applications, and those consumed from them (manifest v2); a version 1 manifest leaves them alone */
   api: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
+  /** Applications it requires or works with (manifest v2); a version 1 manifest leaves them alone */
+  dependencies: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
   menuItems: number;
   /** What changed in the catalogue entry and its sign-in, { field: [before, after] } (audited) */
   changes: Record<string, [unknown, unknown]>;
@@ -358,6 +374,19 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         api = out;
       }
 
+      // Dependencies: replaced; ones not registered yet are a warning (registered later is fine)
+      let dependencies: ImportResult['dependencies'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        await tx.productDependency.deleteMany({ where: { applicationId: app.id } });
+        const rows = [
+          ...m.requires.map((d) => ({ kind: 'requires', productKey: d.productId, reason: d.reason })),
+          ...m.integratesWith.map((d) => ({ kind: 'integrates', productKey: d.productId, reason: d.reason })),
+        ].map((d, position) => ({ applicationId: app.id, ...d, position }));
+        if (rows.length) await tx.productDependency.createMany({ data: rows });
+        const known = new Set((await tx.applicationRegistry.findMany({ where: { key: { in: rows.map((r) => r.productKey) } }, select: { key: true } })).map((a) => a.key));
+        dependencies = { requires: m.requires.length, integratesWith: m.integratesWith.length, notRegisteredYet: rows.map((r) => r.productKey).filter((k) => !known.has(k)) };
+      }
+
       // What changed, for the audit log and the dry run (never secrets)
       const was = {
         name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null, kind: existing?.kind ?? null,
@@ -387,6 +416,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         permissions: { added, updated, notInManifest },
         platformServices,
         api,
+        dependencies,
         menuItems: m.menu.length,
       };
       // A dry run: everything checked and worked out, then rolled back
@@ -422,6 +452,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       declaredTypes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { type: 'asc' }] },
       apiScopes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { name: 'asc' }] },
       consumedScopes: { orderBy: { position: 'asc' } },
+      dependencies: { orderBy: { position: 'asc' } },
     },
   });
   if (!app) throw new AppError('Application not found', 404);
@@ -465,5 +496,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       },
     }),
     ...(app.consumedScopes.length && { consumes: app.consumedScopes.map((c) => ({ scope: c.scope, reason: c.reason })) }),
+    ...(app.dependencies.some((d) => d.kind === 'requires') && { requires: app.dependencies.filter((d) => d.kind === 'requires').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
+    ...(app.dependencies.some((d) => d.kind === 'integrates') && { integratesWith: app.dependencies.filter((d) => d.kind === 'integrates').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
   } as ProductManifest;
 }

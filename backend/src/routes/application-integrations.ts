@@ -4,6 +4,7 @@
  * events and logout tokens are getting through. The Integrations page;
  * details are on each application's panels.
  */
+import { organizationsMissingDependencies } from '../lib/app-dependencies.js';
 import type { FastifyPluginAsync } from 'fastify';
 import { controlDb } from '../lib/prisma.js';
 
@@ -39,6 +40,7 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
       controlDb.productConsumedScope.groupBy({ by: ['applicationId'], _count: { _all: true } }),
       controlDb.appConnectionState.groupBy({ by: ['callerApplicationId'], _sum: { tokensIssued: true }, _max: { lastIssuedAt: true } }),
     ]);
+    const missingDeps = await organizationsMissingDependencies();
     const blockedFor = await controlDb.appConnectionState.groupBy({ by: ['callerApplicationId'], where: { blockedAt: { not: null } }, _count: { _all: true } });
 
     const count = <T extends { applicationId: string; _count: { _all: number } }>(rows: T[], id: string, pick: (r: T) => boolean = () => true) =>
@@ -74,6 +76,7 @@ export const applicationIntegrationRoutes: FastifyPluginAsync = async (fastify) 
           pendingSince && pendingSince < stuckBefore && 'Events waiting for over an hour',
           logoutStats.failed > 0 && `${logoutStats.failed} logout${logoutStats.failed === 1 ? '' : 's'} given up`,
           a.status !== 'ACTIVE' && organizations.total > 0 && 'Not active, but organizations have it on',
+          missingDeps.get(a.id) && `${missingDeps.get(a.id)} organization${missingDeps.get(a.id) === 1 ? ' has' : 's have'} it without something it requires`,
         ].filter((x): x is string => !!x);
         return {
           id: a.id, key: a.key, name: a.name, status: a.status, version: a.version, manifestImportedAt: a.manifestImportedAt,

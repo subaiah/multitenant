@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import { dependenciesOf } from '../lib/app-dependencies.js';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { listTargets } from '../lib/tenant-migrations.js';
@@ -87,8 +88,10 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     
     // What each can learn about the organization's people (lib/application-fields.ts)
     const access = await dataAccessOf(applications.map((a) => a.id));
+    // And what each needs or works with (lib/app-dependencies.ts)
+    const deps = await dependenciesOf(applications.map((a) => a.id));
     return {
-      applications: applications.map((a) => ({ ...a, dataAccess: access.get(a.id) })),
+      applications: applications.map((a) => ({ ...a, dataAccess: access.get(a.id), ...deps.get(a.id) })),
       pagination: {
         page: paging.page,
         limit: paging.limit,

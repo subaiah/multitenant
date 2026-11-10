@@ -162,6 +162,9 @@ export const KIT_AUDIT_EVENTS = {
   'tenant.migrations_run': p('Tenant migrations run', 'tenant'),
 
   // Platform: catalogue, menus, people, support
+  'bundle.created': p('Application bundle created', 'config'),
+  'bundle.updated': p('Application bundle changed', 'config'),
+  'bundle.deleted': p('Application bundle deleted', 'config'),
   'application.created': p('Application added to the catalogue', 'platform'),
   'application.updated': p('Application changed', 'platform'),
   'application.deleted': p('Application removed from the catalogue', 'platform'),

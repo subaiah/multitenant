@@ -23,6 +23,8 @@ export const CATALOGUE_FIELDS = {
   status: true,
   baseUrl: true,
   deletesDataOnDeprovision: true,
+  /** specific or generic (manifest v2) */
+  kind: true,
   createdAt: true,
   updatedAt: true,
 } as const;

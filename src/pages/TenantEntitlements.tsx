@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import Bundles from '../components/Bundles';
 import AppConnections from '../components/AppConnections';
 import { usePermissions } from '../hooks/usePermissions';
-import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye } from 'lucide-react';
+import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye, Link2 } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
@@ -13,8 +14,36 @@ interface Application {
   description?: string;
   version: string;
   status: string;
+  /** specific or generic (manifest v2) */
+  kind?: string;
+  /** Applications it needs on, and ones it works with (backend lib/app-dependencies.ts) */
+  requires?: { productId: string; name: string | null; reason: string }[];
+  integratesWith?: { productId: string; name: string | null; reason: string }[];
   /** What its server can learn about the organization's people (backend lib/application-fields.ts) */
   dataAccess?: { peopleAndGroups: boolean; toldWhenPeopleChange: boolean };
+}
+
+/** What an application needs on, and works with; which needed ones are missing */
+function DependencyNote({ app, onKeys }: { app?: Application; onKeys: Set<string> }) {
+  if (!app || (!app.requires?.length && !app.integratesWith?.length)) return null;
+  return (
+    <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+      {app.requires?.map((d) => (
+        <p key={d.productId} className="flex items-start gap-1.5">
+          <Link2 size={13} className="mt-0.5 shrink-0 text-slate-400" aria-hidden />
+          <span>
+            Needs <strong>{d.name ?? d.productId}</strong>{onKeys.has(d.productId) ? '' : <span className="text-amber-700 dark:text-amber-400"> (not on yet)</span>}: {d.reason}
+          </span>
+        </p>
+      ))}
+      {app.integratesWith?.map((d) => (
+        <p key={d.productId} className="flex items-start gap-1.5 text-slate-500">
+          <Link2 size={13} className="mt-0.5 shrink-0 text-slate-300" aria-hidden />
+          <span>Works with {d.name ?? d.productId}: {d.reason}</span>
+        </p>
+      ))}
+    </div>
+  );
 }
 
 /** What an application's server can learn about the organization's people, in plain words */
@@ -51,6 +80,10 @@ export default function TenantEntitlements() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedAppId, setSelectedAppId] = useState('');
   const [validTo, setValidTo] = useState('');
+  // The server's reason (e.g. what an application needs on first), shown above the list or in the dialog
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const reason = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
   // After a change: the entitlements here, and the Applications page's list
   const fetchData = () => invalidateApi('/tenant-applications', '/applications');
@@ -66,20 +99,20 @@ export default function TenantEntitlements() {
       setShowAddModal(false);
       setSelectedAppId('');
       setValidTo('');
+      setAddError(null);
       fetchData();
     } catch (error) {
-      console.error('Failed to add entitlement:', error);
-      alert('Failed to add entitlement');
+      setAddError(reason(error, 'Adding the application failed'));
     }
   };
 
   const handleUpdateEntitlement = async (id: string, state: string) => {
     try {
       await apiPatch(`/tenant-applications/${id}`, { state });
+      setActionError(null);
       fetchData();
     } catch (error) {
-      console.error('Failed to update entitlement:', error);
-      alert('Failed to update entitlement');
+      setActionError(reason(error, 'Changing the application failed'));
     }
   };
 
@@ -87,10 +120,10 @@ export default function TenantEntitlements() {
     if (!confirm('Are you sure you want to remove this entitlement?')) return;
     try {
       await apiDelete(`/tenant-applications/${id}`);
+      setActionError(null);
       fetchData();
     } catch (error) {
-      console.error('Failed to remove entitlement:', error);
-      alert('Failed to remove entitlement');
+      setActionError(reason(error, 'Removing the application failed'));
     }
   };
 
@@ -112,6 +145,10 @@ export default function TenantEntitlements() {
     return new Date(validTo) < new Date();
   };
 
+  // The product ids the organization has on now (to say which needed ones are missing)
+  const onKeys = new Set(entitledApps.filter((e) => (e.state === 'ENABLED' || e.state === 'TRIAL') && !isExpired(e.validTo)).map((e) => e.application.key));
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -122,6 +159,12 @@ export default function TenantEntitlements() {
 
   return (
     <div className="p-6">
+      {actionError && (
+        <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-800 dark:text-red-300">
+          <span>{actionError}</span>
+          <button type="button" onClick={() => setActionError(null)} className="text-xs underline">Dismiss</button>
+        </div>
+      )}
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Application Entitlements</h1>
         <p className="text-slate-600 dark:text-slate-400 mt-1">
@@ -184,6 +227,7 @@ export default function TenantEntitlements() {
                             {entitlement.application.description}
                           </p>
                         )}
+                        <DependencyNote app={entitlement.application} onKeys={onKeys} />
                         <DataAccessNote access={entitlement.application.dataAccess} />
                         <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
                           <span className="flex items-center gap-1">
@@ -238,6 +282,7 @@ export default function TenantEntitlements() {
         </div>
       </div>
 
+      <Bundles canManage={hasPermission('applications:manage')} onChanged={fetchData} />
       <AppConnections canManage={hasPermission('applications:manage')} />
 
       {/* Add Entitlement Modal */}
@@ -264,7 +309,9 @@ export default function TenantEntitlements() {
                     </option>
                   ))}
                 </select>
+                <DependencyNote app={availableApps.find((a) => a.id === selectedAppId)} onKeys={onKeys} />
                 <DataAccessNote access={availableApps.find((a) => a.id === selectedAppId)?.dataAccess} before />
+                {addError && <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">{addError}</p>}
                 {getAvailableApps().length === 0 && (
                   <p className="text-sm text-amber-600 dark:text-amber-400 mt-2">
                     No applications available to add

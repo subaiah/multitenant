@@ -43,7 +43,10 @@ Each gap names what is missing, why the hub needs it, and the proposed direction
 
 Decision: [ADR-0001](../adr/0001-app-to-app-calls.md).
 
-### G2. No application kinds, dependencies or bundles (P1)
+### G2. No application kinds, dependencies or bundles (P1): **done**
+
+**Done (12 Nov 2026).** `kind`, `requires` and `integratesWith` in manifest v2. Required applications are enforced when organizations turn applications on and off, and refused with the reason, never turned on automatically. Bundles are made by platform staff and turned on by organizations in one step. The catalogue, Application Entitlements and the Integrations page show it all. See [PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#dependencies-and-bundles).
+
 
 **Now.** The manifest has no `kind` and no dependencies. Turning CRMForge on doesn't turn on Hearth; turning Hearth off silently breaks CRMForge's embedded chat.
 
@@ -134,7 +137,7 @@ Notification and audit event types are declared in the manifest, so organization
 
 1. ~~**G3** platform services for applications~~ (done: notifications and audit)
 2. ~~**G1** application-to-application tokens~~ (done)
-3. **G2** kinds, dependencies, bundles
+3. ~~**G2** kinds, dependencies, bundles~~ (done)
 4. **G7** scoped permissions and org units
 5. **G5** embedding contract
 6. **G4** application events
