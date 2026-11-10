@@ -322,6 +322,9 @@ model ApplicationRegistry {
   embeds             ProductEmbed[]
   eventSubscriptions ProductEventSubscription[]
   publishedEvents    ProductPublishedEvent[]
+  limits             ProductLimit[]
+  usageMeters        ProductUsageMeter[]
+  usageRecords       ProductUsageRecord[]
   bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
@@ -476,6 +479,8 @@ model TenantApplication {
   provisioningOperationId String?   @map("provisioning_operation_id")
   /// A hash of the organization's own organizations and units as last told (user events: units.changed)
   unitsStateHash String?            @map("units_state_hash")
+  /// A hash of the limits as last told (organization.entitlement_changed carries them: lib/product-limits.ts)
+  limitsStateHash String?           @map("limits_state_hash")
   createdAt     DateTime            @default(now()) @map("created_at")
 
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1211,6 +1216,83 @@ model ProductPublishedEvent {
   @@unique([applicationId, tenantId, idempotencyKey], map: "product_published_events_idempotency_key")
   @@index([tenantId, type, createdAt])
   @@map("product_published_events")
+}
+
+/// A limit an application's plans set (manifest v2 limits; lib/product-limits.ts)
+model ProductLimit {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  /// <productId>.<name>, unique across the platform
+  key           String              @unique
+  label         String
+  /// integer or boolean
+  type          String
+  /// integer: whether a plan may set no limit
+  unlimited     Boolean             @default(false)
+  /// For plans without a value: { "v": number | null | boolean }
+  defaultValue  Json                @map("default_value")
+  unit          String?
+  position      Int                 @default(0)
+  retiredAt     DateTime?           @map("retired_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  planValues    ProductPlanLimit[]
+
+  @@index([applicationId])
+  @@map("product_limits")
+}
+
+/// A plan's value for an application's limit, set by platform staff
+model ProductPlanLimit {
+  id        String       @id @default(uuid())
+  limitId   String       @map("limit_id")
+  planCode  TenantPlan   @map("plan_code")
+  /// { "v": number | null | boolean }
+  value     Json
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  limit     ProductLimit @relation(fields: [limitId], references: [id], onDelete: Cascade)
+
+  @@unique([limitId, planCode])
+  @@map("product_plan_limits")
+}
+
+/// A metered feature an application reports usage of (manifest v2 usage; lib/product-usage.ts)
+model ProductUsageMeter {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  key           String              @unique
+  label         String
+  unit          String
+  position      Int                 @default(0)
+  retiredAt     DateTime?           @map("retired_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("product_usage_meters")
+}
+
+/// Usage an application reported for an organization
+model ProductUsageRecord {
+  id             String              @id @default(uuid())
+  applicationId  String              @map("application_id")
+  tenantId       String              @map("tenant_id")
+  meterKey       String              @map("meter_key")
+  quantity       Float
+  occurredAt     DateTime            @map("occurred_at")
+  idempotencyKey String?             @map("idempotency_key")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  application    ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, tenantId, idempotencyKey], map: "product_usage_records_idempotency_key")
+  @@index([tenantId, meterKey, occurredAt])
+  @@index([applicationId, occurredAt])
+  @@map("product_usage_records")
 }
 
 model Bundle {

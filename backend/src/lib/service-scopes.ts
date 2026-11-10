@@ -10,6 +10,7 @@ export const SERVICE_SCOPES = {
   'notifications.send': 'Send its declared notifications to people in those organizations',
   'audit.write': 'Write its declared events to those organizations’ audit logs',
   'events.publish': 'Publish its declared events to other applications and webhooks in those organizations',
+  'usage.report': 'Report usage of its metered features in those organizations, and read it back',
   'launcher.read': 'See which of those organizations’ applications each person can open (the application launcher)',
 } as const;
 export type ServiceScope = keyof typeof SERVICE_SCOPES;

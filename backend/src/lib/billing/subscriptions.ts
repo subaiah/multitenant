@@ -16,6 +16,7 @@
  * changed at the provider when they differ. Stripe prorates straight away;
  * Razorpay applies the new count from the next billing cycle.
  */
+import { scheduleLimitsCheck } from '../product-limits.js';
 import { config } from '../../config/env.js';
 import { controlDb } from '../prisma.js';
 import { recordAudit, type AuditActor } from '../audit.js';
@@ -98,6 +99,8 @@ export async function applySubscription(name: ProviderName, ps: ProviderSubscrip
   if (overdue && !tenant.paymentRequiredSince) tenantData.paymentRequiredSince = now;
   if (!overdue && tenant.paymentRequiredSince) tenantData.paymentRequiredSince = null;
   if (Object.keys(tenantData).length) await controlDb.tenant.update({ where: { id: tenantId }, data: tenantData });
+  // Another plan: its applications' limits may differ (lib/product-limits.ts)
+  if (tenantData.plan) scheduleLimitsCheck({ tenantId });
 
   // The audit trail (and, through it, notifications)
   const system = { type: 'SYSTEM' } as const;

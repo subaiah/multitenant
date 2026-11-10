@@ -165,6 +165,7 @@ export const KIT_AUDIT_EVENTS = {
   'bundle.created': p('Application bundle created', 'config'),
   'bundle.updated': p('Application bundle changed', 'config'),
   'bundle.deleted': p('Application bundle deleted', 'config'),
+  'application.plan_limits_changed': p("Application's limits for a plan changed", 'platform'),
   'application.created': p('Application added to the catalogue', 'platform'),
   'application.updated': p('Application changed', 'platform'),
   'application.deleted': p('Application removed from the catalogue', 'platform'),

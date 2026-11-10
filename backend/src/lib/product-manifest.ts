@@ -5,6 +5,7 @@
  * credentials. Permissions no longer in the manifest are reported, never
  * removed: organizations' roles may still hold them.
  */
+import { scheduleLimitsCheck } from './product-limits.js';
 import { z } from 'zod';
 import { controlDb } from './prisma.js';
 import { allowedUri, newClientId, newClientSecret } from './oidc/uris.js';
@@ -94,9 +95,23 @@ const v2Fields = {
     })).max(50).default([]),
     subscribes: z.array(z.object({ type: z.string().max(100), reason: z.string().trim().min(1).max(200) })).max(50).default([]),
   }).default({ emits: [], subscribes: [] }),
+  // What each plan allows in it (values set per plan by platform staff; lib/product-limits.ts)
+  limits: z.array(z.discriminatedUnion('type', [
+    z.object({
+      key: declaredName, label: z.string().trim().min(1).max(100), type: z.literal('integer'),
+      /** Whether a plan may set no limit */
+      unlimited: z.boolean().default(false),
+      /** For plans without a value: a number, or null (no limit; needs unlimited) */
+      default: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+      unit: z.string().trim().max(30).optional(),
+    }),
+    z.object({ key: declaredName, label: z.string().trim().min(1).max(100), type: z.literal('boolean'), default: z.boolean() }),
+  ])).max(50).default([]),
+  // Metered features it reports (lib/product-usage.ts)
+  usage: z.array(z.object({ key: declaredName, label: z.string().trim().min(1).max(100), unit: z.string().trim().min(1).max(30) })).max(20).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['resources', 'limits', 'usage', 'health'] as const;
+export const V2_NOT_YET = ['resources', 'health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -123,6 +138,20 @@ export const manifestSchema = z
           seen.add(t.type);
         });
       }
+      // Limits and usage meters: named for the product, each key once (across both)
+      const keysSeen = new Set<string>();
+      for (const [list, items] of [['limits', m.limits], ['usage', m.usage]] as const) {
+        items.forEach((x, i) => {
+          if (!x.key.startsWith(`${m.productId}.`) || !/^[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/.test(x.key.slice(m.productId.length + 1))) {
+            ctx.addIssue({ code: 'custom', path: [list, i, 'key'], message: `"${x.key}" must start with "${m.productId}." (lowercase letters, digits, _ and -, in dot-separated parts)` });
+          }
+          if (keysSeen.has(x.key)) ctx.addIssue({ code: 'custom', path: [list, i, 'key'], message: `"${x.key}" is listed twice (in limits or usage)` });
+          keysSeen.add(x.key);
+        });
+      }
+      m.limits.forEach((l, i) => {
+        if (l.type === 'integer' && l.default === null && !l.unlimited) ctx.addIssue({ code: 'custom', path: ['limits', i, 'default'], message: 'null (no limit) needs "unlimited": true' });
+      });
       // Subscriptions: another application's event types, each once
       const wanted = new Set<string>();
       m.events.subscribes.forEach((sub, i) => {
@@ -227,6 +256,8 @@ export interface ImportResult {
   dependencies: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
   /** Events it publishes (also in platformServices' added/updated/retired) and subscribes to (manifest v2); a version 1 manifest leaves them alone */
   events: { emits: number; subscribes: number; notDeclaredYet: string[] } | { leftAlone: true };
+  /** Plan limits and usage meters (manifest v2); a version 1 manifest leaves them alone */
+  limits: { added: string[]; updated: string[]; retired: string[]; meters: number } | { leftAlone: true };
   /** Web Components it offers (manifest v2); a version 1 manifest leaves them alone */
   embeds: { tags: string[] } | { leftAlone: true };
   menuItems: number;
@@ -443,6 +474,46 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         events = { emits: m.events.emits.length, subscribes: m.events.subscribes.length, notDeclaredYet: m.events.subscribes.map((sub) => sub.type).filter((t) => !declaredNow.has(t)) };
       }
 
+      // Limits: like declared types (retired, not removed: plans may hold values). Usage meters: the same
+      let limits: ImportResult['limits'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        const out = { added: [] as string[], updated: [] as string[], retired: [] as string[], meters: m.usage.length };
+        const had = new Map((await tx.productLimit.findMany({ where: { applicationId: app.id } })).map((l) => [l.key, l]));
+        for (const [position, l] of m.limits.entries()) {
+          const data = {
+            label: l.label, type: l.type, unlimited: l.type === 'integer' ? l.unlimited : false,
+            defaultValue: { v: l.default ?? null }, unit: l.type === 'integer' ? (l.unit ?? null) : null, position, retiredAt: null,
+          };
+          const old = had.get(l.key);
+          if (!old) {
+            await tx.productLimit.create({ data: { applicationId: app.id, key: l.key, ...data } });
+            out.added.push(l.key);
+          } else {
+            const same = old.label === data.label && old.type === data.type && old.unlimited === data.unlimited && JSON.stringify(old.defaultValue) === JSON.stringify(data.defaultValue) && old.unit === data.unit && !old.retiredAt;
+            await tx.productLimit.update({ where: { id: old.id }, data });
+            if (!same) out.updated.push(l.key);
+            // A type change makes the plans' values meaningless
+            if (old.type !== data.type) await tx.productPlanLimit.deleteMany({ where: { limitId: old.id } });
+          }
+        }
+        const listed = new Set(m.limits.map((l) => l.key));
+        for (const old of had.values()) {
+          if (!listed.has(old.key) && !old.retiredAt) {
+            await tx.productLimit.update({ where: { id: old.id }, data: { retiredAt: new Date() } });
+            out.retired.push(old.key);
+          }
+        }
+        const meters = new Map((await tx.productUsageMeter.findMany({ where: { applicationId: app.id } })).map((u) => [u.key, u]));
+        for (const [position, u] of m.usage.entries()) {
+          const old = meters.get(u.key);
+          if (old) await tx.productUsageMeter.update({ where: { id: old.id }, data: { label: u.label, unit: u.unit, position, retiredAt: null } });
+          else await tx.productUsageMeter.create({ data: { applicationId: app.id, key: u.key, label: u.label, unit: u.unit, position } });
+        }
+        const metered = new Set(m.usage.map((u) => u.key));
+        for (const old of meters.values()) if (!metered.has(old.key) && !old.retiredAt) await tx.productUsageMeter.update({ where: { id: old.id }, data: { retiredAt: new Date() } });
+        limits = out;
+      }
+
       // Embeds: replaced. A tag is the product's (it starts with its key), so it can't clash with another's
       let embeds: ImportResult['embeds'] = { leftAlone: true };
       if (m.manifestVersion === 2) {
@@ -486,6 +557,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         api,
         dependencies,
         events,
+        limits,
         embeds,
         menuItems: m.menu.length,
       };
@@ -510,6 +582,8 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
   const { hadCallback, hadUserEvents, ...rest } = result;
   const told = await callbackChanged(result.application.id, hadCallback, !!m.provisioning);
   await userEventsChanged(result.application.id, hadUserEvents, m.provisioning?.userEvents ?? false);
+  // New or changed limits: organizations that have it on are told
+  if (m.manifestVersion === 2) scheduleLimitsCheck({ applicationId: result.application.id });
   return { ...rest, ...(told && { organizationsTold: told }) };
 }
 
@@ -525,6 +599,8 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       dependencies: { orderBy: { position: 'asc' } },
       embeds: { orderBy: { position: 'asc' } },
       eventSubscriptions: { orderBy: { position: 'asc' } },
+      limits: { where: { retiredAt: null }, orderBy: { position: 'asc' } },
+      usageMeters: { where: { retiredAt: null }, orderBy: { position: 'asc' } },
     },
   });
   if (!app) throw new AppError('Application not found', 404);
@@ -576,6 +652,12 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
         subscribes: app.eventSubscriptions.map((sub) => ({ type: sub.type, reason: sub.reason })),
       },
     }),
+    ...(app.limits.length && {
+      limits: app.limits.map((l) => l.type === 'integer'
+        ? { key: l.key, label: l.label, type: 'integer' as const, unlimited: l.unlimited, default: (l.defaultValue as { v: number | null }).v, ...(l.unit && { unit: l.unit }) }
+        : { key: l.key, label: l.label, type: 'boolean' as const, default: (l.defaultValue as { v: boolean }).v }),
+    }),
+    ...(app.usageMeters.length && { usage: app.usageMeters.map((u) => ({ key: u.key, label: u.label, unit: u.unit })) }),
     ...(app.embeds.length && { embeds: app.embeds.map((e) => ({ tag: e.tag, scriptUrl: e.scriptUrl, attributes: e.attributes, description: e.description })) }),
   } as ProductManifest;
 }

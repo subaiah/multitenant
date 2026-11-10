@@ -122,7 +122,7 @@ See [Events between applications](../PRODUCT_INTEGRATION.md#events-between-appli
 
 See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-application).
 
-### G6. Billing is per tenant, not per application (P2)
+### G6. Billing is per tenant, not per application (P2): **limits and usage done**; prices next
 
 **Now.** One `Subscription` per tenant, priced per seat. `BillingPlan` limits cover users, organizations, groups, SSO and custom domain only. Entitlement events carry state and dates, not limits.
 
@@ -130,6 +130,12 @@ See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-
 - Per-application prices and add-ons (seat-based or flat), on the same Razorpay/Stripe subscription as extra items.
 - Limits per application and plan (e.g. Hearth file size and history; AppForge workflow runs), declared in the manifest and sent in `organization.entitled` / `organization.entitlement_changed`, and readable through the API.
 - Usage reporting for metered features (`POST …/usage`, scope `usage.report`), e.g. AI tokens in AppForge.
+
+**Done so far:**
+- Limits per application and plan: declared in the manifest, values set by platform staff, sent in `organization.entitled` and `organization.entitlement_changed`, readable on the organization, and told again when they change.
+- Usage reporting (`usage.report`, idempotent), with monthly totals for the application, platform staff and administrators.
+
+See [Plans, limits and usage](../PRODUCT_INTEGRATION.md#plans-limits-and-usage). **Next:** per-application prices and add-ons on the subscription, and charging for metered usage.
 
 ### G7. Scoped permissions and org units don't reach applications (P2): **done**
 

@@ -198,7 +198,7 @@ test('service credentials: platform staff only, known scopes only, listed withou
   assert.equal(list.status, 200);
   assert.equal(list.json.tokenUrl, `${baseUrl()}/oidc/token`);
   assert.equal(list.json.audience, 'urn:multitenant:api:v1');
-  assert.deepEqual(list.json.scopes.map((s: { name: string }) => s.name), ['organizations.read', 'members.read', 'lifecycle.report', 'notifications.send', 'audit.write', 'events.publish', 'launcher.read']);
+  assert.deepEqual(list.json.scopes.map((s: { name: string }) => s.name), ['organizations.read', 'members.read', 'lifecycle.report', 'notifications.send', 'audit.write', 'events.publish', 'usage.report', 'launcher.read']);
   assert.equal(list.json.credentials[0].clientId, c.clientId);
   assert.ok(!JSON.stringify(list.json).includes(c.clientSecret), 'never shown again');
 });

@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import { scheduleLimitsCheck } from '../lib/product-limits.js';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { config } from '../config/env.js';
@@ -398,6 +399,8 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
       await organizationStatusChanged(tx, id, before.status, updated.status);
       return updated;
     });
+    // Another plan: its applications' limits may differ (lib/product-limits.ts)
+    if (tenant.plan !== before.plan) scheduleLimitsCheck({ tenantId: id });
     kickLifecycleEvents();
 
     // In the tenant's own log once it has one; the platform log before that

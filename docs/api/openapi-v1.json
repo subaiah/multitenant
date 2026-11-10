@@ -4079,6 +4079,308 @@
         }
       }
     },
+    "/product-integrations/organizations/{organizationId}/usage": {
+      "post": {
+        "operationId": "reportProductUsage",
+        "tags": [
+          "Products"
+        ],
+        "summary": "Report usage of the product’s metered features (manifest usage) in an organization that has it on: one record, or { records: [...] } (up to 100). A record with an idempotencyKey already reported is skipped.",
+        "description": "For external products, with a service access token that has the `usage.report` scope.",
+        "security": [
+          {
+            "productToken": [
+              "usage.report"
+            ]
+          }
+        ],
+        "x-scope": "usage.report",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ProductUsageRecordInput"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "records": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/ProductUsageRecordInput"
+                        },
+                        "minItems": 1,
+                        "maxItems": 100
+                      }
+                    },
+                    "required": [
+                      "records"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "integer"
+                    },
+                    "duplicates": {
+                      "type": "integer",
+                      "description": "Records skipped: their idempotencyKey was reported before"
+                    }
+                  },
+                  "required": [
+                    "accepted",
+                    "duplicates"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getProductUsage",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The product’s usage in an organization for a calendar month (UTC), per meter",
+        "description": "For external products, with a service access token that has the `usage.report` scope.",
+        "security": [
+          {
+            "productToken": [
+              "usage.report"
+            ]
+          }
+        ],
+        "x-scope": "usage.report",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "description": "YYYY-MM (default: this month)"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "month": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "meters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "number"
+                          },
+                          "records": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "unit",
+                          "total",
+                          "records"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "month",
+                    "from",
+                    "to",
+                    "meters"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/product-integrations/organizations/{organizationId}/events": {
       "post": {
         "operationId": "publishProductEvent",
@@ -4297,6 +4599,7 @@
               "notifications.send": "Send its declared notifications to people in those organizations",
               "audit.write": "Write its declared events to those organizations’ audit logs",
               "events.publish": "Publish its declared events to other applications and webhooks in those organizations",
+              "usage.report": "Report usage of its metered features in those organizations, and read it back",
               "launcher.read": "See which of those organizations’ applications each person can open (the application launcher)"
             }
           }
@@ -5387,6 +5690,17 @@
             "type": "boolean",
             "description": "Whether its people can sign in to the product now: turned on, not suspended, and set up"
           },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "What its plan allows in the product: each of the product’s declared limits (manifest limits) with its value; null is no limit. Also sent with organization.entitled and organization.entitlement_changed."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -5400,6 +5714,7 @@
           "entitlement",
           "setup",
           "available",
+          "limits",
           "createdAt"
         ],
         "description": "An organization with an entitlement to the product (in any state)"
@@ -5918,6 +6233,33 @@
           "applications",
           "webhooks",
           "duplicate"
+        ]
+      },
+      "ProductUsageRecordInput": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "One of the product’s meters (manifest usage)"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When (default: now); up to 35 days back"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Reporting the same key again for the organization is skipped"
+          }
+        },
+        "required": [
+          "key",
+          "quantity"
         ]
       },
       "ProductGroup": {

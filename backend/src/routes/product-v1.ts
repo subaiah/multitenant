@@ -14,6 +14,7 @@ import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { RateLimited, sendProductNotification, writeProductAuditEvent } from '../lib/product-services.js';
 import { brandingOf, embedsFor, launcherFor } from '../lib/product-embeds.js';
 import { publishProductEvent } from '../lib/product-events.js';
+import { reportUsage, usageForApplication } from '../lib/product-usage.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
@@ -139,6 +140,18 @@ export async function productV1Routes(fastify: FastifyInstance) {
     const { organizationId } = request.params as { organizationId: string };
     const published = await publishProductEvent(request.service!, organizationId, request.body).catch((err) => throttled(reply, err));
     return reply.status(published.duplicate ? 200 : 202).send(published);
+  });
+
+  // Usage of its metered features (docs/hub/HUB_GAPS.md G6)
+  fastify.post('/product-integrations/organizations/:organizationId/usage', { config: { serviceScope: 'usage.report' }, schema: { params: orgParams } }, async (request, reply) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const accepted = await reportUsage(request.service!, organizationId, request.body).catch((err) => throttled(reply, err));
+    return reply.status(202).send(accepted);
+  });
+  fastify.get('/product-integrations/organizations/:organizationId/usage', { config: { serviceScope: 'usage.report' }, schema: { params: orgParams } }, async (request) => {
+    const { organizationId } = request.params as { organizationId: string };
+    const { month } = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() }).parse(request.query);
+    return usageForApplication(request.service!, organizationId, month);
   });
 
   // The result of setting an organization up, after answering organization.entitled with 202 (lib/product-lifecycle.ts)

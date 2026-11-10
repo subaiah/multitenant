@@ -22,6 +22,30 @@ interface Application {
   integratesWith?: { productId: string; name: string | null; reason: string }[];
   /** What its server can learn about the organization's people (backend lib/application-fields.ts) */
   dataAccess?: { peopleAndGroups: boolean; toldWhenPeopleChange: boolean };
+  /** What the organization's plan allows in it, and its usage this month (backend lib/product-limits.ts, lib/product-usage.ts) */
+  limits?: { key: string; label: string; type: string; unit: string | null; value: number | boolean | null }[];
+  usage?: { month: string; meters: { key: string; label: string; unit: string; total: number }[] };
+}
+
+const amount = (n: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(n);
+
+/** Its limits on the organization's plan, and what's been used this month */
+function PlanNote({ app }: { app?: Application }) {
+  const limits = app?.limits ?? [];
+  const meters = app?.usage?.meters ?? [];
+  if (!limits.length && !meters.length) return null;
+  const shown = (l: NonNullable<Application['limits']>[number]) =>
+    l.type === 'boolean' ? (l.value ? 'included' : 'not included') : l.value === null ? 'no limit' : `${amount(l.value as number)}${l.unit ? ` ${l.unit}` : ''}`;
+  return (
+    <div className="mt-1.5 text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
+      {limits.length > 0 && (
+        <p><span className="text-slate-500">On your plan:</span> {limits.map((l) => `${l.label}: ${shown(l)}`).join(' · ')}</p>
+      )}
+      {meters.length > 0 && (
+        <p><span className="text-slate-500">Used this month:</span> {meters.map((m) => `${m.label}: ${amount(m.total)} ${m.unit}`).join(' · ')}</p>
+      )}
+    </div>
+  );
 }
 
 /** What an application needs on, and works with; which needed ones are missing */
@@ -230,6 +254,7 @@ export default function TenantEntitlements() {
                         )}
                         <DependencyNote app={entitlement.application} onKeys={onKeys} />
                         <DataAccessNote access={entitlement.application.dataAccess} />
+                        <PlanNote app={entitlement.application} />
                         <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />

@@ -600,6 +600,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/product-integrations/organizations/{organizationId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product’s usage in an organization for a calendar month (UTC), per meter
+         * @description For external products, with a service access token that has the `usage.report` scope.
+         */
+        get: operations["getProductUsage"];
+        put?: never;
+        /**
+         * Report usage of the product’s metered features (manifest usage) in an organization that has it on: one record, or { records: [...] } (up to 100). A record with an idempotencyKey already reported is skipped.
+         * @description For external products, with a service access token that has the `usage.report` scope.
+         */
+        post: operations["reportProductUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/product-integrations/organizations/{organizationId}/events": {
         parameters: {
             query?: never;
@@ -949,6 +973,10 @@ export interface components {
             };
             /** @description Whether its people can sign in to the product now: turned on, not suspended, and set up */
             available: boolean;
+            /** @description What its plan allows in the product: each of the product’s declared limits (manifest limits) with its value; null is no limit. Also sent with organization.entitled and organization.entitlement_changed. */
+            limits: {
+                [key: string]: number | boolean | null;
+            };
             /** Format: date-time */
             createdAt: string;
         };
@@ -1102,6 +1130,18 @@ export interface components {
             webhooks: number;
             /** @description The idempotencyKey was used before: this is that result, nothing new was sent */
             duplicate: boolean;
+        };
+        ProductUsageRecordInput: {
+            /** @description One of the product’s meters (manifest usage) */
+            key: string;
+            quantity: number;
+            /**
+             * Format: date-time
+             * @description When (default: now); up to 35 days back
+             */
+            occurredAt?: string;
+            /** @description Reporting the same key again for the organization is skipped */
+            idempotencyKey?: string;
         };
         ProductGroup: {
             /** Format: uuid */
@@ -3748,6 +3788,183 @@ export interface operations {
                     "application/json": {
                         /** @description The entry’s position in the organization’s log */
                         seq: number;
+                    };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getProductUsage: {
+        parameters: {
+            query?: {
+                month?: string;
+            };
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        month: string;
+                        /** Format: date-time */
+                        from: string;
+                        /** Format: date-time */
+                        to: string;
+                        meters: {
+                            key: string;
+                            label: string;
+                            unit: string;
+                            total: number;
+                            records: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    reportProductUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductUsageRecordInput"] | {
+                    records: components["schemas"]["ProductUsageRecordInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        accepted: number;
+                        /** @description Records skipped: their idempotencyKey was reported before */
+                        duplicates: number;
                     };
                 };
             };
