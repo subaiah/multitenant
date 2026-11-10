@@ -418,6 +418,8 @@ In Sentry, set up an alert rule ("a new issue is created" → email) to hear abo
 | --- | --- |
 | Release step by hand | `docker compose run --rm migrate` |
 | First (or another) platform administrator | `docker compose run --rm --no-deps api node dist/cli/create-admin.js <email> ["Name"]` |
+| A new phone or authenticator app | Signed in: **Your sign-in → Use a new authenticator** (a current code or a recovery code, then the new app's code) |
+| A platform user who lost their authenticator | A recovery code at sign-in; or another platform admin: **Platform Users → Reset two-factor**; or, as the last resort (not audited): `docker compose exec db psql -U postgres -d multitenant -c "UPDATE platform_users SET totp_secret = NULL, mfa_enabled_at = NULL, mfa_last_step = NULL, mfa_recovery_codes = '{}' WHERE email = '<email>';"`, then set it up again at the next sign-in |
 | Check the audit logs | `docker compose run --rm --no-deps api node dist/cli/audit.js verify` |
 | Archive old audit entries now | `docker compose run --rm --no-deps api node dist/cli/audit.js archive` |
 | Secrets still on an old key | `docker compose run --rm --no-deps api node dist/cli/encrypt-secrets.js --check` |

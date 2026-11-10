@@ -1,6 +1,6 @@
-/** Your own two-factor sign-in: set it up, make new recovery codes, turn it off. */
+/** Your own two-factor sign-in: set it up, move it to a new authenticator, make new recovery codes, turn it off. */
 import { useState } from 'react';
-import { KeyRound, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { KeyRound, Loader2, ShieldCheck, ShieldAlert, Smartphone } from 'lucide-react';
 import { apiPost } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
@@ -12,7 +12,8 @@ interface Status {
   recoveryCodesLeft: number;
 }
 
-type Mode = 'idle' | 'enroll' | 'disable' | 'regenerate';
+/** replace: a current code first; replace-confirm: a code from the new app */
+type Mode = 'idle' | 'enroll' | 'disable' | 'regenerate' | 'replace' | 'replace-confirm';
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong');
 const btn = 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
@@ -62,6 +63,15 @@ export function TwoFactorSettings() {
       if (mode === 'enroll' && enrollment) {
         const res = await apiPost<{ recoveryCodes: string[] }>('/bff/two-factor/enroll/confirm', { enrollToken: enrollment.enrollToken, code });
         setCodes(res.recoveryCodes);
+      } else if (mode === 'replace') {
+        // The old authenticator keeps working until the new one is confirmed
+        setEnrollment(await apiPost<Enrollment>('/bff/two-factor/replace/start', { code }));
+        setCode('');
+        setMode('replace-confirm');
+        return;
+      } else if (mode === 'replace-confirm' && enrollment) {
+        const res = await apiPost<{ recoveryCodes: string[] }>('/bff/two-factor/replace/confirm', { enrollToken: enrollment.enrollToken, code });
+        setCodes(res.recoveryCodes);
       } else if (mode === 'regenerate') {
         const res = await apiPost<{ recoveryCodes: string[] }>('/bff/two-factor/recovery-codes', { code });
         setCodes(res.recoveryCodes);
@@ -106,6 +116,11 @@ export function TwoFactorSettings() {
             </button>
           )}
           {status.enabled && (
+            <button type="button" onClick={() => { setCodes(null); setMode('replace'); }} className={`${btn} bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200`}>
+              <Smartphone size={16} /> Use a new authenticator
+            </button>
+          )}
+          {status.enabled && (
             <button type="button" onClick={() => { setCodes(null); setMode('regenerate'); }} className={`${btn} bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200`}>
               New recovery codes
             </button>
@@ -120,17 +135,29 @@ export function TwoFactorSettings() {
 
       {mode !== 'idle' && (
         <form onSubmit={submit} className="space-y-3 max-w-sm">
-          {mode === 'enroll' && enrollment && <EnrollInstructions enrollment={enrollment} />}
-          {mode !== 'enroll' && (
+          {(mode === 'enroll' || mode === 'replace-confirm') && enrollment && (
+            <>
+              {mode === 'replace-confirm' && (
+                <p className="text-sm text-slate-600 dark:text-slate-400">Now add this account to your new authenticator app. Your current one keeps working until you confirm.</p>
+              )}
+              <EnrollInstructions enrollment={enrollment} />
+            </>
+          )}
+          {mode !== 'enroll' && mode !== 'replace-confirm' && (
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              {mode === 'disable' ? 'To turn off two-factor, enter' : 'To make new recovery codes (the old ones stop working), enter'} a code from your authenticator app or a recovery code.
+              {mode === 'disable'
+                ? 'To turn off two-factor, enter'
+                : mode === 'replace'
+                  ? 'To move two-factor to a new authenticator app, first enter'
+                  : 'To make new recovery codes (the old ones stop working), enter'}{' '}
+              a code from your current authenticator app or a recovery code.
             </p>
           )}
-          <CodeField value={code} onChange={setCode} allowRecovery={mode !== 'enroll'} autoFocus />
+          <CodeField key={mode} value={code} onChange={setCode} allowRecovery={mode !== 'enroll' && mode !== 'replace-confirm'} autoFocus />
           <div className="flex gap-2">
             <button type="submit" disabled={busy || code.trim().length < 6} className={`${btn} ${mode === 'disable' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'} text-white`}>
               {busy && <Loader2 size={14} className="animate-spin" />}
-              {mode === 'enroll' ? 'Confirm' : mode === 'disable' ? 'Turn off two-factor' : 'Make new codes'}
+              {mode === 'enroll' || mode === 'replace-confirm' ? 'Confirm' : mode === 'replace' ? 'Continue' : mode === 'disable' ? 'Turn off two-factor' : 'Make new codes'}
             </button>
             <button type="button" onClick={reset} className={`${btn} text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700`}>
               Cancel

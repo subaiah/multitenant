@@ -441,3 +441,59 @@ test('SSO creates the user when the provider auto-provisions; a disabled provide
   assert.equal(off.location.searchParams.get('sso_error'), 'SSO_UNAVAILABLE');
   await ssoProvider({ enabled: true, autoProvision: false });
 });
+
+test('a new authenticator while signed in: a current code first, the old one works until the new one is confirmed, then only the new one', async () => {
+  // Platform support: two-factor may be required for platform users, so turning it off isn't the way to change devices
+  const session = await loginSession('platform', P.supportEmail);
+  const { secret: oldSecret, recoveryCodes: oldCodes } = await enroll(session);
+  const { controlDb } = await db();
+  // Each code is used once and only a step either side of now is accepted: forget the last one used, as if time had passed
+  const later = () => controlDb.platformUser.update({ where: { email: P.supportEmail }, data: { mfaLastStep: null } });
+  try {
+    // A current code (or recovery code) first
+    const wrong = await api('POST', '/bff/two-factor/replace/start', { cookie: session.cookie, body: { code: '000000' } });
+    assert.equal(wrong.status, 400);
+    assert.equal(wrong.json.code, 'MFA_INVALID');
+    const start = await api('POST', '/bff/two-factor/replace/start', { cookie: session.cookie, body: { code: nextCode(oldSecret) } });
+    assert.equal(start.status, 200, JSON.stringify(start.json));
+    assert.match(start.json.otpauthUrl, /^otpauth:\/\/totp\//);
+    const newSecret = start.json.secret as string;
+    assert.notEqual(newSecret, oldSecret);
+
+    // Not confirmed yet: the old authenticator still signs in
+    let login = await passwordLogin(P.supportEmail, 'platform');
+    assert.equal(login.json.mfa, 'verify');
+    await later();
+    let ok = await api('POST', '/bff/auth/mfa/verify', { body: { mfaToken: login.json.mfaToken, code: totpAt(oldSecret, currentStep()) } });
+    assert.equal(ok.status, 200, 'the old app still works until the new one is confirmed');
+
+    // A setup token can't confirm a change, nor a code from the old app
+    const setupToken = (await api('POST', '/bff/two-factor/enroll/start', { cookie: session.cookie })).status;
+    assert.equal(setupToken, 409, 'already on: setting up again is refused, use a new authenticator instead');
+    const oldCode = await api('POST', '/bff/two-factor/replace/confirm', { cookie: session.cookie, body: { enrollToken: start.json.enrollToken, code: totpAt(oldSecret, currentStep() + 1) } });
+    assert.equal(oldCode.status, 400);
+    const forged = await api('POST', '/bff/two-factor/enroll/confirm', { cookie: session.cookie, body: { enrollToken: start.json.enrollToken, code: totpAt(newSecret, currentStep()) } });
+    assert.equal(forged.status, 400, 'a change token is not a setup token');
+
+    const confirm = await api('POST', '/bff/two-factor/replace/confirm', { cookie: session.cookie, body: { enrollToken: start.json.enrollToken, code: totpAt(newSecret, currentStep()) } });
+    assert.equal(confirm.status, 200, JSON.stringify(confirm.json));
+    assert.equal(confirm.json.recoveryCodes.length, 10);
+    assert.ok(!confirm.json.recoveryCodes.includes(oldCodes[1]));
+
+    // Now only the new one: the old app's codes and the old recovery codes are refused
+    await later();
+    login = await passwordLogin(P.supportEmail, 'platform');
+    const stale = await api('POST', '/bff/auth/mfa/verify', { body: { mfaToken: login.json.mfaToken, code: totpAt(oldSecret, currentStep()) } });
+    assert.equal(stale.status, 401);
+    const staleRecovery = await api('POST', '/bff/auth/mfa/verify', { body: { mfaToken: login.json.mfaToken, code: oldCodes[1] } });
+    assert.equal(staleRecovery.status, 401);
+    ok = await api('POST', '/bff/auth/mfa/verify', { body: { mfaToken: login.json.mfaToken, code: totpAt(newSecret, currentStep() + 1) } });
+    assert.equal(ok.status, 200);
+
+    const audit = JSON.stringify((await api('GET', '/platform-audit?limit=20', { cookie: (await loginSession('platform', P.adminEmail)).cookie })).json);
+    assert.ok(audit.includes('platform.account.mfa_replaced'));
+  } finally {
+    // Leave the account as it was for other tests
+    await controlDb.platformUser.update({ where: { email: P.supportEmail }, data: { platformTotpSecret: null, mfaEnabledAt: null, mfaLastStep: null, mfaRecoveryCodes: [] } });
+  }
+});
