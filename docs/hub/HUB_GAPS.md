@@ -95,7 +95,7 @@ Notification and audit event types are declared in the manifest, so organization
 - The platform relays to subscribed applications whose organization has both applications on, reusing the existing signed, ordered, retried delivery (Standard Webhooks headers, per-organization ordering, backoff, Retry now).
 - Organization administrators can see which applications receive which events.
 
-### G5. No embedding contract (P2)
+### G5. No embedding contract (P2): **done**
 
 **Now.** Menu entries open `baseUrl + path` in a new tab. The OIDC pages send `frame-ancestors 'none'` (correct, and must stay), and the deployed CSP forbids framing.
 
@@ -104,6 +104,15 @@ Notification and audit event types are declared in the manifest, so organization
 - Embedded components authenticate through the **host application's** server (token exchange from G1), never by running the OIDC flow inside a frame.
 - Theme tokens and the tenant's branding available to applications (a `GET /api/v1/product-integrations/organizations/{id}/branding` route, or claims).
 - An application launcher (switch between an organization's applications) available as a Web Component for every application's header.
+
+**Done.**
+- Manifest `embeds`.
+- `GET …/embeds`: what the organization's other applications offer, and whether the caller can get the component's token now.
+- `GET …/branding`, with theme tokens.
+- `<mt-app-launcher>`, served at `/api/embed/v1/launcher.js` and fed by `GET …/members/{subject}/applications` (`launcher.read`).
+- Components get their tokens from the host application's server, through G1's token exchange.
+
+See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-application).
 
 ### G6. Billing is per tenant, not per application (P2)
 
@@ -141,7 +150,7 @@ Notification and audit event types are declared in the manifest, so organization
 2. ~~**G1** application-to-application tokens~~ (done)
 3. ~~**G2** kinds, dependencies, bundles~~ (done)
 4. ~~**G7** scoped permissions and org units~~ (done)
-5. **G5** embedding contract
+5. ~~**G5** embedding contract~~ (done)
 6. **G4** application events
 7. **G6** per-application billing and usage
 8. **G8**, **G9**

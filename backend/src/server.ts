@@ -64,6 +64,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { billingWebhookRoutes } from './routes/billing-webhooks.js';
 import { oidcRoutes } from './routes/oidc.js';
 import { productV1Routes } from './routes/product-v1.js';
+import { embedRoutes } from './routes/embed.js';
 import { platformBillingRoutes } from './routes/platform-billing.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -252,6 +253,8 @@ async function registerRoutes() {
   await fastify.register(oidcRoutes, { prefix: '/oidc' });
   // API v1 for external products calling as themselves, with a service access token (lib/product-service.ts)
   await fastify.register(productV1Routes);
+  // Scripts applications load into their own pages (the application launcher)
+  await fastify.register(embedRoutes, { prefix: '/embed' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
 

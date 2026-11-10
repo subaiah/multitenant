@@ -12,6 +12,7 @@ import { recordAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { RateLimited, sendProductNotification, writeProductAuditEvent } from '../lib/product-services.js';
+import { brandingOf, embedsFor, launcherFor } from '../lib/product-embeds.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
@@ -91,6 +92,23 @@ export async function productV1Routes(fastify: FastifyInstance) {
   fastify.get('/product-integrations/organizations/:organizationId/org-units', { config: { serviceScope: 'members.read' }, schema: { params: orgParams } }, async (request) => {
     const { organizationId } = request.params as { organizationId: string };
     return listProductOrgUnits(request.service!.applicationId, organizationId);
+  });
+
+  // Applications inside each other's pages (docs/hub/HUB_GAPS.md G5): what others offer, the organization's look, and the launcher
+  fastify.get('/product-integrations/organizations/:organizationId/embeds', { config: { serviceScope: 'organizations.read' }, schema: { params: orgParams } }, async (request) => {
+    const { organizationId } = request.params as { organizationId: string };
+    return embedsFor(request.service!.applicationId, organizationId);
+  });
+  fastify.get('/product-integrations/organizations/:organizationId/branding', { config: { serviceScope: 'organizations.read' }, schema: { params: orgParams } }, async (request) => {
+    const { organizationId } = request.params as { organizationId: string };
+    return brandingOf(request.service!.applicationId, organizationId);
+  });
+  fastify.get('/product-integrations/organizations/:organizationId/members/:subject/applications', {
+    config: { serviceScope: 'launcher.read' },
+    schema: { params: { type: 'object', required: ['organizationId', 'subject'], properties: { organizationId: { type: 'string', maxLength: 100 }, subject: { type: 'string', maxLength: 200 } } } },
+  }, async (request) => {
+    const { organizationId, subject } = request.params as { organizationId: string; subject: string };
+    return launcherFor(request.service!.applicationId, organizationId, subject);
   });
 
   // The product's own lifecycle events, oldest first: to catch up on any it missed

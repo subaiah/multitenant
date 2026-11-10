@@ -280,6 +280,38 @@ SCHEMAS.ProductOrgUnits = obj({
   })),
 }, undefined, { description: 'All of the organization’s own organizations and units: units form a tree by parentUnitId' });
 
+SCHEMAS.ProductEmbed = obj({
+  productId: { type: 'string', description: 'The application offering it' },
+  application: { type: 'string', description: 'Its name' },
+  tag: { type: 'string', description: 'The custom element, e.g. hearth-record-thread' },
+  scriptUrl: { type: 'string', description: 'Load it with <script type="module" src="…">' },
+  attributes: arrayOf({ type: 'string' }),
+  description: { type: 'string' },
+  audience: { type: 'string', description: 'urn:mt:app:<productId>: the resource to exchange the person’s token for (the component’s token)' },
+  usable: { type: 'boolean', description: 'Whether the caller can get that token for this organization now' },
+  reason: nullable({ type: 'string', description: 'Why not, when it can’t' }),
+}, undefined, { description: 'A Web Component another application the organization has on offers' });
+
+SCHEMAS.ProductBranding = obj({
+  organization: obj({ id: uuid, slug: { type: 'string' }, name: { type: 'string' } }),
+  logoUrl: nullable({ type: 'string' }),
+  primaryColor: { type: 'string', description: '#rrggbb' },
+  theme: { type: 'object', additionalProperties: { type: 'string' }, description: 'CSS custom properties to set: --mt-color-primary, --mt-color-on-primary, --mt-radius, --mt-font-family' },
+  portalUrl: { type: 'string', description: 'Where the organization’s people sign in to the portal' },
+});
+
+SCHEMAS.ProductLauncher = obj({
+  subject: { type: 'string' },
+  organization: obj({ id: uuid, slug: { type: 'string' }, name: { type: 'string' } }),
+  portal: obj({ label: { type: 'string' }, url: { type: 'string' } }),
+  applications: arrayOf(obj({
+    productId: { type: 'string' }, name: { type: 'string' },
+    current: { type: 'boolean', description: 'The application asking' },
+    url: { type: 'string', description: 'Its first page the person may open' },
+    entries: arrayOf(obj({ label: { type: 'string' }, url: { type: 'string' }, icon: nullable({ type: 'string' }) })),
+  })),
+}, undefined, { description: 'What <mt-app-launcher> shows: the organization’s applications this person can open, as the portal’s menu shows them' });
+
 SCHEMAS.ProductGroup = obj({
   id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
   memberCount: { type: 'integer', description: 'People in it now' }, createdAt: dateTime, updatedAt: dateTime,
@@ -341,6 +373,15 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
   { method: 'GET', path: '/product-integrations/organizations/:organizationId/org-units', operationId: 'listProductOrgUnits', tag: 'Products',
     summary: 'An organization’s own organizations and units (the tree scoped permissions refer to). Only while it has the product turned on.', scope: 'members.read',
     responses: { 200: ref('ProductOrgUnits') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/embeds', operationId: 'listProductEmbeds', tag: 'Products',
+    summary: 'The Web Components the organization’s other applications offer, and whether this application can use each (a token on a person’s behalf) now. Only while it has the product turned on.', scope: 'organizations.read',
+    responses: { 200: obj({ embeds: arrayOf(ref('ProductEmbed')) }) } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/branding', operationId: 'getProductBranding', tag: 'Products',
+    summary: 'The organization’s name, logo and colour, with theme tokens. Only while it has the product turned on.', scope: 'organizations.read',
+    responses: { 200: ref('ProductBranding') } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/members/:subject/applications', operationId: 'getProductLauncher', tag: 'Products',
+    summary: 'The organization’s applications a person can open (for <mt-app-launcher>). Only while it has the product turned on; 404 for anyone not active in it.', scope: 'launcher.read',
+    responses: { 200: ref('ProductLauncher') } },
   { method: 'GET', path: '/product-integrations/events', operationId: 'listProductEvents', tag: 'Products',
     summary: 'The product’s lifecycle events, oldest first: to catch up on any it missed', scope: 'organizations.read',
     query: {

@@ -319,6 +319,7 @@ model ApplicationRegistry {
   apiScopes          ProductApiScope[]
   consumedScopes     ProductConsumedScope[]
   dependencies       ProductDependency[]
+  embeds             ProductEmbed[]
   bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
@@ -1155,6 +1156,24 @@ model ProductDependency {
 
 /// A named set of applications organizations turn on together, defined by
 /// platform staff (e.g. "Sales suite")
+/// A Web Component an application offers other applications (manifest v2 embeds; lib/product-embeds.ts)
+model ProductEmbed {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  /// A custom element name starting with the product's key
+  tag           String              @unique
+  scriptUrl     String              @map("script_url")
+  attributes    String[]            @default([])
+  description   String
+  position      Int                 @default(0)
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("product_embeds")
+}
+
 model Bundle {
   id           String              @id @default(uuid())
   key          String              @unique

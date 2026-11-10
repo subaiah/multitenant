@@ -30,6 +30,9 @@ export type ProductIdentity = Schemas['ProductIdentity'];
 export type ProductOrganization = Schemas['ProductOrganization'];
 export type ProductMember = Schemas['ProductMember'];
 export type ProductOrgUnits = Schemas['ProductOrgUnits'];
+export type ProductEmbed = Schemas['ProductEmbed'];
+export type ProductBranding = Schemas['ProductBranding'];
+export type ProductLauncher = Schemas['ProductLauncher'];
 export type ProductGroup = Schemas['ProductGroup'];
 export type ProductEvent = Schemas['ProductEvent'];
 
@@ -104,3 +107,6 @@ export { createAppTokens, createAppTokenVerifier, appAudience, AppTokenError, Ap
 
 // Applying permissions held across the organization or in part of it (docs/hub/HUB_GAPS.md G7)
 export { allows, permissionMatches, unitTree, type Access, type ScopedPermission, type Target, type UnitTree } from './access.js';
+
+// Applications inside each other's pages (docs/hub/HUB_GAPS.md G5)
+export { themeCss, launcherScriptUrl } from './embeds.js';

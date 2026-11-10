@@ -77,9 +77,16 @@ const v2Fields = {
   // Other applications it needs, or works with (lib/app-dependencies.ts)
   requires: z.array(z.object({ productId: z.string().max(50), reason: z.string().trim().min(1).max(200) })).max(10).default([]),
   integratesWith: z.array(z.object({ productId: z.string().max(50), reason: z.string().trim().min(1).max(200) })).max(20).default([]),
+  // Web Components it offers other applications (lib/product-embeds.ts)
+  embeds: z.array(z.object({
+    tag: z.string().max(100),
+    scriptUrl: uri,
+    attributes: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,49}$/, 'A lowercase attribute name (letters, digits, hyphens)')).max(10).default([]),
+    description: z.string().trim().min(1).max(200),
+  })).max(20).default([]),
 };
 /** Version 2 fields this platform doesn't take yet (refused, not dropped) */
-export const V2_NOT_YET = ['embeds', 'events', 'resources', 'limits', 'usage', 'health'] as const;
+export const V2_NOT_YET = ['events', 'resources', 'limits', 'usage', 'health'] as const;
 
 /** <productId>.<name>: lowercase letters, digits, _ and -, in dot-separated parts */
 const declaredTypeProblem = (productId: string, type: string): string | null => {
@@ -133,6 +140,20 @@ export const manifestSchema = z
           others.add(d.productId);
         });
       }
+      // Embeds: custom elements named for the product, loaded from its own host
+      const tags = new Set<string>();
+      const host = (() => { try { return new URL(m.baseUrl).host; } catch { return null; } })();
+      m.embeds.forEach((e, i) => {
+        if (!e.tag.startsWith(`${m.productId}-`) || !/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(e.tag)) {
+          ctx.addIssue({ code: 'custom', path: ['embeds', i, 'tag'], message: `"${e.tag}": a custom element name starting with "${m.productId}-" (lowercase letters, digits, hyphens)` });
+        }
+        if (tags.has(e.tag)) ctx.addIssue({ code: 'custom', path: ['embeds', i, 'tag'], message: `"${e.tag}" is listed twice` });
+        tags.add(e.tag);
+        try {
+          if (host && new URL(e.scriptUrl).host !== host) ctx.addIssue({ code: 'custom', path: ['embeds', i, 'scriptUrl'], message: `must be on the application's own host (${host})` });
+        } catch { /* the uri rule reports it */ }
+        if (new Set(e.attributes).size !== e.attributes.length) ctx.addIssue({ code: 'custom', path: ['embeds', i, 'attributes'], message: 'an attribute is listed twice' });
+      });
     }
     const names = new Set<string>();
     m.permissions.forEach((p, i) => {
@@ -185,6 +206,8 @@ export interface ImportResult {
   api: { added: string[]; updated: string[]; retired: string[]; consumes: number; notExposedYet: string[] } | { leftAlone: true };
   /** Applications it requires or works with (manifest v2); a version 1 manifest leaves them alone */
   dependencies: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
+  /** Web Components it offers (manifest v2); a version 1 manifest leaves them alone */
+  embeds: { tags: string[] } | { leftAlone: true };
   menuItems: number;
   /** What changed in the catalogue entry and its sign-in, { field: [before, after] } (audited) */
   changes: Record<string, [unknown, unknown]>;
@@ -387,6 +410,18 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         dependencies = { requires: m.requires.length, integratesWith: m.integratesWith.length, notRegisteredYet: rows.map((r) => r.productKey).filter((k) => !known.has(k)) };
       }
 
+      // Embeds: replaced. A tag is the product's (it starts with its key), so it can't clash with another's
+      let embeds: ImportResult['embeds'] = { leftAlone: true };
+      if (m.manifestVersion === 2) {
+        await tx.productEmbed.deleteMany({ where: { applicationId: app.id } });
+        if (m.embeds.length) {
+          await tx.productEmbed.createMany({
+            data: m.embeds.map((e, position) => ({ applicationId: app.id, tag: e.tag, scriptUrl: e.scriptUrl, attributes: e.attributes, description: e.description, position })),
+          });
+        }
+        embeds = { tags: m.embeds.map((e) => e.tag) };
+      }
+
       // What changed, for the audit log and the dry run (never secrets)
       const was = {
         name: existing?.name ?? null, version: existing?.version ?? null, baseUrl: existing?.baseUrl ?? null, kind: existing?.kind ?? null,
@@ -417,6 +452,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
         platformServices,
         api,
         dependencies,
+        embeds,
         menuItems: m.menu.length,
       };
       // A dry run: everything checked and worked out, then rolled back
@@ -453,6 +489,7 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
       apiScopes: { where: { retiredAt: null }, orderBy: [{ position: 'asc' }, { name: 'asc' }] },
       consumedScopes: { orderBy: { position: 'asc' } },
       dependencies: { orderBy: { position: 'asc' } },
+      embeds: { orderBy: { position: 'asc' } },
     },
   });
   if (!app) throw new AppError('Application not found', 404);
@@ -498,5 +535,6 @@ export async function exportManifest(applicationId: string): Promise<ProductMani
     ...(app.consumedScopes.length && { consumes: app.consumedScopes.map((c) => ({ scope: c.scope, reason: c.reason })) }),
     ...(app.dependencies.some((d) => d.kind === 'requires') && { requires: app.dependencies.filter((d) => d.kind === 'requires').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
     ...(app.dependencies.some((d) => d.kind === 'integrates') && { integratesWith: app.dependencies.filter((d) => d.kind === 'integrates').map((d) => ({ productId: d.productKey, reason: d.reason })) }),
+    ...(app.embeds.length && { embeds: app.embeds.map((e) => ({ tag: e.tag, scriptUrl: e.scriptUrl, attributes: e.attributes, description: e.description })) }),
   } as ProductManifest;
 }

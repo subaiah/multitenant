@@ -3288,6 +3288,328 @@
         }
       }
     },
+    "/product-integrations/organizations/{organizationId}/embeds": {
+      "get": {
+        "operationId": "listProductEmbeds",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The Web Components the organization’s other applications offer, and whether this application can use each (a token on a person’s behalf) now. Only while it has the product turned on.",
+        "description": "For external products, with a service access token that has the `organizations.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "organizations.read"
+            ]
+          }
+        ],
+        "x-scope": "organizations.read",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "embeds": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProductEmbed"
+                      }
+                    }
+                  },
+                  "required": [
+                    "embeds"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/branding": {
+      "get": {
+        "operationId": "getProductBranding",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The organization’s name, logo and colour, with theme tokens. Only while it has the product turned on.",
+        "description": "For external products, with a service access token that has the `organizations.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "organizations.read"
+            ]
+          }
+        ],
+        "x-scope": "organizations.read",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductBranding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product-integrations/organizations/{organizationId}/members/{subject}/applications": {
+      "get": {
+        "operationId": "getProductLauncher",
+        "tags": [
+          "Products"
+        ],
+        "summary": "The organization’s applications a person can open (for <mt-app-launcher>). Only while it has the product turned on; 404 for anyone not active in it.",
+        "description": "For external products, with a service access token that has the `launcher.read` scope.",
+        "security": [
+          {
+            "productToken": [
+              "launcher.read"
+            ]
+          }
+        ],
+        "x-scope": "launcher.read",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductLauncher"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/product-integrations/events": {
       "get": {
         "operationId": "listProductEvents",
@@ -3823,7 +4145,8 @@
               "members.read": "See the people, groups and units in those organizations",
               "lifecycle.report": "Report the result of setting an organization up",
               "notifications.send": "Send its declared notifications to people in those organizations",
-              "audit.write": "Write its declared events to those organizations’ audit logs"
+              "audit.write": "Write its declared events to those organizations’ audit logs",
+              "launcher.read": "See which of those organizations’ applications each person can open (the application launcher)"
             }
           }
         }
@@ -5204,6 +5527,220 @@
           "units"
         ],
         "description": "All of the organization’s own organizations and units: units form a tree by parentUnitId"
+      },
+      "ProductEmbed": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "description": "The application offering it"
+          },
+          "application": {
+            "type": "string",
+            "description": "Its name"
+          },
+          "tag": {
+            "type": "string",
+            "description": "The custom element, e.g. hearth-record-thread"
+          },
+          "scriptUrl": {
+            "type": "string",
+            "description": "Load it with <script type=\"module\" src=\"…\">"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string",
+            "description": "urn:mt:app:<productId>: the resource to exchange the person’s token for (the component’s token)"
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether the caller can get that token for this organization now"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why not, when it can’t"
+          }
+        },
+        "required": [
+          "productId",
+          "application",
+          "tag",
+          "scriptUrl",
+          "attributes",
+          "description",
+          "audience",
+          "usable",
+          "reason"
+        ],
+        "description": "A Web Component another application the organization has on offers"
+      },
+      "ProductBranding": {
+        "type": "object",
+        "properties": {
+          "organization": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "slug",
+              "name"
+            ]
+          },
+          "logoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "primaryColor": {
+            "type": "string",
+            "description": "#rrggbb"
+          },
+          "theme": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "CSS custom properties to set: --mt-color-primary, --mt-color-on-primary, --mt-radius, --mt-font-family"
+          },
+          "portalUrl": {
+            "type": "string",
+            "description": "Where the organization’s people sign in to the portal"
+          }
+        },
+        "required": [
+          "organization",
+          "logoUrl",
+          "primaryColor",
+          "theme",
+          "portalUrl"
+        ]
+      },
+      "ProductLauncher": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "slug",
+              "name"
+            ]
+          },
+          "portal": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "url"
+            ]
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "productId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "current": {
+                  "type": "boolean",
+                  "description": "The application asking"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Its first page the person may open"
+                },
+                "entries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "icon": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "url",
+                      "icon"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "productId",
+                "name",
+                "current",
+                "url",
+                "entries"
+              ]
+            }
+          }
+        },
+        "required": [
+          "subject",
+          "organization",
+          "portal",
+          "applications"
+        ],
+        "description": "What <mt-app-launcher> shows: the organization’s applications this person can open, as the portal’s menu shows them"
       },
       "ProductGroup": {
         "type": "object",

@@ -480,6 +480,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/product-integrations/organizations/{organizationId}/embeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Web Components the organization’s other applications offer, and whether this application can use each (a token on a person’s behalf) now. Only while it has the product turned on.
+         * @description For external products, with a service access token that has the `organizations.read` scope.
+         */
+        get: operations["listProductEmbeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/product-integrations/organizations/{organizationId}/branding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The organization’s name, logo and colour, with theme tokens. Only while it has the product turned on.
+         * @description For external products, with a service access token that has the `organizations.read` scope.
+         */
+        get: operations["getProductBranding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/product-integrations/organizations/{organizationId}/members/{subject}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The organization’s applications a person can open (for <mt-app-launcher>). Only while it has the product turned on; 404 for anyone not active in it.
+         * @description For external products, with a service access token that has the `launcher.read` scope.
+         */
+        get: operations["getProductLauncher"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/product-integrations/events": {
         parameters: {
             query?: never;
@@ -948,6 +1008,69 @@ export interface components {
                 createdAt: string;
                 /** Format: date-time */
                 updatedAt: string;
+            }[];
+        };
+        /** @description A Web Component another application the organization has on offers */
+        ProductEmbed: {
+            /** @description The application offering it */
+            productId: string;
+            /** @description Its name */
+            application: string;
+            /** @description The custom element, e.g. hearth-record-thread */
+            tag: string;
+            /** @description Load it with <script type="module" src="…"> */
+            scriptUrl: string;
+            attributes: string[];
+            description: string;
+            /** @description urn:mt:app:<productId>: the resource to exchange the person’s token for (the component’s token) */
+            audience: string;
+            /** @description Whether the caller can get that token for this organization now */
+            usable: boolean;
+            /** @description Why not, when it can’t */
+            reason: string | null;
+        };
+        ProductBranding: {
+            organization: {
+                /** Format: uuid */
+                id: string;
+                slug: string;
+                name: string;
+            };
+            logoUrl: string | null;
+            /** @description #rrggbb */
+            primaryColor: string;
+            /** @description CSS custom properties to set: --mt-color-primary, --mt-color-on-primary, --mt-radius, --mt-font-family */
+            theme: {
+                [key: string]: string;
+            };
+            /** @description Where the organization’s people sign in to the portal */
+            portalUrl: string;
+        };
+        /** @description What <mt-app-launcher> shows: the organization’s applications this person can open, as the portal’s menu shows them */
+        ProductLauncher: {
+            subject: string;
+            organization: {
+                /** Format: uuid */
+                id: string;
+                slug: string;
+                name: string;
+            };
+            portal: {
+                label: string;
+                url: string;
+            };
+            applications: {
+                productId: string;
+                name: string;
+                /** @description The application asking */
+                current: boolean;
+                /** @description Its first page the person may open */
+                url: string;
+                entries: {
+                    label: string;
+                    url: string;
+                    icon: string | null;
+                }[];
             }[];
         };
         ProductGroup: {
@@ -3100,6 +3223,237 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductOrgUnits"];
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listProductEmbeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        embeds: components["schemas"]["ProductEmbed"][];
+                    };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getProductBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductBranding"];
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getProductLauncher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+                subject: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductLauncher"];
                 };
             };
             /** @description The request is not valid */
