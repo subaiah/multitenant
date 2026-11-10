@@ -5,6 +5,19 @@ import { z } from 'zod';
 /** An optional setting given as "" is treated as not given */
 const unsetIfEmpty = <T extends z.ZodType>(schema: T) => z.preprocess((v) => (v === '' ? undefined : v), schema);
 
+/**
+ * A public address as given (e.g. PUBLIC_URL with a trailing slash, so
+ * BFF_URL becomes https://host//api), made canonical: no trailing slash, no
+ * repeated slashes in the path. A path starting with // would otherwise be
+ * read as another host (https://api/oidc/auth), breaking OIDC discovery.
+ */
+export function publicUrl(value: string): string {
+  const v = value.trim();
+  const m = /^([a-z][a-z0-9+.-]*:\/\/[^/]*)(.*)$/i.exec(v);
+  if (!m) return v.replace(/\/+$/, '');
+  return `${m[1]}${m[2].replace(/\/{2,}/g, '/').replace(/\/+$/, '')}`;
+}
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
@@ -58,7 +71,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('24h'),
 
   // CORS
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  CORS_ORIGIN: z.string().default('http://localhost:5173').transform((v) => v.split(',').map(publicUrl).join(',')),
 
   // Rate Limiting
   RATE_LIMIT_MAX: z.string().default('1000').transform(Number),
@@ -72,8 +85,8 @@ const envSchema = z.object({
   TENANT_HEADER: z.string().default('x-tenant-id'),
 
   // BFF Configuration
-  BFF_URL: z.string().default('http://localhost:4000'),
-  FRONTEND_URL: z.string().default('http://localhost:5173'),
+  BFF_URL: z.string().default('http://localhost:4000').transform(publicUrl),
+  FRONTEND_URL: z.string().default('http://localhost:5173').transform(publicUrl),
   COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
