@@ -81,7 +81,7 @@ const info = await client.fetchUserInfo(config, tokens.access_token, claims.sub)
 | `email` | `email`. There's no `email_verified`: the kit doesn't record whether an address was confirmed. |
 | `profile` | `name`, `updated_at` |
 | `organization` | `tenant_id`, `tenant_slug`, `tenant_name` |
-| `roles` | `roles`: the person's role names, directly and through groups. `permissions`: the application's own permissions that the person holds (see [The application's permissions](#the-applications-permissions)). |
+| `roles` | `roles`: the person's role names, directly and through groups. `permissions`: the application's own permissions that the person holds across the organization (see [The application's permissions](#the-applications-permissions)). `scoped_permissions`: those held only in part of it, as `{ permission, scopeType, scopeId }` ([PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md#scoped-permissions-and-units)). |
 | `offline_access` | A refresh token. The authorization request must also have `prompt=consent`, as the OpenID spec requires. |
 
 The ID token carries `sub` (and `nonce`, `auth_time` and the usual fields). The other claims come from the userinfo endpoint.

@@ -12,7 +12,7 @@ import { recordAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { RateLimited, sendProductNotification, writeProductAuditEvent } from '../lib/product-services.js';
-import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrganizations } from '../lib/product-data.js';
+import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
 const pagination = (page: number, limit: number, total: number) => ({ page, limit, total, pages: Math.ceil(total / limit) });
@@ -28,6 +28,7 @@ const membersQuery = z.object({
   ...paging(50),
   status: z.enum(['ACTIVE', 'INACTIVE', 'PENDING']).optional(),
   groupId: z.string().uuid().optional(),
+  orgUnitId: z.string().uuid().optional(),
   updatedSince: z.coerce.date().optional(),
   search: z.string().trim().max(100).optional(),
 });
@@ -84,6 +85,12 @@ export async function productV1Routes(fastify: FastifyInstance) {
     const q = groupsQuery.parse(request.query);
     const { groups, total } = await listProductGroups(request.service!.applicationId, organizationId, q, { skip: (q.page - 1) * q.limit, limit: q.limit });
     return { groups, pagination: pagination(q.page, q.limit, total) };
+  });
+
+  // Its own organizations and units (the tree scoped permissions refer to): docs/hub/HUB_GAPS.md G7
+  fastify.get('/product-integrations/organizations/:organizationId/org-units', { config: { serviceScope: 'members.read' }, schema: { params: orgParams } }, async (request) => {
+    const { organizationId } = request.params as { organizationId: string };
+    return listProductOrgUnits(request.service!.applicationId, organizationId);
   });
 
   // The product's own lifecycle events, oldest first: to catch up on any it missed

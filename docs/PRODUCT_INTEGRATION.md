@@ -53,7 +53,7 @@ There are two ways to build on the platform:
 ### Access
 
 5. **Must** declare every permission it checks, named `<productId>:<action>` or `<productId>.<thing>:<action>` (e.g. `appforge:admin`, `appforge.workflows:run`). The platform refuses other names, so one product can't widen the platform's permissions or another product's.
-6. **Must** decide what a person may do from the `permissions` claim, and nothing else. The organization's administrators manage access in the platform's role editor. The application **should not** have its own role screens that contradict them.
+6. **Must** decide what a person may do from the `permissions` and `scoped_permissions` claims, and nothing else ([Scoped permissions and units](#scoped-permissions-and-units)). The organization's administrators manage access in the platform's role editor. The application **should not** have its own role screens that contradict them.
 7. **Must** treat a failed token refresh, or a refused sign-in, as access withdrawn. It means the organization turned the application off, the person was deactivated or signed out everywhere, or the organization was suspended. **Must not** keep someone working on an old session after that. The platform checks again at every sign-in and refresh, not on every page load, so sessions **should** last no longer than the access token (one hour) before refreshing.
 
 ### Data
@@ -268,20 +268,22 @@ With `provisioning.userEvents` (or **Also tell it when people change** on the Li
 
 | Event | When | `data` beyond `application` and `organization` |
 | --- | --- | --- |
-| `user.added` | Someone joined (invited, or signed in with single sign-on the first time) | `user`, `permissions` |
+| `user.added` | Someone joined (invited, or signed in with single sign-on the first time) | `user`, `permissions`, `scopedPermissions`, `memberOf` |
 | `user.updated` | Their email, name or type changed, or they accepted their invitation (`changes` includes `status`) | `user`, `changes` (e.g. `["name"]`) |
 | `user.deactivated` | Their account was deactivated: **end their sessions** | `user` |
-| `user.reactivated` | Their account was reactivated | `user`, `permissions` |
+| `user.reactivated` | Their account was reactivated | `user`, `permissions`, `scopedPermissions`, `memberOf` |
 | `user.removed` | They were removed from the organization: **end their sessions** and drop or anonymize what you keep about them | `user` (`id` and `subject` only) |
-| `user.permissions_changed` | The application's own permissions they hold changed | `user`, `permissions` (now), `added`, `removed` |
+| `user.permissions_changed` | The application's own permissions they hold changed, everywhere or in part of the organization | `user`, `permissions` (now), `added`, `removed`, `scopedPermissions` (now), `scopedAdded`, `scopedRemoved` |
+| `user.units_changed` | They joined or left one of the organization's own organizations or units | `user`, `memberOf` (now), `added`, `removed` (each `{ organizations, units }`) |
+| `units.changed` | The organization's own organizations or units were added, renamed, moved or deleted: read them again | `organizations`, `units` (how many there are now); no `user` |
 
-`user` is `{ id, subject, email, name, userType, status }`, as in [Reading organizations and people](#reading-organizations-and-people). `permissions` are only the application's own.
+`user` is `{ id, subject, email, name, userType, status }`, as in [Reading organizations and people](#reading-organizations-and-people). `permissions` and `scopedPermissions` are only the application's own.
 
 How changes are found:
 - **By comparing, not guessing.** After any change to people, groups, roles or delegations in an organization, each person is compared with what the application was last told. So editing or deleting a role, deactivating a group, or adding someone to a group all come out as the right `user.permissions_changed` events, for exactly the people affected. A burst of changes is gathered for a moment and sent as one pass.
 - **Every hour, everyone is compared again.** This catches what changes with time, such as an assignment or delegation that expired, or anything that happened while the platform was down.
 - **Nothing on the first pass.** When an organization turns the application on, or the application starts asking for user events, everyone is recorded without sending anything. The application reads the members through the API while setting the organization up.
-- **No plain personal data is kept to do this.** The platform keeps keyed hashes of email and name, plus type, status and the application's permission names.
+- **No plain personal data is kept to do this.** The platform keeps keyed hashes of email and name, plus type, status, the application's permission names (with where they hold, for scoped ones), the ids of the units they're in, and a hash of the organization's units.
 
 Answer with any `2xx`. An application that doesn't recognize an event type should still answer `2xx`. Don't let an unknown event stall the organization's queue.
 
@@ -380,8 +382,9 @@ All under `/api/v1/product-integrations`, with a service token. Lists are paged 
 | --- | --- | --- |
 | `GET /organizations` | `organizations.read` | The organizations with an entitlement to the application, **in any state**, oldest first. Filters: `active`, `setupStatus`, `search`. |
 | `GET /organizations/{id}` | `organizations.read` | One of them (`404` for any other organization) |
-| `GET /organizations/{id}/members` | `members.read` | Its people, oldest first. Filters: `status`, `groupId`, `updatedSince`, `search`. |
+| `GET /organizations/{id}/members` | `members.read` | Its people, oldest first. Filters: `status`, `groupId`, `orgUnitId`, `updatedSince`, `search`. |
 | `GET /organizations/{id}/groups` | `members.read` | Its groups, by name, with how many people are in each now |
+| `GET /organizations/{id}/org-units` | `members.read` | Its own organizations and units, all of them ([Scoped permissions and units](#scoped-permissions-and-units)) |
 | `GET /events` | `organizations.read` | The application's own lifecycle events, oldest first, from a cursor |
 
 **An organization** carries:
@@ -399,7 +402,9 @@ Use the list to **reconcile** with what the events said, for example after the a
 - `email`, `name`, `userType`, `status`;
 - `groups`: the active groups they're in now;
 - `roles`;
-- `permissions`: **only the application's own permissions** that they hold now, as in the `permissions` claim at sign-in. Administrators hold them all. People who aren't `ACTIVE` hold none.
+- `permissions`: **only the application's own permissions** that they hold now across the whole organization, as in the `permissions` claim at sign-in. Administrators hold them all. People who aren't `ACTIVE` hold none;
+- `scopedPermissions`: the application's own permissions they hold **only in part of the organization**, as in the `scoped_permissions` claim;
+- `memberOf`: `{ organizations, units }`, the ids of the organization's own organizations and units they're directly in.
 
 Nothing secret (passwords, two-factor settings) is ever included.
 
@@ -408,6 +413,42 @@ Nothing secret (passwords, two-factor settings) is ever included.
 **Events** come back exactly as they were sent (`payload`), with how delivery went. The answer has:
 - `nextAfter`: pass it as `after` for the next page. It's given on the last page too, so keep it and poll from it to catch any event the application missed;
 - `hasMore`.
+
+## Scoped permissions and units
+
+Inside an organization, administrators can give a role for the whole organization, or only for one of its own **organizations** (for example Acme EU), one **unit** and every unit below it (Sales, and Sales East under it), or one record. A "Deal editor for Sales" may edit Sales' deals and no one else's. The platform tells the application both kinds, and only for the application's own permissions:
+
+| Where | Held everywhere | Held in part of the organization |
+| --- | --- | --- |
+| Sign-in claims (`roles` scope) | `permissions` | `scoped_permissions` |
+| A token made on a person's behalf | `permissions` | `scoped_permissions` |
+| `GET …/members` | `permissions` | `scopedPermissions` |
+| User events | `permissions` | `scopedPermissions` |
+
+Each scoped one is `{ permission, scopeType, scopeId }`:
+- `ORGANIZATION`: one of the organization's own organizations;
+- `ORG_UNIT`: that unit **and every unit below it**;
+- `RESOURCE`: one record, by its id.
+
+A permission held everywhere isn't repeated as a scoped one.
+
+**Applying them.** Record, on each of your rows, the organization or unit it belongs to. Then a person may act on a row when they hold the permission everywhere, or hold it scoped to the row's organization, to its unit or a unit above it, or to the row itself. Read the tree with `GET …/org-units`:
+- `organizations`: `{ id, name, description, status, memberCount }`;
+- `units`: `{ id, organizationId, parentUnitId, unitType, name, description, memberCount }`, a tree by `parentUnitId`.
+
+It's always whole, not paged. When `units.changed` arrives, read it again. Who is in which unit comes with each person (`memberOf`, and the `orgUnitId` filter) and in `user.units_changed`.
+
+The TypeScript client applies them the way the platform does:
+
+```ts
+import { allows, unitTree } from '@multitenant/api-client';
+
+const units = unitTree((await api.GET('/product-integrations/organizations/{organizationId}/org-units', { params: { path: { organizationId } } })).data!.units);
+// person: the sign-in claims ({ permissions, scopedPermissions: claims.scoped_permissions }), a member, or caller.person
+if (!allows(person, 'crm.deals:edit', { orgUnitId: deal.unitId }, units)) return reply.status(403).send();
+```
+
+Without a target, `allows()` counts only a permission held everywhere. That's the right check for screens that aren't about one record, such as a menu entry.
 
 ## Using the platform's services
 
@@ -528,7 +569,7 @@ Any of the caller's service credentials can get one. It doesn't need a particula
   The token lasts 5 minutes, with no refresh token: exchange again when you need one. It adds:
   - `sub`, the person;
   - `act: { sub, product_id }`, who is acting;
-  - `permissions`, **the person's permissions in the target application**, as when they sign in to it.
+  - `permissions` and `scoped_permissions`, **the person's permissions in the target application**, as when they sign in to it.
 
   A scope without `allowsOnBehalfOf` is refused (`invalid_scope`). So is a subject token issued to another application, or for a person who can't use the caller any more (`invalid_grant`).
 
@@ -544,7 +585,7 @@ Otherwise the answer is `access_denied`, `invalid_target`, `invalid_scope` or `i
 
 - Check the signature against the platform's keys (`jwks_uri`), and `iss`, `aud` (your own `urn:mt:app:<productId>`), `exp` and `typ: at+jwt`.
 - **Scope every query by `tenant_id`.**
-- On behalf of a person, authorize with the token's `sub` and `permissions`, never the caller's, and record `act.sub` in your own audit entries.
+- On behalf of a person, authorize with the token's `sub`, `permissions` and `scoped_permissions`, never the caller's, and record `act.sub` in your own audit entries.
 
 The TypeScript client does both sides:
 
@@ -636,7 +677,7 @@ Products that need attention come first: a failed setup, events given up or wait
 - [ ] Sign-in uses PKCE, with exact redirect URIs, and checks the ID token (issuer, audience, signature, nonce).
 - [ ] People and organizations are keyed by `sub` and `tenant_id`, never by email.
 - [ ] Every query is scoped to the organization; a test proves one organization can't read another's data.
-- [ ] Access comes from the `permissions` claim; every page checks one, and its menu entry has the same.
+- [ ] Access comes from the `permissions` claim (and `scoped_permissions`, for records that belong to part of the organization); every page checks one, and its menu entry has the same.
 - [ ] A refused sign-in or a failed refresh ends the session.
 - [ ] Calls to the platform go to API v1, from the server.
 - [ ] Webhooks, if used, are verified and handled idempotently.

@@ -2,8 +2,10 @@
  * User events for external products (docs/PRODUCT_INTEGRATION.md): telling a
  * product when people in an organization that has it are added, changed,
  * deactivated, reactivated or removed, or when the product's permissions
- * they hold change, so it can revoke access without waiting for them to sign
- * in again.
+ * they hold change (everywhere, or in part of the organization), so it can
+ * revoke access without waiting for them to sign in again; also when they
+ * join or leave the organization's own organizations and units, and when
+ * those change (units.changed: read them again). docs/hub/HUB_GAPS.md G7.
  *
  * - Only for products that ask for them (manifest provisioning.userEvents, or
  *   the Lifecycle events panel), with a callback address, and only for
@@ -29,11 +31,12 @@ import { dbForTenant } from './tenant-db.js';
 import { onAudit, PLATFORM_CHAIN, type AuditContent } from './audit.js';
 import { accountIdFor } from './oidc/accounts.js';
 import { kickLifecycleEvents, queueProductEvent } from './product-lifecycle.js';
-import { getEnhancedUserPermissions } from '../utils/authorization.js';
-import { permissionMatches } from '../utils/permissions.js';
+import { getEnhancedUserPermissions, type EnhancedPermissionData } from '../utils/authorization.js';
+import { applicationAccess, scopedKey, type ScopedPermission } from './application-access.js';
+import { memberOf } from './product-data.js';
 import { config } from '../config/env.js';
 
-export const USER_EVENTS = ['user.added', 'user.updated', 'user.deactivated', 'user.reactivated', 'user.removed', 'user.permissions_changed'] as const;
+export const USER_EVENTS = ['user.added', 'user.updated', 'user.deactivated', 'user.reactivated', 'user.removed', 'user.permissions_changed', 'user.units_changed', 'units.changed'] as const;
 export type UserEvent = (typeof USER_EVENTS)[number];
 
 const ACTIVE_STATES = ['ENABLED', 'TRIAL'];
@@ -55,7 +58,29 @@ async function listeningProducts(tenantId: string) {
   });
 }
 
-interface Person { id: string; email: string; name: string | null; userType: string; status: string }
+interface Person { id: string; email: string; name: string | null; userType: string; status: string; orgMemberships: { organizationId: string | null; orgUnitId: string | null }[] }
+
+type MemberOf = ReturnType<typeof memberOf>;
+const unitKeys = (m: MemberOf) => [...m.organizations.map((id) => `ORGANIZATION:${id}`), ...m.units.map((id) => `ORG_UNIT:${id}`)].sort();
+const fromUnitKeys = (keys: string[]): MemberOf => ({
+  organizations: keys.filter((k) => k.startsWith('ORGANIZATION:')).map((k) => k.slice(13)),
+  units: keys.filter((k) => k.startsWith('ORG_UNIT:')).map((k) => k.slice(9)),
+});
+const fromScopedKey = (k: string): ScopedPermission => {
+  const at = k.lastIndexOf('@');
+  const colon = k.indexOf(':', at);
+  return { permission: k.slice(0, at), scopeType: k.slice(at + 1, colon) as ScopedPermission['scopeType'], scopeId: k.slice(colon + 1) };
+};
+const minus = (a: string[], b: string[]) => { const s = new Set(b); return a.filter((x) => !s.has(x)); };
+
+/** A hash of the organization's own organizations and units: when it changes, listening products are told units.changed */
+async function unitsHash(db: Awaited<ReturnType<typeof dbForTenant>>, tenantId: string) {
+  const [orgs, units] = await Promise.all([
+    db.organization.findMany({ where: { tenantId }, select: { id: true, name: true, status: true }, orderBy: { id: 'asc' } }),
+    db.orgUnit.findMany({ where: { tenantId }, select: { id: true, organizationId: true, parentUnitId: true, unitType: true, name: true }, orderBy: { id: 'asc' } }),
+  ]);
+  return { hash: keyedHash(JSON.stringify([orgs, units])), organizations: orgs.length, units: units.length };
+}
 
 /**
  * Compare people in an organization with what each listening product was
@@ -81,13 +106,14 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
   const db = await dbForTenant(tenantId, tenant.databaseConfig?.updatedAt);
   const people: Person[] = await db.user.findMany({
     where: { tenantId, ...(scope && { id: { in: scope } }) },
-    select: { id: true, email: true, name: true, userType: true, status: true },
+    select: { id: true, email: true, name: true, userType: true, status: true, orgMemberships: { select: { organizationId: true, orgUnitId: true } } },
   });
   // Everything each active person holds, worked out once for all products
-  const held = new Map<string, string[]>();
+  const held = new Map<string, Pick<EnhancedPermissionData, 'permissions' | 'scoped'>>();
   for (const p of people) {
-    if (p.status === 'ACTIVE') held.set(p.id, (await getEnhancedUserPermissions(p.id, tenantId, p.userType)).permissions);
+    if (p.status === 'ACTIVE') held.set(p.id, await getEnhancedUserPermissions(p.id, tenantId, p.userType));
   }
+  const structure = await unitsHash(db, tenantId);
 
   let queued = 0;
   for (const product of products) {
@@ -107,14 +133,26 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
         n++;
       };
 
+      // The organization's own organizations and units changed: re-read them (GET .../org-units)
+      const entitlement = await tx.tenantApplication.findUnique({ where: { tenantId_applicationId: { tenantId, applicationId: product.id } }, select: { unitsStateHash: true } });
+      if (entitlement && entitlement.unitsStateHash !== structure.hash) {
+        if (entitlement.unitsStateHash !== null) await send('units.changed', { organizations: structure.organizations, units: structure.units });
+        await tx.tenantApplication.update({ where: { tenantId_applicationId: { tenantId, applicationId: product.id } }, data: { unitsStateHash: structure.hash } });
+      }
+
       for (const p of people) {
-        const permissions = p.status === 'ACTIVE' ? names.filter((x) => permissionMatches(held.get(p.id) ?? [], x)) : [];
-        const state = { status: p.status, userType: p.userType, emailHash: keyedHash(p.email.toLowerCase()), nameHash: keyedHash(p.name ?? ''), permissions };
+        const access = p.status === 'ACTIVE' ? applicationAccess(held.get(p.id)!, names) : { permissions: [], scopedPermissions: [] };
+        const { permissions, scopedPermissions } = access;
+        const member = memberOf(p.orgMemberships);
+        const state = {
+          status: p.status, userType: p.userType, emailHash: keyedHash(p.email.toLowerCase()), nameHash: keyedHash(p.name ?? ''), permissions,
+          scopedPermissions: scopedPermissions.map(scopedKey), units: unitKeys(member), unitsRecorded: true,
+        };
         const user = { id: p.id, subject: accountIdFor(tenantId, p.id), email: p.email, name: p.name ?? p.email, userType: p.userType, status: p.status };
         const old = before.get(p.id);
         before.delete(p.id);
         if (!old) {
-          await send('user.added', { user, permissions });
+          await send('user.added', { user, permissions, scopedPermissions, memberOf: member });
         } else {
           const changes = [
             old.emailHash !== state.emailHash && 'email',
@@ -127,16 +165,29 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
             await send('user.deactivated', { user });
           } else if (statusChanged && old.status === 'INACTIVE' && state.status === 'ACTIVE') {
             if (changes.length) await send('user.updated', { user, changes });
-            await send('user.reactivated', { user, permissions });
+            await send('user.reactivated', { user, permissions, scopedPermissions, memberOf: member });
           } else {
             if (statusChanged) changes.push('status');
             if (changes.length) await send('user.updated', { user, changes });
-            const was = new Set(old.permissions);
-            const added = permissions.filter((x) => !was.has(x));
-            const removed = old.permissions.filter((x) => !permissions.includes(x));
-            if (added.length || removed.length) await send('user.permissions_changed', { user, permissions, added, removed });
+            const added = minus(permissions, old.permissions);
+            const removed = minus(old.permissions, permissions);
+            // Rows from before scoped permissions and units were tracked: record those silently
+            const scopedAdded = old.unitsRecorded ? minus(state.scopedPermissions, old.scopedPermissions) : [];
+            const scopedRemoved = old.unitsRecorded ? minus(old.scopedPermissions, state.scopedPermissions) : [];
+            if (added.length || removed.length || scopedAdded.length || scopedRemoved.length) {
+              await send('user.permissions_changed', {
+                user, permissions, added, removed,
+                scopedPermissions, scopedAdded: scopedAdded.map(fromScopedKey), scopedRemoved: scopedRemoved.map(fromScopedKey),
+              });
+            }
+            const unitsAdded = old.unitsRecorded ? minus(state.units, old.units) : [];
+            const unitsRemoved = old.unitsRecorded ? minus(old.units, state.units) : [];
+            if (unitsAdded.length || unitsRemoved.length) {
+              await send('user.units_changed', { user, memberOf: member, added: fromUnitKeys(unitsAdded), removed: fromUnitKeys(unitsRemoved) });
+            }
           }
-          if (!changes.length && !statusChanged && old.permissions.join(' ') === permissions.join(' ')) continue;
+          const same = (a: string[], b: string[]) => a.join(' ') === b.join(' ');
+          if (!changes.length && !statusChanged && old.unitsRecorded && same(old.permissions, permissions) && same(old.scopedPermissions, state.scopedPermissions) && same(old.units, state.units)) continue;
         }
         await tx.productMemberState.upsert({
           where: { applicationId_tenantId_userId: { applicationId: product.id, tenantId, userId: p.id } },
@@ -203,6 +254,9 @@ export function affectedBy(entry: Pick<AuditContent, 'event' | 'outcome' | 'reso
   if (e === 'group.member_added' || e === 'group.member_removed') return id(d.userId);
   if (e === 'role.assigned' || e === 'role.unassigned') return d.principalType === 'USER' ? id(d.principalId) : null;
   if (e === 'delegation.created' || e === 'delegation.revoked') return id(d.delegateId);
+  // The organization's own organizations and units (G7): who is in them, and the tree itself
+  if (e === 'organization.member_added' || e === 'organization.member_removed' || e === 'org_unit.member_added' || e === 'org_unit.member_removed') return id(d.userId);
+  if (['organization.created', 'organization.updated', 'organization.deleted', 'org_unit.created', 'org_unit.updated', 'org_unit.deleted'].includes(e)) return null;
   if (e.startsWith('role.') || e.startsWith('group.') || e.startsWith('entitlement.')) return null;
   return undefined;
 }

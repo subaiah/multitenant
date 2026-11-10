@@ -19,7 +19,7 @@ import { controlDb } from './prisma.js';
 import { dbForTenant } from './tenant-db.js';
 import { accountIdFor } from './oidc/accounts.js';
 import { getEnhancedUserPermissions } from '../utils/authorization.js';
-import { permissionMatches } from '../utils/permissions.js';
+import { applicationAccess, type ScopedPermission } from './application-access.js';
 import { AppError } from '../middleware/error-handler.js';
 
 const ACTIVE_STATES = ['ENABLED', 'TRIAL'];
@@ -100,7 +100,44 @@ export async function readableOrganization(applicationId: string, tenantId: stri
 const now = () => new Date();
 const inForce = () => ({ validFrom: { lte: now() }, OR: [{ validTo: null }, { validTo: { gt: now() } }] });
 
-export type MemberFilter = { status?: 'ACTIVE' | 'INACTIVE' | 'PENDING'; groupId?: string; updatedSince?: Date; search?: string };
+export type MemberFilter = { status?: 'ACTIVE' | 'INACTIVE' | 'PENDING'; groupId?: string; orgUnitId?: string; updatedSince?: Date; search?: string };
+
+/** The organization's own organizations and units a person is directly in, sorted */
+export function memberOf(rows: { organizationId: string | null; orgUnitId: string | null }[]) {
+  const ids = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))].sort();
+  return { organizations: ids(rows.filter((r) => !r.orgUnitId).map((r) => r.organizationId)), units: ids(rows.map((r) => r.orgUnitId)) };
+}
+
+/**
+ * The organization's own organizations and their units, for applications that
+ * apply scoped permissions (a unit grant covers the units below it) or group
+ * people by unit. All of them: a tree is only useful whole.
+ */
+export async function listProductOrgUnits(applicationId: string, tenantId: string) {
+  const db = await readableOrganization(applicationId, tenantId);
+  const [organizations, units] = await Promise.all([
+    db.organization.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, description: true, status: true, createdAt: true, updatedAt: true, _count: { select: { memberships: { where: { orgUnitId: null } } } } },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    }),
+    db.orgUnit.findMany({
+      where: { tenantId },
+      select: { id: true, organizationId: true, parentUnitId: true, unitType: true, name: true, description: true, createdAt: true, updatedAt: true, _count: { select: { memberships: true } } },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    }),
+  ]);
+  return {
+    organizations: organizations.map((o) => ({
+      id: o.id, name: o.name, description: o.description, status: o.status, memberCount: o._count.memberships,
+      createdAt: o.createdAt.toISOString(), updatedAt: o.updatedAt.toISOString(),
+    })),
+    units: units.map((u) => ({
+      id: u.id, organizationId: u.organizationId, parentUnitId: u.parentUnitId, unitType: u.unitType, name: u.name, description: u.description,
+      memberCount: u._count.memberships, createdAt: u.createdAt.toISOString(), updatedAt: u.updatedAt.toISOString(),
+    })),
+  };
+}
 
 /** Run fn over items, a few at a time */
 async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -123,6 +160,7 @@ export async function listProductMembers(applicationId: string, tenantId: string
     ...(filter.status && { status: filter.status }),
     ...(filter.updatedSince && { updatedAt: { gte: filter.updatedSince } }),
     ...(filter.groupId && { groupMemberships: { some: { groupId: filter.groupId, ...inForce() } } }),
+    ...(filter.orgUnitId && { orgMemberships: { some: { orgUnitId: filter.orgUnitId } } }),
     ...(filter.search && { OR: [{ email: { contains: filter.search, mode: 'insensitive' as const } }, { name: { contains: filter.search, mode: 'insensitive' as const } }] }),
   };
   const [users, total, declared] = await Promise.all([
@@ -131,6 +169,7 @@ export async function listProductMembers(applicationId: string, tenantId: string
       select: {
         id: true, email: true, name: true, userType: true, status: true, lastLoginAt: true, createdAt: true, updatedAt: true,
         groupMemberships: { where: { ...inForce(), group: { status: 'ACTIVE' } }, select: { group: { select: { id: true, name: true } } }, orderBy: { group: { name: 'asc' } } },
+        orgMemberships: { select: { organizationId: true, orgUnitId: true } },
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       skip: page.skip,
@@ -145,10 +184,11 @@ export async function listProductMembers(applicationId: string, tenantId: string
     // Only people who can sign in hold anything
     let roles: string[] = [];
     let permissions: string[] = [];
+    let scopedPermissions: ScopedPermission[] = [];
     if (u.status === 'ACTIVE') {
       const data = await getEnhancedUserPermissions(u.id, tenantId, u.userType);
       roles = [...new Set([...data.sources.directRoles, ...data.sources.groupRoles])].sort();
-      permissions = names.filter((p) => permissionMatches(data.permissions, p));
+      ({ permissions, scopedPermissions } = applicationAccess(data, names));
     }
     return {
       id: u.id,
@@ -160,6 +200,8 @@ export async function listProductMembers(applicationId: string, tenantId: string
       groups: u.groupMemberships.map((m) => m.group),
       roles,
       permissions,
+      scopedPermissions,
+      memberOf: memberOf(u.orgMemberships),
       lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
       createdAt: u.createdAt.toISOString(),
       updatedAt: u.updatedAt.toISOString(),

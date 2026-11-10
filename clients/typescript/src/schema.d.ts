@@ -460,6 +460,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/product-integrations/organizations/{organizationId}/org-units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An organization’s own organizations and units (the tree scoped permissions refer to). Only while it has the product turned on.
+         * @description For external products, with a service access token that has the `members.read` scope.
+         */
+        get: operations["listProductOrgUnits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/product-integrations/events": {
         parameters: {
             query?: never;
@@ -871,12 +891,64 @@ export interface components {
             }[];
             roles: string[];
             permissions: string[];
+            /** @description This product’s own permissions the person holds only in part of the organization (not repeated if held everywhere). As the scoped_permissions claim. */
+            scopedPermissions: components["schemas"]["ScopedPermission"][];
+            /** @description From GET …/org-units */
+            memberOf: {
+                organizations: string[];
+                units: string[];
+            };
             /** Format: date-time */
             lastLoginAt: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description A permission held in part of the organization only */
+        ScopedPermission: {
+            permission: string;
+            /**
+             * @description ORGANIZATION: one of the organization’s own organizations; ORG_UNIT: that unit and every unit below it; RESOURCE: one record
+             * @enum {string}
+             */
+            scopeType: "ORGANIZATION" | "ORG_UNIT" | "RESOURCE";
+            /** @description An id from GET …/org-units, or a resource id */
+            scopeId: string;
+        };
+        /** @description All of the organization’s own organizations and units: units form a tree by parentUnitId */
+        ProductOrgUnits: {
+            organizations: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                description: string | null;
+                status: string;
+                /** @description People directly in it (not through a unit) */
+                memberCount: number;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                updatedAt: string;
+            }[];
+            units: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                organizationId: string;
+                /** Format: uuid */
+                parentUnitId: string | null;
+                /** @description DIVISION, DEPARTMENT, TEAM, LOCATION */
+                unitType: string;
+                name: string;
+                description: string | null;
+                /** @description People directly in it */
+                memberCount: number;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                updatedAt: string;
+            }[];
         };
         ProductGroup: {
             /** Format: uuid */
@@ -2847,6 +2919,7 @@ export interface operations {
                 limit?: number;
                 status?: "ACTIVE" | "INACTIVE" | "PENDING";
                 groupId?: string;
+                orgUnitId?: string;
                 updatedSince?: string;
                 search?: string;
             };
@@ -2951,6 +3024,82 @@ export interface operations {
                         groups: components["schemas"]["ProductGroup"][];
                         pagination: components["schemas"]["Pagination"];
                     };
+                };
+            };
+            /** @description The request is not valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found (another product's things are not found either) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests (RATE_LIMITED; see Retry-After) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listProductOrgUnits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organizationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductOrgUnits"];
                 };
             };
             /** @description The request is not valid */
