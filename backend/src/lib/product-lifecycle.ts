@@ -19,6 +19,7 @@
  *   late answer can't overwrite a newer setup. The Applications page, the
  *   sidebar and sign-in wait for READY.
  */
+import { limitsFor, limitsHash } from './product-limits.js';
 import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { z } from 'zod';
@@ -89,7 +90,7 @@ export const trustedCallback = (url: string) => config.nodeEnv !== 'production' 
 // Queueing
 // ---------------------------------------------------------------------------
 
-type Tx = Pick<typeof controlDb, 'productEvent' | 'tenantApplication' | 'applicationRegistry' | 'tenant'>;
+type Tx = Pick<typeof controlDb, 'productEvent' | 'tenantApplication' | 'applicationRegistry' | 'tenant' | 'productLimit'>;
 
 interface Entitlement {
   tenantId: string;
@@ -120,6 +121,9 @@ export async function queueLifecycleEvent(tx: Tx, type: LifecycleEvent, entitlem
     ? { id: newOperationId(), generation: entitlement.provisioningGeneration + 1 }
     : entitlement.provisioningOperationId ? { id: entitlement.provisioningOperationId, generation: entitlement.provisioningGeneration } : null;
   const ending = type === 'organization.deprovisioning_requested';
+  // What its plan allows in the application (lib/product-limits.ts), when it declares limits
+  const limits = type === 'organization.entitled' || type === 'organization.entitlement_changed' ? await limitsFor(tx, app.id, entitlement.tenantId) : null;
+  const withLimits = limits && Object.keys(limits).length ? limits : null;
 
   const publicId = `evt_${randomBytes(12).toString('base64url')}`;
   const payload = {
@@ -133,12 +137,14 @@ export async function queueLifecycleEvent(tx: Tx, type: LifecycleEvent, entitlem
       entitlement: ending ? null : { state: entitlement.state, validFrom: entitlement.validFrom.toISOString(), validTo: entitlement.validTo?.toISOString() ?? null },
       operation,
       ...(ending && { deleteData: app.deletesDataOnDeprovision }),
+      ...(withLimits && { limits: withLimits }),
       ...extra,
     },
   };
   await tx.productEvent.create({
     data: { publicId, applicationId: app.id, tenantId: entitlement.tenantId, type, payload, operationId: operation?.id ?? null, generation: operation?.generation ?? null },
   });
+  if (withLimits) await tx.tenantApplication.updateMany({ where: { tenantId: entitlement.tenantId, applicationId: app.id }, data: { limitsStateHash: limitsHash(withLimits) } });
   if (type === 'organization.entitled' && operation) {
     await tx.tenantApplication.updateMany({
       where: { tenantId: entitlement.tenantId, applicationId: app.id },

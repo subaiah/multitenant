@@ -14,6 +14,7 @@
  *   it declares that the person holds), as in the `permissions` claim at
  *   sign-in (lib/oidc/accounts.ts).
  */
+import { limitsForPlan, type LimitValue } from './product-limits.js';
 import type { Prisma } from '../generated/control/client.js';
 import { controlDb } from './prisma.js';
 import { dbForTenant } from './tenant-db.js';
@@ -24,15 +25,15 @@ import { AppError } from '../middleware/error-handler.js';
 
 const ACTIVE_STATES = ['ENABLED', 'TRIAL'];
 
-type EntitlementRow = Prisma.TenantApplicationGetPayload<{ include: { tenant: { select: { id: true; slug: true; name: true; status: true; provisioningStatus: true } } } }>;
+type EntitlementRow = Prisma.TenantApplicationGetPayload<{ include: { tenant: { select: { id: true; slug: true; name: true; status: true; provisioningStatus: true; plan: true } } } }>;
 
-const entitlementInclude = { tenant: { select: { id: true, slug: true, name: true, status: true, provisioningStatus: true } } } as const;
+const entitlementInclude = { tenant: { select: { id: true, slug: true, name: true, status: true, provisioningStatus: true, plan: true } } } as const;
 
 const isActiveNow = (e: Pick<EntitlementRow, 'state' | 'validFrom' | 'validTo'>, now = new Date()) =>
   ACTIVE_STATES.includes(e.state) && e.validFrom <= now && (!e.validTo || e.validTo > now);
 
 /** An organization as a product sees it */
-function organizationView(e: EntitlementRow, now = new Date()) {
+function organizationView(e: EntitlementRow, limits: Record<string, LimitValue>, now = new Date()) {
   const active = isActiveNow(e, now);
   const suspended = e.tenant.status === 'SUSPENDED';
   const setupDone = e.provisioningStatus === 'READY' || e.provisioningStatus === 'NOT_REQUIRED';
@@ -50,6 +51,8 @@ function organizationView(e: EntitlementRow, now = new Date()) {
     },
     /** Whether its people can sign in to the product now */
     available: active && !suspended && setupDone && e.tenant.provisioningStatus === 'READY',
+    /** What its plan allows in the product (manifest limits; lib/product-limits.ts) */
+    limits,
     createdAt: e.createdAt.toISOString(),
   };
 }
@@ -71,7 +74,10 @@ export async function listProductOrganizations(applicationId: string, filter: Or
     controlDb.tenantApplication.findMany({ where, include: entitlementInclude, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], skip: page.skip, take: page.limit }),
     controlDb.tenantApplication.count({ where }),
   ]);
-  return { organizations: rows.map((r) => organizationView(r, now)), total };
+  // Limits follow the plan: worked out once per plan
+  const byPlan = new Map<string, Record<string, LimitValue>>();
+  for (const plan of new Set(rows.map((r) => r.tenant.plan))) byPlan.set(plan, await limitsForPlan(controlDb, applicationId, plan));
+  return { organizations: rows.map((r) => organizationView(r, byPlan.get(r.tenant.plan)!, now)), total };
 }
 
 async function entitlementOf(applicationId: string, tenantId: string) {
@@ -84,7 +90,7 @@ async function entitlementOf(applicationId: string, tenantId: string) {
 export async function getProductOrganization(applicationId: string, tenantId: string) {
   const e = await entitlementOf(applicationId, tenantId);
   if (!e) throw new AppError('No organization with that id has this product', 404, true, 'NOT_FOUND');
-  return organizationView(e);
+  return organizationView(e, await limitsForPlan(controlDb, applicationId, e.tenant.plan));
 }
 
 /** The organization's data, if the product may read its people now */

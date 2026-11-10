@@ -316,6 +316,7 @@ An application can have several credentials at once.
 | `notifications.send` | [Sending its declared notifications](#notifications) to people in those organizations |
 | `audit.write` | [Writing its declared audit events](#audit-events) to those organizations' audit logs |
 | `events.publish` | [Publishing its declared events](#events-between-applications) to other applications and webhooks in those organizations |
+| `usage.report` | [Reporting usage](#usage) of its metered features, and reading it back |
 | `launcher.read` | [Which applications a person can open](#the-application-launcher), for the launcher |
 
 ### Getting a token
@@ -621,6 +622,42 @@ On **Application Entitlements**, **Connections between applications** lists ever
 - how often the connection was used.
 
 Connections are allowed by default. Administrators (`applications:manage`) can **Block** one, which stops new tokens at once, and **Allow** it again. Both go into the audit log. Platform staff see each application's connections and use on the **Integrations** page.
+
+## Plans, limits and usage
+
+### Limits
+
+An application can say what each plan allows in it: a number of workflow runs, a file size, whether a feature is on. Declare them in the manifest (version 2):
+
+```json
+"limits": [
+  { "key": "appforge.workflow_runs", "label": "Workflow runs a month", "type": "integer", "unlimited": true, "default": 100, "unit": "runs" },
+  { "key": "appforge.ai", "label": "AI assistant", "type": "boolean", "default": false }
+]
+```
+
+- **Values per plan:** platform staff set them under **Plans and usage** on the Applications page. A plan without a value gets the `default`. For an integer, `null` means no limit, but only where `unlimited` is true.
+- **Sent to the application:** an organization's limits follow its plan. They come in `organization.entitled` and `organization.entitlement_changed` as `data.limits` (`{ key: value }`), and on the organization in `GET …/organizations` and `GET …/organizations/{id}`.
+- **Told when they change:** if the organization changes plan, staff change a value, or a new manifest changes the limits, every organization that has the application on gets `organization.entitlement_changed` with `changed: ["limits"]` and the new values. Each change is told once, and an hourly pass catches anything missed.
+- **Enforcing them is the application's job.** The platform says what they are. Administrators see them on **Application Entitlements** ("On your plan").
+- A limit left out of a later manifest is kept (plans may hold values) and stops being sent.
+
+### Usage
+
+Metered features (AI tokens, storage) are declared as `usage` meters: `{ "key": "appforge.ai_tokens", "label": "AI tokens", "unit": "tokens" }`.
+
+Report them from the server: `POST …/organizations/{id}/usage` (scope `usage.report`), for an organization that has the application on.
+
+```json
+{ "records": [ { "key": "appforge.ai_tokens", "quantity": 1200, "occurredAt": "2026-11-12T10:00:00Z", "idempotencyKey": "run-8812" } ] }
+```
+
+- Send one record, or up to 100 in `records`. `quantity` is zero or more and may have decimals.
+- `occurredAt` defaults to now. It may be up to 35 days back, and not in the future.
+- A record whose `idempotencyKey` was reported before is skipped. The answer (`202`) counts `accepted` and `duplicates`, so retrying a batch is safe.
+- Up to 600 requests a minute per credential.
+
+`GET …/organizations/{id}/usage?month=YYYY-MM` gives the month's totals per meter (calendar months, UTC). Administrators see this month's totals on Application Entitlements ("Used this month"). Platform staff see them per organization under Plans and usage.
 
 ## Events between applications
 

@@ -30,7 +30,7 @@ import { AppError } from '../middleware/error-handler.js';
 // Rate limits (per server; each server counts its own)
 // ---------------------------------------------------------------------------
 
-export const LIMITS = { notifications: 120, audit: 600, events: 600 } as const;
+export const LIMITS = { notifications: 120, audit: 600, events: 600, usage: 600 } as const;
 
 export class RateLimited extends AppError {
   constructor(message: string, readonly retryAfter: number) {

@@ -243,6 +243,7 @@ SCHEMAS.ProductOrganization = obj({
     operation: nullable(obj({ id: { type: 'string' }, generation: { type: 'integer' } }) as Schema & { type: string }),
   }),
   available: { type: 'boolean', description: 'Whether its people can sign in to the product now: turned on, not suspended, and set up' },
+  limits: { type: 'object', additionalProperties: { type: ['integer', 'boolean', 'null'] }, description: 'What its plan allows in the product: each of the product’s declared limits (manifest limits) with its value; null is no limit. Also sent with organization.entitled and organization.entitlement_changed.' },
   createdAt: dateTime,
 }, undefined, { description: 'An organization with an entitlement to the product (in any state)' });
 
@@ -318,6 +319,13 @@ SCHEMAS.ProductPublished = obj({
   webhooks: { type: 'integer', description: 'The organization’s webhook endpoints it was queued for' },
   duplicate: { type: 'boolean', description: 'The idempotencyKey was used before: this is that result, nothing new was sent' },
 });
+
+SCHEMAS.ProductUsageRecordInput = obj({
+  key: { type: 'string', description: 'One of the product’s meters (manifest usage)' },
+  quantity: { type: 'number', minimum: 0 },
+  occurredAt: { ...dateTime, description: 'When (default: now); up to 35 days back' },
+  idempotencyKey: { type: 'string', maxLength: 200, description: 'Reporting the same key again for the organization is skipped' },
+}, ['key', 'quantity']);
 
 SCHEMAS.ProductGroup = obj({
   id: uuid, name: { type: 'string' }, description: nullable({ type: 'string' }), status: { type: 'string', enum: ACTIVE_INACTIVE },
@@ -428,6 +436,18 @@ export const PRODUCT_ENDPOINTS: ProductEndpoint[] = [
       details: { type: 'object', additionalProperties: true, description: 'At most 4000 characters as JSON' },
     }, ['type']),
     responses: { 201: obj({ seq: { type: 'integer', description: 'The entry’s position in the organization’s log' } }) } },
+  { method: 'POST', path: '/product-integrations/organizations/:organizationId/usage', operationId: 'reportProductUsage', tag: 'Products',
+    summary: 'Report usage of the product’s metered features (manifest usage) in an organization that has it on: one record, or { records: [...] } (up to 100). A record with an idempotencyKey already reported is skipped.',
+    scope: 'usage.report',
+    body: { oneOf: [ref('ProductUsageRecordInput'), obj({ records: { ...arrayOf(ref('ProductUsageRecordInput')), minItems: 1, maxItems: 100 } })] },
+    responses: { 202: obj({ accepted: { type: 'integer' }, duplicates: { type: 'integer', description: 'Records skipped: their idempotencyKey was reported before' } }) } },
+  { method: 'GET', path: '/product-integrations/organizations/:organizationId/usage', operationId: 'getProductUsage', tag: 'Products',
+    summary: 'The product’s usage in an organization for a calendar month (UTC), per meter', scope: 'usage.report',
+    query: { month: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: 'YYYY-MM (default: this month)' } },
+    responses: { 200: obj({
+      month: { type: 'string' }, from: dateTime, to: dateTime,
+      meters: arrayOf(obj({ key: { type: 'string' }, label: { type: 'string' }, unit: { type: 'string' }, total: { type: 'number' }, records: { type: 'integer' } })),
+    }) } },
   { method: 'POST', path: '/product-integrations/organizations/:organizationId/events', operationId: 'publishProductEvent', tag: 'Products',
     summary: 'Publish one of the product’s declared events for an organization: sent to the applications it has on that subscribe to it, and to its webhook endpoints that want it. 202 when published; 200 for an idempotencyKey already used.',
     scope: 'events.publish',

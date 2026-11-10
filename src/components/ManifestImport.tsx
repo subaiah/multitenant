@@ -26,6 +26,7 @@ interface ImportResult {
   dependencies?: { requires: number; integratesWith: number; notRegisteredYet: string[] } | { leftAlone: true };
   embeds?: { tags: string[] } | { leftAlone: true };
   events?: { emits: number; subscribes: number; notDeclaredYet: string[] } | { leftAlone: true };
+  limits?: { added: string[]; updated: string[]; retired: string[]; meters: number } | { leftAlone: true };
   menuItems: number;
   changes: Record<string, [unknown, unknown]>;
   dryRun?: true;
@@ -63,6 +64,7 @@ function Plan({ plan }: { plan: ImportResult }) {
       <ApiLine api={plan.api} />
       <DependenciesLine dependencies={plan.dependencies} />
       <EventsLine events={plan.events} />
+      <LimitsLine limits={plan.limits} />
       <EmbedsLine embeds={plan.embeds} />
     </div>
   );
@@ -132,6 +134,7 @@ export function ManifestImport({ onClose, onImported }: { onClose: () => void; o
         <ApiLine api={result.api} />
         <DependenciesLine dependencies={result.dependencies} />
         <EventsLine events={result.events} />
+        <LimitsLine limits={result.limits} />
         <EmbedsLine embeds={result.embeds} />
         <div className="space-y-1">
           <p className="text-sm text-slate-600 dark:text-slate-300">Client ID</p>
@@ -259,5 +262,17 @@ function EventsLine({ events }: { events?: ImportResult['events'] }) {
       <p>Publishes {events.emits} event type{events.emits === 1 ? '' : 's'}; subscribes to {events.subscribes}.</p>
       {events.notDeclaredYet.length > 0 && <p className="mt-1 text-amber-700 dark:text-amber-400">No registered application publishes these yet: <span className="font-mono text-xs break-all">{events.notDeclaredYet.join(', ')}</span></p>}
     </div>
+  );
+}
+
+/** Plan limits and usage meters */
+function LimitsLine({ limits }: { limits?: ImportResult['limits'] }) {
+  if (!limits || 'leftAlone' in limits) return null;
+  const { added, updated, retired, meters } = limits;
+  if (!added.length && !updated.length && !retired.length && !meters) return null;
+  return (
+    <p className="text-sm text-slate-600 dark:text-slate-300">
+      Plan limits: {added.length} added, {updated.length} updated{retired.length ? `, ${retired.length} no longer listed (kept)` : ''}. Set each plan's values in Plans and usage. Reports usage of {meters} feature{meters === 1 ? '' : 's'}.
+    </p>
   );
 }

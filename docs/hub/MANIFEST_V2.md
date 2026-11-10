@@ -16,7 +16,8 @@ Version 2 adds what an application needs to work **with other applications** in 
 | `requires`, `integratesWith` | Implemented: enforced when organizations turn applications on and off, never turned on automatically; plus bundles ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#dependencies-and-bundles)) |
 | `embeds` | Implemented, with the embeds list, branding and the application launcher ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#embedding-another-application)) |
 | `events` (emits, subscribes) | Implemented, with `events.publish` ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#events-between-applications)) |
-| `resources`, `limits`, `usage`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
+| `limits`, `usage` | Implemented: values per plan, sent with lifecycle events and told again when they change; usage reported with `usage.report` and totalled per month ([PRODUCT_INTEGRATION.md](../PRODUCT_INTEGRATION.md#plans-limits-and-usage)). Charging per application is next. |
+| `resources`, `health` | Not yet. A version 2 manifest with any of them is **refused** with a message naming the field, rather than having it silently dropped. |
 
 Also implemented:
 - A version 1 manifest with any version 2 field, supported or not yet, is refused (`kind: needs "manifestVersion": 2`), for the same reason.
@@ -102,9 +103,9 @@ Also implemented:
   },
 
   "limits": [
-    { "key": "hearth.history_days",    "label": "Message history (days)", "type": "integer", "unlimited": true },
-    { "key": "hearth.file_max_mb",     "label": "Largest file (MB)",      "type": "integer" },
-    { "key": "hearth.agents_enabled",  "label": "AI agents in chat",      "type": "boolean" }
+    { "key": "hearth.history_days",    "label": "Message history",   "type": "integer", "unlimited": true, "default": 90, "unit": "days" },
+    { "key": "hearth.file_max_mb",     "label": "Largest file",      "type": "integer", "default": 25, "unit": "MB" },
+    { "key": "hearth.agents_enabled",  "label": "AI agents in chat", "type": "boolean", "default": false }
   ],
 
   "usage": [],
@@ -169,8 +170,8 @@ Also implemented:
 | `events.emits` | No | Up to 50 types named `<productId>.<name>` (not also an audit or notification type), each with a `label`, optional `description` and optional JSON Schema `schemaUrl`. Needs `events.publish`. |
 | `events.subscribes` | No | Up to 50 event types from other applications, each with a `reason` (shown to administrators). Delivered to `provisioning.callbackUrl` only for organizations that have both applications on, once it has set them up. |
 | `resources` | No | Up to 50 record types the application owns: `type`, `label`, `urlTemplate` (relative path with `{id}`). Identifiers: `mt://<productId>/<type>/<id>`. |
-| `limits` | No | Up to 50. `key` named `<productId>.<name>`, `label`, `type` (`integer` or `boolean`), `unlimited` (whether a plan may set no limit). Values are set per plan by platform staff and sent in `organization.entitled` and `organization.entitlement_changed` (`data.limits`). |
-| `usage` | No | Up to 20 metered features: `key`, `label`, `unit`. Reported with `usage.report`; billed per plan. |
+| `limits` | No | Up to 50. `key` named `<productId>.<name>`, `label`, `type` (`integer` or `boolean`), `default` (for plans without a value; `null` is no limit and needs `unlimited`), integer only: `unlimited` (whether a plan may set no limit) and `unit`. Values are set per plan by platform staff and sent in `organization.entitled` and `organization.entitlement_changed` (`data.limits`). |
+| `usage` | No | Up to 20 metered features: `key` (named like limits, not the same as one), `label`, `unit`. Reported with `usage.report`. |
 | `health.url` | No | An `https://` address on the same host answering `200` with `{ "status": "ok", "version": "…" }`. Polled every minute; shown on the Integrations page. |
 
 ## New service scopes

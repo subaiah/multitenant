@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import { monthOf, usageTotals } from '../lib/product-usage.js';
 import { organizationEventFlows } from '../lib/product-events.js';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
@@ -131,8 +132,9 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     // What each can learn about the organization's people (lib/application-fields.ts)
     const access = await dataAccessOf(tenantApplications.map((t) => t.applicationId));
     const deps = await dependenciesOf(tenantApplications.map((t) => t.applicationId));
+    const plans = await planAndUsageOf(request.tenant.id, tenantApplications.map((t) => t.applicationId));
     return {
-      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId), ...deps.get(t.applicationId) } })),
+      tenantApplications: tenantApplications.map((t) => ({ ...t, application: { ...t.application, dataAccess: access.get(t.applicationId), ...deps.get(t.applicationId), ...plans.get(t.applicationId) } })),
       pagination: {
         page: paging.page,
         limit: paging.limit,
@@ -501,3 +503,27 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 };
+
+/** For administrators: each application's limits on the organization's plan, and its usage this month (G6) */
+async function planAndUsageOf(tenantId: string, applicationIds: string[]) {
+  const ids = [...new Set(applicationIds)];
+  const tenant = await controlDb.tenant.findUnique({ where: { id: tenantId }, select: { plan: true } });
+  const period = monthOf();
+  const [limits, meters, totals] = await Promise.all([
+    controlDb.productLimit.findMany({ where: { applicationId: { in: ids }, retiredAt: null }, include: { planValues: { where: { planCode: tenant?.plan ?? 'FREE' } } }, orderBy: { position: 'asc' } }),
+    controlDb.productUsageMeter.findMany({ where: { applicationId: { in: ids }, retiredAt: null }, orderBy: { position: 'asc' } }),
+    usageTotals({ tenantId }, period.from, period.to),
+  ]);
+  const val = (j: unknown) => { const x = (j as { v?: unknown } | null)?.v; return typeof x === 'number' || typeof x === 'boolean' ? x : null; };
+  const out = new Map<string, { limits: unknown[]; usage: { month: string; meters: unknown[] } }>();
+  for (const id of ids) {
+    out.set(id, {
+      limits: limits.filter((l) => l.applicationId === id).map((l) => ({ key: l.key, label: l.label, type: l.type, unit: l.unit, value: l.planValues[0] ? val(l.planValues[0].value) : val(l.defaultValue) })),
+      usage: {
+        month: period.month,
+        meters: meters.filter((m) => m.applicationId === id).map((m) => ({ key: m.key, label: m.label, unit: m.unit, total: totals.find((t) => t.applicationId === id && t.key === m.key)?.total ?? 0 })),
+      },
+    });
+  }
+  return out;
+}

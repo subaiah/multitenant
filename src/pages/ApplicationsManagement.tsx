@@ -10,6 +10,7 @@ import { invalidateApi } from '../lib/query';
 import ApplicationSignIn from '../components/ApplicationSignIn';
 import ApplicationLifecycle from '../components/ApplicationLifecycle';
 import ApplicationServiceCredentials from '../components/ApplicationServiceCredentials';
+import ApplicationPlans from '../components/ApplicationPlans';
 import BundlesManager from '../components/BundlesManager';
 
 interface Application {
@@ -344,6 +345,7 @@ export default function ApplicationsManagement() {
             {canManage && <ApplicationSignIn applicationId={selectedApp.id} applicationName={selectedApp.name} />}
             {canManage && <ApplicationLifecycle applicationId={selectedApp.id} applicationName={selectedApp.name} />}
             {canManage && <ApplicationServiceCredentials applicationId={selectedApp.id} applicationName={selectedApp.name} />}
+            {canManage && <ApplicationPlans applicationId={selectedApp.id} applicationName={selectedApp.name} />}
             </>
           ) : (
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12 text-center">
