@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import { organizationEventFlows } from '../lib/product-events.js';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { CATALOGUE_FIELDS, dataAccessOf } from '../lib/application-fields.js';
@@ -404,6 +405,12 @@ export const tenantApplicationRoutes: FastifyPluginAsync = async (fastify) => {
   // Applications calling each other (docs/adr/0001-app-to-app-calls.md):
   // allowed between applications the organization has on, unless blocked here
   // ---------------------------------------------------------------------------
+
+  // Events between applications (docs/hub/HUB_GAPS.md G4): who publishes what, and who receives it here
+  fastify.get('/events', {
+    config: { permission: 'applications:read' },
+    schema: { tags: ['tenant-applications'], summary: 'The events the organization’s applications publish, and which applications and webhook endpoints receive each' },
+  }, async (request) => organizationEventFlows(request.tenant.id));
 
   fastify.get('/connections', {
     config: { permission: 'applications:read' },

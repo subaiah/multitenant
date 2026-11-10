@@ -85,7 +85,7 @@ The review found more to it than the table below suggests, and it was built in:
 
 Notification and audit event types are declared in the manifest, so organization rules and the webhook UI can list them.
 
-### G4. Events flow only from the platform to applications (P2)
+### G4. Events flow only from the platform to applications (P2): **done**
 
 **Now.** `ProductEvent` delivers lifecycle and user events to a product. A product can't publish domain events (e.g. `crmforge.deal.won`) for other applications or for the organization's webhooks.
 
@@ -94,6 +94,14 @@ Notification and audit event types are declared in the manifest, so organization
 - `POST /api/v1/product-integrations/organizations/{id}/events` (scope `events.publish`).
 - The platform relays to subscribed applications whose organization has both applications on, reusing the existing signed, ordered, retried delivery (Standard Webhooks headers, per-organization ordering, backoff, Retry now).
 - Organization administrators can see which applications receive which events.
+
+**Done.**
+- Manifest `events.emits` (with `schemaUrl`) and `events.subscribes`.
+- `POST …/events` (`events.publish`, idempotent), relayed through the lifecycle outbox to subscribing applications the organization has on and set up.
+- The types are in the organization's webhook catalog.
+- **Events between applications** on Application Entitlements.
+
+See [Events between applications](../PRODUCT_INTEGRATION.md#events-between-applications).
 
 ### G5. No embedding contract (P2): **done**
 
@@ -151,7 +159,7 @@ See [Embedding another application](../PRODUCT_INTEGRATION.md#embedding-another-
 3. ~~**G2** kinds, dependencies, bundles~~ (done)
 4. ~~**G7** scoped permissions and org units~~ (done)
 5. ~~**G5** embedding contract~~ (done)
-6. **G4** application events
+6. ~~**G4** application events~~ (done)
 7. **G6** per-application billing and usage
 8. **G8**, **G9**
 

@@ -33,6 +33,7 @@ import { controlDb } from './prisma.js';
 import { dbForTenant } from './tenant-db.js';
 import { PLATFORM_CHAIN, auditCatalog, onAudit, onAuditInTransaction, recordAudit, type AuditContent } from './audit.js';
 import { decryptSecret, secretContext } from './secrets.js';
+import { productEventTypes } from './product-catalog.js';
 import { AppError } from '../middleware/error-handler.js';
 
 const BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 18_000_000, 36_000_000, 86_400_000];
@@ -47,12 +48,34 @@ export const TEST_EVENT = 'webhook.test';
 // Events, payloads, signatures
 // ---------------------------------------------------------------------------
 
-/** The events an endpoint can subscribe to: the organization's own audit entries */
+/** The events an endpoint can subscribe to: the organization's own audit entries, and events applications publish */
 export function webhookEvents(): { type: string; label: string; category: string }[] {
-  return Object.entries(auditCatalog())
-    .filter(([, d]) => d.scope === 'tenant')
-    .map(([type, d]) => ({ type, label: d.label, category: d.category }))
-    .sort((a, b) => a.type.localeCompare(b.type));
+  return [
+    ...Object.entries(auditCatalog())
+      .filter(([, d]) => d.scope === 'tenant')
+      .map(([type, d]) => ({ type, label: d.label, category: d.category })),
+    ...productEventTypes(),
+  ].sort((a, b) => a.type.localeCompare(b.type));
+}
+
+/**
+ * An event an application published (lib/product-events.ts), for the
+ * organization's endpoints that want it. Same delivery, signing and retries
+ * as audit events; the payload's data is the application's, with where it's
+ * from. Returns how many endpoints it was queued for.
+ */
+export async function queueApplicationWebhookEvent(
+  tenantId: string,
+  e: { eventId: string; type: string; occurredAt: string; application: { id: string; key: string; name: string }; subject: string | null; data: unknown },
+): Promise<number> {
+  const db = await dbForTenant(tenantId);
+  const endpoints = await db.webhookEndpoint.findMany({ where: { tenantId, enabled: true }, select: { id: true, events: true } });
+  const targets = endpoints.filter((x) => x.events.includes('*') || x.events.includes(e.type));
+  if (!targets.length) return 0;
+  const payload = { id: e.eventId, type: e.type, timestamp: e.occurredAt, tenantId, data: { application: e.application, subject: e.subject, event: e.data } };
+  await db.webhookDelivery.createMany({ data: targets.map((x) => ({ tenantId, endpointId: x.id, eventId: e.eventId, type: e.type, payload: payload as object })) });
+  scheduleWebhooks(tenantId);
+  return targets.length;
 }
 
 export const newSigningSecret = () => `whsec_${randomBytes(24).toString('base64')}`;

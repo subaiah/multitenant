@@ -320,6 +320,8 @@ model ApplicationRegistry {
   consumedScopes     ProductConsumedScope[]
   dependencies       ProductDependency[]
   embeds             ProductEmbed[]
+  eventSubscriptions ProductEventSubscription[]
+  publishedEvents    ProductPublishedEvent[]
   bundleEntries      BundleApplication[]
   callingConnections AppConnectionState[] @relation("ConnectionCaller")
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
@@ -1057,7 +1059,7 @@ model OidcLogoutDelivery {
 model ProductDeclaredType {
   id             String              @id @default(uuid())
   applicationId  String              @map("application_id")
-  /// notification or audit
+  /// notification, audit or event (an event it publishes: lib/product-events.ts)
   kind           String
   /// <productId>.<name>, unique across the platform
   type           String              @unique
@@ -1065,6 +1067,8 @@ model ProductDeclaredType {
   description    String?
   defaultInApp   Boolean             @default(true) @map("default_in_app")
   defaultEmail   Boolean             @default(false) @map("default_email")
+  /// For events: where the JSON Schema of data is published (informational)
+  schemaUrl      String?             @map("schema_url")
   /// Order in the manifest
   position       Int                 @default(0)
   retiredAt      DateTime?           @map("retired_at")
@@ -1172,6 +1176,41 @@ model ProductEmbed {
 
   @@index([applicationId])
   @@map("product_embeds")
+}
+
+/// An event type an application wants to receive from others (manifest v2 events.subscribes)
+model ProductEventSubscription {
+  id            String              @id @default(uuid())
+  applicationId String              @map("application_id")
+  type          String
+  reason        String
+  position      Int                 @default(0)
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, type])
+  @@index([type])
+  @@map("product_event_subscriptions")
+}
+
+/// An event an application published for an organization (lib/product-events.ts): for idempotency and what organizations see
+model ProductPublishedEvent {
+  /// evt_…, the id every copy carries (data.eventId)
+  id             String              @id
+  applicationId  String              @map("application_id")
+  tenantId       String              @map("tenant_id")
+  type           String
+  idempotencyKey String?             @map("idempotency_key")
+  /// How many applications and webhook endpoints it was queued for
+  applications   Int                 @default(0)
+  webhooks       Int                 @default(0)
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  application    ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, tenantId, idempotencyKey], map: "product_published_events_idempotency_key")
+  @@index([tenantId, type, createdAt])
+  @@map("product_published_events")
 }
 
 model Bundle {

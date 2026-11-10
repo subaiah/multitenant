@@ -4078,6 +4078,156 @@
           }
         }
       }
+    },
+    "/product-integrations/organizations/{organizationId}/events": {
+      "post": {
+        "operationId": "publishProductEvent",
+        "tags": [
+          "Products"
+        ],
+        "summary": "Publish one of the product’s declared events for an organization: sent to the applications it has on that subscribe to it, and to its webhook endpoints that want it. 202 when published; 200 for an idempotencyKey already used.",
+        "description": "For external products, with a service access token that has the `events.publish` scope.",
+        "security": [
+          {
+            "productToken": [
+              "events.publish"
+            ]
+          }
+        ],
+        "x-scope": "events.publish",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "One of the product’s declared events (manifest events.emits)"
+                  },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The event’s content, at most 64 KB as JSON (described by the type’s schemaUrl)"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "description": "The person it’s about, if any: <organization id>.<user id>"
+                  },
+                  "occurredAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "When it happened (default: now)"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Publishing again with the same key for the organization does nothing"
+                  }
+                },
+                "required": [
+                  "type",
+                  "data"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPublished"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductPublished"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is not valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or an invalid, expired or revoked one (code INVALID_TOKEN, TOKEN_EXPIRED, CREDENTIAL_REVOKED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the scope (INSUFFICIENT_SCOPE), the product is not active (APPLICATION_INACTIVE), or the organization doesn’t have it turned on now (NOT_ENTITLED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (another product's things are not found either)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A stale operation (STALE_OPERATION), a result that no longer applies (INVALID_TRANSITION), or an organization still being created (ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (RATE_LIMITED; see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {
@@ -4146,6 +4296,7 @@
               "lifecycle.report": "Report the result of setting an organization up",
               "notifications.send": "Send its declared notifications to people in those organizations",
               "audit.write": "Write its declared events to those organizations’ audit logs",
+              "events.publish": "Publish its declared events to other applications and webhooks in those organizations",
               "launcher.read": "See which of those organizations’ applications each person can open (the application launcher)"
             }
           }
@@ -5741,6 +5892,33 @@
           "applications"
         ],
         "description": "What <mt-app-launcher> shows: the organization’s applications this person can open, as the portal’s menu shows them"
+      },
+      "ProductPublished": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "evt_…: every copy carries it as data.eventId (webhooks: id); deduplicate on it"
+          },
+          "applications": {
+            "type": "integer",
+            "description": "Applications it was queued for"
+          },
+          "webhooks": {
+            "type": "integer",
+            "description": "The organization’s webhook endpoints it was queued for"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "description": "The idempotencyKey was used before: this is that result, nothing new was sent"
+          }
+        },
+        "required": [
+          "id",
+          "applications",
+          "webhooks",
+          "duplicate"
+        ]
       },
       "ProductGroup": {
         "type": "object",
