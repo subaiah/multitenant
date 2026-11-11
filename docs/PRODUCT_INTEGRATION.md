@@ -915,6 +915,12 @@ Platform staff see every external product on one page (**Customers → Integrati
 
 Products that need attention come first: a failed setup, events given up or waiting over an hour, or logout tokens given up.
 
+**Integrating a new application**, at the top of the page, is a step-by-step guide with two sides:
+- **On the platform**: what platform staff do. Choosing an application shows which of these steps it has done.
+- **In the application**: what the application's team builds.
+
+Hearth's settings are the worked example on both sides. The guide starts open while no application is integrated, and remembers whether it was left open.
+
 ## Checklist before going live
 
 - [ ] The manifest is in the application's repository, imported, and the client secret is stored on the application's server.

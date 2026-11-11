@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Clock, LogOut, Plug } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { Badge, DataView, EmptyState, PageHeader, StatCard, formatDateTime, formatRelative } from '../components/ui';
+import IntegrationGuide from '../components/IntegrationGuide';
 
 interface Integration {
   id: string;
@@ -35,7 +36,12 @@ export default function Integrations() {
       <DataView {...info}>
         {({ applications }) => {
           if (!applications.length) {
-            return <EmptyState icon={Plug} title="No external products yet" message="Import a product's manifest on the Applications page." />;
+            return (
+              <>
+                <IntegrationGuide applications={applications} />
+                <EmptyState icon={Plug} title="No external products yet" message="Import a product's manifest on the Applications page." />
+              </>
+            );
           }
           const needs = applications.filter((a) => a.attention.length);
           const waiting = applications.reduce((n, a) => n + a.events.pending, 0);
@@ -48,6 +54,7 @@ export default function Integrations() {
                 <StatCard label="Events waiting" value={waiting} icon={Clock} />
                 <StatCard label="Logouts waiting" value={logouts} icon={LogOut} />
               </div>
+              <IntegrationGuide applications={applications} />
               <ul className="space-y-4">
                 {[...needs, ...applications.filter((a) => !a.attention.length)].map((a) => <IntegrationCard key={a.id} a={a} />)}
               </ul>
