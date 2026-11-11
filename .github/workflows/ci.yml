@@ -236,7 +236,16 @@ jobs:
           node-version: 24
       - name: Browser
         working-directory: e2e
-        run: npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+        # The system libraries come from Ubuntu's mirrors, which the runner
+        # sometimes can't reach (DNS), and apt then retries for ten minutes
+        # or more. Give it four, then go on without them: the runner image
+        # already has what Chromium needs.
+        run: |
+          npm ci --no-audit --no-fund
+          if ! timeout 240 npx playwright install --with-deps chromium; then
+            echo "::warning::Couldn't install the browser's system libraries; using the runner's own"
+            npx playwright install chromium
+          fi
       - name: Browser journey
         working-directory: e2e
         env:
