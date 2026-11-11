@@ -343,6 +343,16 @@ Verified domains are checked again every `DOMAIN_RECHECK_HOURS` (default 24). A 
 
 Set `CUSTOM_DOMAINS=false` to turn custom domains off. Every domain then stops working, but the stored ones are kept.
 
+## Other applications on this server
+
+Applications integrated with the platform can run on the same server, each on its own hostname. Hearth does this. The platform's Caddy stays the only thing on ports 80 and 443, and serves their hostnames too:
+
+- The compose file creates a Docker network, `apps`. An application's containers join it as an external network.
+- Caddy imports every `deploy/sites/*.caddy`. An application's deploy script writes its site there and reloads Caddy (`docker exec <web container> caddy reload --config /etc/caddy/Caddyfile`).
+- Caddy gets each hostname's certificate on its own. Point the name's DNS at this server first.
+
+Site files aren't committed; [deploy/sites/README.md](../deploy/sites/README.md) says what they contain. To remove an application, delete its file and reload Caddy.
+
 ## Running more than one API server
 
 The server is safe to run several times behind a load balancer:
