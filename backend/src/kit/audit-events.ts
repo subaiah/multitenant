@@ -41,12 +41,14 @@ export const KIT_AUDIT_EVENTS = {
   'account.mfa_enabled': t('Two-factor turned on', 'account'),
   'account.mfa_disabled': t('Two-factor turned off', 'account'),
   'account.recovery_codes_regenerated': t('New recovery codes made', 'account'),
+  'account.mfa_replaced': t('Two-factor moved to a new authenticator', 'account'),
   'platform.account.mfa_enabled': p('Platform user turned on two-factor', 'account'),
   'platform.account.password_changed': p('Platform user changed their password', 'account'),
   'platform.account.email_change_requested': p('Platform user asked to change their email', 'account'),
   'platform.account.email_changed': p('Platform user changed their email', 'account'),
   'platform.account.mfa_disabled': p('Platform user turned off two-factor', 'account'),
   'platform.account.recovery_codes_regenerated': p('Platform user made new recovery codes', 'account'),
+  'platform.account.mfa_replaced': p('Platform user moved two-factor to a new authenticator', 'account'),
 
   // Users
   'user.invited': t('User invited', 'access'),

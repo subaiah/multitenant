@@ -45,7 +45,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     const owner = ownerOfRequest(request);
     const state = await getMfaState(owner, request.user.userId);
     if (!state) throw new AppError('Account not found', 404);
-    if (state.enabled) throw new AppError('Two-factor is already set up. Turn it off first to use a new device.', 409);
+    if (state.enabled) throw new AppError('Two-factor is already set up. Use a new authenticator instead.', 409);
     return enrollment(claimsOfRequest(request), state.email);
   });
 
@@ -55,7 +55,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     const body = z.object({ enrollToken: z.string(), code: codeSchema }).parse(request.body);
     const claims = await readMfaToken(body.enrollToken);
     const owner = ownerOfRequest(request);
-    if (claims.userId !== request.user.userId || claims.tenantId !== (owner === 'platform' ? undefined : owner.tenantId) || !claims.pendingSecret) {
+    if (claims.step !== 'enroll' || claims.userId !== request.user.userId || claims.tenantId !== (owner === 'platform' ? undefined : owner.tenantId) || !claims.pendingSecret) {
       throw new AppError('This setup has expired. Please start again.', 400, true, 'MFA_EXPIRED');
     }
     const state = await getMfaState(owner, request.user.userId);
@@ -90,6 +90,38 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'turned off two-factor', target: 'system', type: 'AUTH' });
     await audit(request, owner === 'platform' ? 'platform.account.mfa_disabled' : 'account.mfa_disabled');
     return { enabled: false };
+  });
+
+  /**
+   * A new authenticator (a new phone, a lost app): a current code or a
+   * recovery code first, then a code from the new app. The old one keeps
+   * working until the new one is confirmed, so stopping half-way changes
+   * nothing. Also for people who must use two-factor and can't turn it off.
+   */
+  fastify.post('/replace/start', {
+    config: { permission: AUTHENTICATED, rateLimit: signedInCodeRateLimit('replace') },
+  }, async (request) => {
+    const owner = await checkCode(request);
+    const state = await getMfaState(owner, request.user.userId);
+    return enrollment(claimsOfRequest(request), state!.email, 'replace');
+  });
+
+  fastify.post('/replace/confirm', {
+    config: { permission: AUTHENTICATED, rateLimit: mfaRateLimit('settings-replace') },
+  }, async (request) => {
+    const body = z.object({ enrollToken: z.string(), code: codeSchema }).parse(request.body);
+    const claims = await readMfaToken(body.enrollToken);
+    const owner = ownerOfRequest(request);
+    if (claims.step !== 'replace' || claims.userId !== request.user.userId || claims.tenantId !== (owner === 'platform' ? undefined : owner.tenantId) || !claims.pendingSecret) {
+      throw new AppError('This change has expired. Please start again.', 400, true, 'MFA_EXPIRED');
+    }
+    const state = await getMfaState(owner, request.user.userId);
+    if (!state?.enabled) throw new AppError('Two-factor is not set up', 409);
+    // The new secret, and new recovery codes (the old ones stop working)
+    const recoveryCodes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret, body.code);
+    await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'moved two-factor to a new authenticator', target: 'system', type: 'AUTH' });
+    await audit(request, owner === 'platform' ? 'platform.account.mfa_replaced' : 'account.mfa_replaced');
+    return { enabled: true, recoveryCodes };
   });
 
   fastify.post('/recovery-codes', {

@@ -198,7 +198,8 @@ export interface MfaClaims {
   tenantId?: string;
   tenantSlug?: string;
   /** verify: has an authenticator; enroll: must set one up first */
-  step: 'verify' | 'enroll';
+  /** verify, enroll (first authenticator), or replace (a new one while signed in) */
+  step: 'verify' | 'enroll' | 'replace';
   /** During enrollment: the new secret, until a code from it is confirmed */
   pendingSecret?: string;
 }

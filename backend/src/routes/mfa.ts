@@ -55,13 +55,13 @@ async function issuerFor(owner: SessionOwner): Promise<string> {
 }
 
 /** A new secret for `claims`' user, and a token that carries it until a code from it is confirmed. */
-export async function enrollment(claims: Omit<MfaClaims, 'step' | 'pendingSecret'>, email: string) {
+export async function enrollment(claims: Omit<MfaClaims, 'step' | 'pendingSecret'>, email: string, step: 'enroll' | 'replace' = 'enroll') {
   const secret = newTotpSecret();
   const issuer = await issuerFor(ownerOf(claims));
   return {
     secret,
     otpauthUrl: otpauthUrl(secret, email, issuer),
-    enrollToken: await signMfaToken({ ...claims, step: 'enroll', pendingSecret: secret }, 15),
+    enrollToken: await signMfaToken({ ...claims, step, pendingSecret: secret }, 15),
   };
 }
 
