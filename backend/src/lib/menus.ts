@@ -55,7 +55,9 @@ export async function syncMenus(): Promise<number> {
       }
       return added;
     },
-    { timeout: 60_000 },
+    // maxWait: the release runs while the server is busy (images just built); the default 2 seconds
+    // to get a connection failed a deploy ("Unable to start a transaction in the given time")
+    { timeout: 60_000, maxWait: 30_000 },
   );
 }
 
