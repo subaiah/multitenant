@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
@@ -40,6 +41,15 @@ const otpVerifySchema = z.object({
   tenantSlug: z.string(),
   code: z.string().length(6),
 });
+
+/**
+ * Emailed sign-in codes are kept as a keyed hash, bound to the organization
+ * and address they were sent to. Six digits are too few for a plain hash (a
+ * copy of the table could be tried against every code in a moment), so the
+ * key is derived from JWT_SECRET, which isn't in the database.
+ */
+const otpKey = crypto.createHmac('sha256', config.jwtSecret).update('emailed sign-in codes').digest();
+const hashOtp = (tenantId: string, email: string, code: string) => crypto.createHmac('sha256', otpKey).update(`${tenantId}:${email}:${code}`).digest('hex');
 
 /** What a sign-in step returns when two-factor comes next (no session yet). */
 const mfaNext = (r: NonNullable<SignInResult>) => ({
@@ -213,7 +223,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         tenantId: tenant.id,
         email,
-        code,
+        code: hashOtp(tenant.id, email, code),
         expiresAt,
       },
     });
@@ -273,7 +283,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const otpRecord = await db.otpCode.findFirst({
-      where: { tenantId: tenant.id, email, code, verified: false },
+      where: { tenantId: tenant.id, email, code: hashOtp(tenant.id, email, code), verified: false },
     });
     if (!otpRecord) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });
