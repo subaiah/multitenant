@@ -17,6 +17,8 @@
  * to look in.
  */
 import * as oidc from 'openid-client';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import type { FastifyRequest } from 'fastify';
 import { config } from '../config/env.js';
 import { controlDb } from './prisma.js';
@@ -26,6 +28,7 @@ import { decryptSecret, secretContext } from './secrets.js';
 import { slugToken, tenantForSignIn, tokenSlug } from './auth-planes.js';
 import type { TenantDb } from './tenant-db.js';
 import { assertWithinLimit } from './billing/plans.js';
+import { isPrivateAddress } from './webhooks.js';
 
 export const SSO_CALLBACK_PATH = '/bff/auth/sso/callback';
 export const ssoRedirectUri = () => `${config.bffUrl.replace(/\/$/, '')}${SSO_CALLBACK_PATH}`;
@@ -80,6 +83,35 @@ export function issuerOf(p: Pick<Provider, 'provider' | 'domain' | 'idpTenantId'
 
 const insecureOk = () => config.nodeEnv !== 'production';
 
+/**
+ * An organization's administrator types in where its identity provider is,
+ * and this server then fetches from there (the discovery document, keys,
+ * tokens). In production that must be a public https address, so the form
+ * can't be used to make the server call things on its own network (cloud
+ * metadata, other containers). SSO_ALLOW_PRIVATE=true lifts it for an
+ * installation whose identity provider is on a private network.
+ *
+ * The name is resolved here, before the request; a provider whose DNS answer
+ * changes between this check and the request is not caught (webhooks check
+ * at connection time, lib/webhooks.ts; openid-client makes its own requests).
+ */
+export async function assertPublicProviderUrl(raw: string | null | undefined, enforce = config.nodeEnv === 'production' && !config.ssoAllowPrivate): Promise<void> {
+  if (!raw || !enforce) return;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new SsoError('The identity provider address is not a valid URL', 'SSO_MISCONFIGURED');
+  }
+  if (url.protocol !== 'https:') throw new SsoError('The identity provider address must use https', 'SSO_MISCONFIGURED');
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true }).catch(() => [])).map((a) => a.address);
+  if (!addresses.length) throw new SsoError(`Could not reach the identity provider (${host} does not resolve)`, 'SSO_UNAVAILABLE');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || addresses.some(isPrivateAddress)) {
+    throw new SsoError('The identity provider must be at a public address', 'SSO_MISCONFIGURED');
+  }
+}
+
 // Discovery documents, kept for an hour per provider configuration
 const discovered = new Map<string, { at: number; conf: oidc.Configuration }>();
 
@@ -94,11 +126,17 @@ async function configurationFor(p: Provider): Promise<oidc.Configuration> {
   const auth = secret ? oidc.ClientSecretPost(secret) : oidc.None();
   let conf: oidc.Configuration;
   if (issuer) {
+    await assertPublicProviderUrl(issuer);
     conf = await oidc.discovery(new URL(issuer), p.clientId, secret, auth, insecureOk() ? { execute: [oidc.allowInsecureRequests] } : undefined)
       .catch((err) => {
         throw new SsoError(`Could not reach the identity provider (${(err as Error).message})`, 'SSO_UNAVAILABLE');
       });
+    // The discovery document says where tokens and keys come from: those too
+    const found = conf.serverMetadata();
+    for (const endpoint of [found.token_endpoint, found.jwks_uri, found.userinfo_endpoint]) await assertPublicProviderUrl(endpoint);
   } else {
+    await assertPublicProviderUrl(p.tokenUrl);
+    await assertPublicProviderUrl(p.userInfoUrl);
     conf = new oidc.Configuration(
       {
         issuer: 'https://github.com',

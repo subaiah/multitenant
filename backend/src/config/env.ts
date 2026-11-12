@@ -174,6 +174,10 @@ const envSchema = z.object({
   // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
   // allows private ones and plain http (development and tests only)
   WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+  // Identity providers for single sign-on (lib/sso.ts) must be at public
+  // addresses in production; true allows private ones, for an installation
+  // whose identity provider is on its own network
+  SSO_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
   // Hosts an external product's lifecycle callback may use in production
   // without https or on an inside address (a product on the same network,
   // e.g. "appforge"), comma-separated (lib/product-lifecycle.ts)
@@ -385,6 +389,7 @@ export const config = {
     graceDays: env.BILLING_GRACE_DAYS,
   },
   webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
+  ssoAllowPrivate: env.SSO_ALLOW_PRIVATE === 'true',
   productCallbackAllowedHosts: env.PRODUCT_CALLBACK_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,

@@ -48,6 +48,7 @@ x-api-env: &api-env
   CLOSE_GRACE_DAYS: ${CLOSE_GRACE_DAYS:-30}
   CUSTOM_DOMAINS: ${CUSTOM_DOMAINS:-true}
   CUSTOM_DOMAIN_TARGET: ${CUSTOM_DOMAIN_TARGET:-}
+  SSO_ALLOW_PRIVATE: ${SSO_ALLOW_PRIVATE:-false}
   API_DOCS: ${API_DOCS:-false}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   # External products on the same network (docs/PRODUCT_INTEGRATION.md): hosts their lifecycle callbacks may use without https
