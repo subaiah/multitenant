@@ -3,15 +3,33 @@
  * - "single sign-on only" also turns off emailed codes;
  * - an email address is the same person whatever capitals it's typed with;
  * - passwords are scrypt hashes, and older hashes are replaced at sign-in;
- * - refresh tokens are stored as hashes;
- * - in production, identity providers must be at public addresses.
+ * - refresh tokens and emailed codes are stored as hashes;
+ * - in production, identity providers must be at public addresses;
+ * - every audit chain can be checked in one go (the scheduled check).
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { PASSWORD, api, loginSession, seedTenant, startServer, stopServerAndCleanUp, type TenantSeed } from './helpers.js';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PASSWORD, api, db, loginSession, seedTenant, startServer, stopServerAndCleanUp, type TenantSeed } from './helpers.js';
 import { checkSignInPassword, hashPassword, passwordNeedsRehash, verifyPassword } from '../src/utils/auth.js';
 import { SsoError, assertPublicProviderUrl } from '../src/lib/sso.js';
+import { verifyAllChains } from '../src/lib/audit.js';
+
+// Emails the server sends are appended to this file
+const outbox = join(mkdtempSync(join(tmpdir(), 'mail-')), 'outbox.jsonl');
+process.env.EMAIL_TRANSPORT = 'file';
+process.env.MAIL_OUTBOX_FILE = outbox;
+
+/** The sign-in code in the last email sent to an address */
+function emailedCode(to: string): string {
+  const mails = existsSync(outbox) ? readFileSync(outbox, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { to: string; text: string }) : [];
+  const m = mails.filter((mail) => mail.to === to).at(-1)?.text.match(/sign-in code for .* is (\d{6})\./);
+  assert.ok(m, `no sign-in code emailed to ${to}`);
+  return m[1];
+}
 
 let A: TenantSeed;
 
@@ -37,7 +55,11 @@ test('single sign-on only refuses emailed codes as well as passwords', async () 
   // A code asked for while codes were still allowed
   const asked = await api('POST', '/bff/auth/otp/request', { body });
   assert.equal(asked.status, 200, JSON.stringify(asked.json));
-  const { code } = await A.db.otpCode.findFirstOrThrow({ where: { tenantId: A.tenantId, email: A.userEmail } });
+  const code = emailedCode(A.userEmail);
+  // Kept as a keyed hash, not the code
+  const stored = await A.db.otpCode.findFirstOrThrow({ where: { tenantId: A.tenantId, email: A.userEmail } });
+  assert.match(stored.code, /^[0-9a-f]{64}$/);
+  assert.equal((await api('POST', '/bff/auth/otp/verify', { body: { ...body, code: code === '000000' ? '000001' : '000000' } })).status, 401, 'a wrong code');
 
   await A.db.authConfig.update({ where: { tenantId: A.tenantId }, data: { ssoOnly: true } });
   try {
@@ -154,4 +176,22 @@ test('in production, identity providers must be at public https addresses', asyn
   // Nothing to check, or not enforced (outside production, or SSO_ALLOW_PRIVATE=true)
   await assertPublicProviderUrl(null, true);
   await assertPublicProviderUrl('http://127.0.0.1:9/', false);
+});
+
+test('checking every audit chain finds the one that was cut short', async () => {
+  const { controlDb } = await db();
+  // Other test files' tenants share the database: only this tenant's chain is looked at
+  const mine = async () => (await verifyAllChains({ recheckAfterMs: 0 })).find((r) => r.chain === A.tenantId);
+  const head = await controlDb.auditHead.findUniqueOrThrow({ where: { chain: A.tenantId } });
+  assert.equal(await mine(), undefined, 'the chain verifies as it is');
+
+  // The recorded head says there were more entries than the log holds
+  await controlDb.auditHead.update({ where: { chain: A.tenantId }, data: { seq: head.seq + 5 } });
+  try {
+    const report = await mine();
+    assert.ok(report && !report.ok, 'reported');
+    assert.match(report.problems[0].problem, /missing from the end/);
+  } finally {
+    await controlDb.auditHead.update({ where: { chain: A.tenantId }, data: { seq: head.seq, hash: head.hash } });
+  }
 });

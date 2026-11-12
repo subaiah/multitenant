@@ -733,6 +733,60 @@ export function stopAuditArchiving() {
   if (timer) clearInterval(timer);
 }
 
+// ---------------------------------------------------------------------------
+// Checking on a schedule
+// ---------------------------------------------------------------------------
+
+/**
+ * Check every chain (the platform's and each ready tenant's) and return the
+ * ones that don't verify. Live entries and the recorded head by default;
+ * `archives` reads the archive files too (the CLI does).
+ *
+ * An entry written, or a batch archived, while a chain is being read can
+ * look like a gap, so a chain that fails is read once more before it counts.
+ */
+export async function verifyAllChains({ archives = false, recheckAfterMs = 5000 } = {}): Promise<VerifyReport[]> {
+  const tenants = await controlDb.tenant.findMany({ where: { provisioningStatus: 'READY' }, select: { id: true } });
+  const broken: VerifyReport[] = [];
+  for (const chain of [PLATFORM_CHAIN, ...tenants.map((t) => t.id)]) {
+    try {
+      let report = await verifyChain(chain, { archives });
+      if (!report.ok) {
+        await new Promise((r) => setTimeout(r, recheckAfterMs));
+        report = await verifyChain(chain, { archives });
+      }
+      if (!report.ok) broken.push(report);
+    } catch (err) {
+      // Unreachable or deleted meanwhile: not evidence of tampering
+      warn(`The audit log of ${chain} could not be checked`, err);
+    }
+  }
+  return broken;
+}
+
+let verifyTimer: NodeJS.Timeout | undefined;
+/** Every AUDIT_VERIFY_INTERVAL_MS: a chain that doesn't verify is logged as an error and reported (error tracking). */
+export function startAuditVerification(log: (msg: string, err?: unknown) => void) {
+  if (!config.auditVerifyIntervalMs) return;
+  const run = async () => {
+    try {
+      for (const r of await verifyAllChains()) {
+        const what = r.problems.slice(0, 3).map((p) => (p.seq === undefined ? p.problem : `entry ${p.seq}: ${p.problem}`)).join('; ');
+        const message = `AUDIT LOG DOES NOT VERIFY: ${r.chain === PLATFORM_CHAIN ? 'the platform log' : `tenant ${r.chain}`} (${what})`;
+        log(message, new Error(message));
+      }
+    } catch (err) {
+      log('Checking the audit logs failed', err);
+    }
+  };
+  verifyTimer = setInterval(() => void run(), config.auditVerifyIntervalMs);
+  verifyTimer.unref();
+}
+export function stopAuditVerification() {
+  if (verifyTimer) clearInterval(verifyTimer);
+  verifyTimer = undefined;
+}
+
 /** Stream an archive file (for download). */
 export function archiveStream(file: string) {
   const root = resolve(config.auditArchiveDir);

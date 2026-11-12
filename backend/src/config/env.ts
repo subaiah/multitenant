@@ -102,6 +102,8 @@ const envSchema = z.object({
   AUDIT_ARCHIVE_DIR: z.string().default('./audit-archive'),
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
+  // How often every audit chain is checked (ms); 0 = only with npm run audit:verify
+  AUDIT_VERIFY_INTERVAL_MS: z.string().default('86400000').transform(Number),
   // Organizations' data exports (lib/data-export.ts): where the files go
   // (shared storage when running several API servers), and for how many days
   // each can be downloaded
@@ -360,6 +362,7 @@ export const config = {
   exportDir: env.EXPORT_DIR,
   exportRetentionDays: env.EXPORT_RETENTION_DAYS,
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
+  auditVerifyIntervalMs: env.AUDIT_VERIFY_INTERVAL_MS,
   notificationPollMs: env.NOTIFICATION_POLL_MS,
   supportMaxHours: env.SUPPORT_MAX_HOURS,
   selfSignup: env.SELF_SIGNUP === 'true',

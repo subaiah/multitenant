@@ -12,7 +12,7 @@ import { config } from '../config/env.js';
 import { resumeProvisioning } from './provisioning.js';
 import { startUsageRefresh, stopUsageRefresh } from './tenant-usage.js';
 import { startTenantLifecycle, stopTenantLifecycle } from './tenant-lifecycle.js';
-import { startAuditArchiving, stopAuditArchiving } from './audit.js';
+import { startAuditArchiving, startAuditVerification, stopAuditArchiving, stopAuditVerification } from './audit.js';
 import { notificationsSettled, startNotifications, stopNotifications } from './notifications.js';
 import { startRateLimitCleanup, stopRateLimitCleanup } from './rate-limit-store.js';
 import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
@@ -79,6 +79,7 @@ export async function startJobs(log: JobLogger) {
   await resumeProvisioning().catch((err) => failed('Resuming provisioning failed', err));
   startUsageRefresh((msg) => log.warn(msg), resumeProvisioning);
   startAuditArchiving(failed);
+  startAuditVerification(failed);
   startNotifications(failed);
   startRateLimitCleanup((err) => log.warn(`Removing expired rate-limit counters failed: ${(err as Error)?.message ?? err}`));
   startTenantLifecycle(failed);
@@ -96,6 +97,7 @@ export async function startJobs(log: JobLogger) {
 export async function stopJobs() {
   stopUsageRefresh();
   stopAuditArchiving();
+  stopAuditVerification();
   stopNotifications();
   stopRateLimitCleanup();
   stopTenantLifecycle();
