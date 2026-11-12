@@ -11,7 +11,7 @@ import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/
 import { config } from '../config/env.js';
 import { sendMail } from '../lib/mailer.js';
 import { otpEmail } from '../lib/email-templates.js';
-import { verifyPassword } from '../utils/auth.js';
+import { checkSignInPassword, hashPassword, passwordNeedsRehash } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
 import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
@@ -86,13 +86,18 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // tenant users through their tenant's slug, in its database
     if (isPlatformSlug(tenantSlug)) {
       const user = await controlDb.platformUser.findUnique({ where: { email } });
-      if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+      if (!(await checkSignInPassword(password, user?.passwordHash)) || !user?.passwordHash) {
         await recordSignInFailure(request, 'platform', { email, userId: user?.id, method: 'password', reason: user ? 'wrong password' : 'no such account' });
         throw new AppError('Invalid credentials', 401);
       }
       if (user.status !== 'ACTIVE') {
         await recordSignInFailure(request, 'platform', { email, userId: user.id, method: 'password', reason: 'account not active' });
         throw new AppError('User account is not active', 403);
+      }
+      // A hash from before the current cost: replace it now that the password is known to be right
+      if (passwordNeedsRehash(user.passwordHash)) {
+        await controlDb.platformUser.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } })
+          .catch((err) => request.log.warn({ err }, 'Password hash not upgraded'));
       }
       const next = await completeSignIn(fastify, request, reply, 'platform', user);
       if (next) return mfaNext(next);
@@ -111,7 +116,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const refuse = (reason: string) => recordSignInFailure(request, owner, { email, userId: user?.id, method: 'password', reason });
 
     // Password is required. Verify it before revealing anything else about the account.
-    if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+    if (!(await checkSignInPassword(password, user?.passwordHash)) || !user?.passwordHash) {
       await refuse(user ? 'wrong password' : 'no such account');
       throw new AppError('Invalid credentials', 401);
     }
@@ -123,6 +128,11 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     if (user.status !== 'ACTIVE') {
       await refuse('account not active');
       throw new AppError('User account is not active', 403);
+    }
+
+    if (passwordNeedsRehash(user.passwordHash)) {
+      await db.user.updateMany({ where: { id: user.id, tenantId: tenant.id }, data: { passwordHash: await hashPassword(password) } })
+        .catch((err) => request.log.warn({ err }, 'Password hash not upgraded'));
     }
 
     const next = await completeSignIn(fastify, request, reply, owner, user);
