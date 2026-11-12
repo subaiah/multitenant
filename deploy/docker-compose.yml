@@ -196,9 +196,20 @@ services:
     volumes:
       - caddy-data:/data
       - caddy-config:/config
+      # Other applications' sites on this server (deploy/sites/README.md)
+      - ./sites:/etc/caddy/sites:ro
+    networks:
+      default: {}
+      apps: {}
     depends_on:
       api:
         condition: service_healthy
+
+networks:
+  # Shared with other applications on this server, so the front door can
+  # reach them (their compose files use it as an external network)
+  apps:
+    name: apps
 
 volumes:
   pgdata:

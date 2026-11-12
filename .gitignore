@@ -7,3 +7,6 @@ build/
 # Deployment settings and local backups (deploy/)
 deploy/.env
 deploy/backups/
+
+# Other applications on this server write their sites here (deploy/sites/README.md)
+deploy/sites/*.caddy

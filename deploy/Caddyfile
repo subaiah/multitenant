@@ -74,6 +74,11 @@
 	import app
 }
 
+# Other applications on this server, each on its own hostname (e.g. Hearth):
+# their deploy scripts put a site file in deploy/sites/ and reload Caddy.
+# Their containers join the Docker network `apps`, where Caddy reaches them.
+import /etc/caddy/sites/*.caddy
+
 # Custom domains: any other name over HTTPS, with a certificate on demand
 # (only once port 443 reaches this container; unused otherwise).
 https:// {
