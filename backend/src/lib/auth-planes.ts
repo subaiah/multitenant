@@ -52,7 +52,14 @@ export interface SessionMeta {
   ipAddress?: string;
 }
 
-/** Store a new refresh token and return its value (for the cookie). */
+/**
+ * Refresh tokens are kept as SHA-256 hashes, like API keys and emailed
+ * tokens: the database (or a backup of it) holds nothing that can be put in
+ * a cookie. They are 48 random bytes, so a plain hash is enough.
+ */
+const hashRefreshToken = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
+
+/** Store a new refresh token (its hash) and return its value (for the cookie). */
 export async function issueRefreshToken(
   owner: SessionOwner,
   userId: string,
@@ -64,7 +71,7 @@ export async function issueRefreshToken(
 ): Promise<string> {
   const token = slugToken(owner === 'platform' ? PLATFORM_SLUG : owner.tenantSlug);
   const data = {
-    userId, token, familyId, expiresAt, userAgent: meta.userAgent, ipAddress: meta.ipAddress,
+    userId, token: hashRefreshToken(token), familyId, expiresAt, userAgent: meta.userAgent, ipAddress: meta.ipAddress,
     sessionStartedAt, lastSeenAt: new Date(),
   };
   if (owner === 'platform') {
@@ -95,7 +102,10 @@ export async function findRefreshToken(value: string): Promise<StoredRefreshToke
   const userSelect = { id: true, userType: true, status: true } as const;
 
   if (isPlatformSlug(slug)) {
-    const t = await controlDb.platformRefreshToken.findUnique({ where: { token: value } });
+    const t =
+      (await controlDb.platformRefreshToken.findUnique({ where: { token: hashRefreshToken(value) } })) ??
+      // Sessions started before tokens were hashed: they end on their own within REFRESH_TOKEN_EXPIRY
+      (await controlDb.platformRefreshToken.findUnique({ where: { token: value } }));
     if (!t) return null;
     const user = await controlDb.platformUser.findUnique({ where: { id: t.userId }, select: userSelect });
     return { ...pick(t), owner: 'platform', user };
@@ -104,7 +114,9 @@ export async function findRefreshToken(value: string): Promise<StoredRefreshToke
   const tenant = await controlDb.tenant.findUnique({ where: { slug }, select: { id: true, slug: true, status: true, provisioningStatus: true } });
   if (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY') return null;
   const db = await dbForTenant(tenant.id);
-  const t = await db.refreshToken.findFirst({ where: { token: value, tenantId: tenant.id } });
+  const t =
+    (await db.refreshToken.findFirst({ where: { token: hashRefreshToken(value), tenantId: tenant.id } })) ??
+    (await db.refreshToken.findFirst({ where: { token: value, tenantId: tenant.id } }));
   if (!t) return null;
   const user = await db.user.findFirst({ where: { id: t.userId, tenantId: tenant.id }, select: userSelect });
   return { ...pick(t), owner: { tenantId: tenant.id, tenantSlug: tenant.slug }, user };
