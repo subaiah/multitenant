@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 
 const updateApiConfigSchema = z.object({
   bffEnabled: z.boolean().optional(),
@@ -66,9 +66,13 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const before = await request.db.apiConfig.findUnique({ where: { tenantId: request.tenant.id } });
-    const config = await request.db.apiConfig.update({
-      where: { tenantId: request.tenant.id },
-      data,
+    const config = await withAudit(request, async (tx, record) => {
+      const config = await tx.apiConfig.update({
+        where: { tenantId: request.tenant.id },
+        data,
+      });
+      await record('api_config.updated', { resource: { type: 'api_config', label: 'API settings' }, changes: diff(before, data) });
+      return config;
     });
 
     await logActivity({
@@ -79,7 +83,6 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'API',
         metadata: data,
       });
-    await audit(request, 'api_config.updated', { resource: { type: 'api_config', label: 'API settings' }, changes: diff(before, data) });
 
     return config;
   });

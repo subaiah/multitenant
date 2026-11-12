@@ -4,7 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { requireCanGrant } from '../middleware/authorize.js';
 import { assignmentState, groupPermissionNames } from '../lib/access.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { assertWithinLimitFor } from '../lib/billing/plans.js';
 
@@ -199,11 +199,15 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Group name already exists', 409);
     }
     
-    const group = await request.db.group.create({
-      data: {
-        tenantId,
-        ...data,
-      },
+    const group = await withAudit(request, async (tx, record) => {
+      const group = await tx.group.create({
+        data: {
+          tenantId,
+          ...data,
+        },
+      });
+      await record('group.created', { resource: { type: 'group', id: group.id, label: group.name }, details: { description: group.description } });
+      return group;
     });
     
     // Log activity
@@ -214,7 +218,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
-    await audit(request, 'group.created', { resource: { type: 'group', id: group.id, label: group.name }, details: { description: group.description } });
     
     return reply.status(201).send(group);
   });
@@ -263,9 +266,13 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       await requireCanGrant(request, await groupPermissionNames(request.db, id, tenantId), `${data.status === 'ACTIVE' ? 'activate' : 'deactivate'} this group`);
     }
     
-    const group = await request.db.group.update({
-      where: { id },
-      data,
+    const group = await withAudit(request, async (tx, record) => {
+      const group = await tx.group.update({
+        where: { id },
+        data,
+      });
+      await record('group.updated', { resource: { type: 'group', id: group.id, label: group.name }, changes: diff(current, data) });
+      return group;
     });
     
     // Log activity
@@ -276,7 +283,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
-    await audit(request, 'group.updated', { resource: { type: 'group', id: group.id, label: group.name }, changes: diff(current, data) });
     
     return group;
   });
@@ -325,8 +331,12 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete group with role assignments. Remove all assignments first.', 400);
     }
     
-    const group = await request.db.group.delete({
-      where: { id },
+    const group = await withAudit(request, async (tx, record) => {
+      const group = await tx.group.delete({
+        where: { id },
+      });
+      await record('group.deleted', { resource: { type: 'group', id: group.id, label: group.name } });
+      return group;
     });
     
     // Log activity
@@ -337,7 +347,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: group.name,
         type: 'CONFIG',
       });
-    await audit(request, 'group.deleted', { resource: { type: 'group', id: group.id, label: group.name } });
     
     return reply.status(204).send();
   });
@@ -406,14 +415,18 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User is already a member of this group', 409);
     }
     
-    const membership = await request.db.groupMembership.create({
-      data: {
-        tenantId,
-        groupId,
-        userId: memberUserId,
-        validFrom: validFrom ? new Date(validFrom) : new Date(),
-        validTo: validTo ? new Date(validTo) : null,
-      },
+    const membership = await withAudit(request, async (tx, record) => {
+      const membership = await tx.groupMembership.create({
+        data: {
+          tenantId,
+          groupId,
+          userId: memberUserId,
+          validFrom: validFrom ? new Date(validFrom) : new Date(),
+          validTo: validTo ? new Date(validTo) : null,
+        },
+      });
+      await record('group.member_added', { resource: { type: 'group', id: group.id, label: group.name }, details: { userId: memberUserId, user: user.email, membershipId: membership.id } });
+      return membership;
     });
     
     // Log activity
@@ -424,7 +437,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${user.email} to ${group.name}`,
         type: 'USER',
       });
-    await audit(request, 'group.member_added', { resource: { type: 'group', id: group.id, label: group.name }, details: { userId: memberUserId, user: user.email, membershipId: membership.id } });
     
     return reply.status(201).send(membership);
   });
@@ -461,7 +473,10 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
     
     await requireCanGrant(request, await groupPermissionNames(request.db, groupId, tenantId), `remove members from ${membership.group.name}`);
     
-    await request.db.groupMembership.delete({ where: { id: membership.id } });
+    await withAudit(request, async (tx, record) => {
+      await tx.groupMembership.delete({ where: { id: membership.id } });
+      await record('group.member_removed', { resource: { type: 'group', id: groupId, label: membership.group.name }, details: { userId: membership.userId, user: membership.user.email } });
+    });
     
     // Log activity
     await logActivity({
@@ -471,7 +486,6 @@ export const groupRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${membership.user.email} from ${membership.group.name}`,
         type: 'USER',
       });
-    await audit(request, 'group.member_removed', { resource: { type: 'group', id: groupId, label: membership.group.name }, details: { userId: membership.userId, user: membership.user.email } });
     
     return reply.status(204).send();
   });

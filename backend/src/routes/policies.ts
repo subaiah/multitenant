@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 
 const createPolicySchema = z.object({
@@ -152,11 +152,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     
     const data = createPolicySchema.parse(request.body);
     
-    const policy = await request.db.accessPolicy.create({
-      data: {
-        tenantId,
-        ...data,
-      },
+    const policy = await withAudit(request, async (tx, record) => {
+      const policy = await tx.accessPolicy.create({
+        data: {
+          tenantId,
+          ...data,
+        },
+      });
+      await record('policy.created', { resource: { type: 'policy', id: policy.id, label: policy.name }, details: { policy: data } });
+      return policy;
     });
     
     // Log activity
@@ -167,7 +171,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
         target: policy.name,
         type: 'CONFIG',
       });
-    await audit(request, 'policy.created', { resource: { type: 'policy', id: policy.id, label: policy.name }, details: { policy: data } });
     
     return reply.status(201).send(policy);
   });
@@ -207,9 +210,13 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updatePolicySchema.parse(request.body);
     
     const before = await request.db.accessPolicy.findFirst({ where: { id, tenantId } });
-    const policy = await request.db.accessPolicy.update({
-      where: { id, tenantId },
-      data,
+    const policy = await withAudit(request, async (tx, record) => {
+      const policy = await tx.accessPolicy.update({
+        where: { id, tenantId },
+        data,
+      });
+      await record('policy.updated', { resource: { type: 'policy', id: policy.id, label: policy.name }, changes: diff(before as Record<string, unknown> | null, data as Record<string, unknown>) });
+      return policy;
     });
     
     // Log activity
@@ -220,7 +227,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
         target: policy.name,
         type: 'CONFIG',
       });
-    await audit(request, 'policy.updated', { resource: { type: 'policy', id: policy.id, label: policy.name }, changes: diff(before as Record<string, unknown> | null, data as Record<string, unknown>) });
     
     return policy;
   });
@@ -246,8 +252,12 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const policy = await request.db.accessPolicy.delete({
-      where: { id, tenantId },
+    const policy = await withAudit(request, async (tx, record) => {
+      const policy = await tx.accessPolicy.delete({
+        where: { id, tenantId },
+      });
+      await record('policy.deleted', { resource: { type: 'policy', id: policy.id, label: policy.name } });
+      return policy;
     });
     
     // Log activity
@@ -258,7 +268,6 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
         target: policy.name,
         type: 'CONFIG',
       });
-    await audit(request, 'policy.deleted', { resource: { type: 'policy', id: policy.id, label: policy.name } });
     
     return reply.status(204).send();
   });

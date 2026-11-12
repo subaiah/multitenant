@@ -13,7 +13,7 @@ import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authori
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity, logPlatformActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withPlatformAudit } from '../lib/audit.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { sendInvitation } from '../lib/invitations.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
@@ -188,8 +188,10 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     if (admin.status !== 'PENDING') throw new AppError(`${admin.email} has already accepted the invitation`, 409);
 
     const invite = await sendInvitation(tenant, admin, request.user.userId);
-    await controlDb.tenant.update({ where: { id }, data: { adminInvitedAt: new Date(), adminInviteError: invite.sent ? null : (invite.error ?? 'The email could not be sent') } });
-    await audit(request, 'tenant.invitation_resent', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { to: admin.email, emailed: invite.sent } });
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.tenant.update({ where: { id }, data: { adminInvitedAt: new Date(), adminInviteError: invite.sent ? null : (invite.error ?? 'The email could not be sent') } });
+      await record('tenant.invitation_resent', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { to: admin.email, emailed: invite.sent } });
+    });
     // The link only when the email didn't go out, to share another way
     return invite.sent
       ? { invitationSent: true, to: admin.email }

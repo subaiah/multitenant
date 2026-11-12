@@ -95,6 +95,29 @@ auditEvents: {
 
 Then record from a route:
 
+Record in the same transaction as the change wherever you can. The change and its entry are
+one transaction, so neither is saved without the other, and a failure to record undoes the
+change.
+
+```ts
+import { withAudit } from '../lib/audit.js';
+
+const invoice = await withAudit(request, async (tx, record) => {
+  const approved = await tx.invoice.update({ where: { id }, data: { status: 'APPROVED' } });
+  await record('invoice.approved', { resource: { type: 'invoice', id: approved.id, label: approved.number } });
+  return approved;
+});
+```
+
+Inside the callback use only `tx` and `record` (not `request.db`, which would take a second
+connection), record last, and send emails or write the activity feed after it returns.
+`withPlatformAudit` is the same for control-plane changes and the platform's log. One
+transaction covers one database: an entry for a tenant's log can't be saved together with a
+control-plane change, or the reverse.
+
+Where that isn't possible (the change is in the other database, or is made by a library
+function with its own connection), record after the change:
+
 ```ts
 import { audit, diff } from '../lib/audit.js';
 
@@ -105,9 +128,11 @@ await audit(request, 'invoice.approved', {
 });
 ```
 
+Here the action has already happened, so a failure to record is logged as
+`AUDIT ENTRY NOT RECORDED` instead of failing the request. Background work uses
+`recordAudit(ctx, event, input)`, which behaves the same way.
+
 Recording an event that isn't in a catalog throws, and `test/audit.test.ts` checks every key
-used in the code. Recording never fails the request: the action has already happened, so
-a failure to record is logged as `AUDIT ENTRY NOT RECORDED`. Background work uses
-`recordAudit(ctx, event, input)`.
+used in the code.
 
 `onAudit(listener)` runs for every entry recorded. This is where notifications will attach.

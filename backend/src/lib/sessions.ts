@@ -16,7 +16,7 @@ import { USER_TYPE_HIERARCHY } from '../utils/authorization.js';
  * Returns Prisma operations so callers can run them inside their own
  * transaction: `prisma.$transaction([...update, ...endAllSessions(id)])`.
  */
-export function endAllSessions(db: TenantDb, userId: string, at = new Date()) {
+export function endAllSessions(db: Pick<TenantDb, 'user' | 'refreshToken'>, userId: string, at = new Date()) {
   return [
     db.user.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
     db.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),

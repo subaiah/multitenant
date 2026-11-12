@@ -6,7 +6,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { API_RESOURCE, SERVICE_SCOPES, SERVICE_TOKEN_TTL_SECONDS, isServiceScope, newServiceClientId, newServiceSecret } from '../lib/product-service.js';
 import { issuer } from '../lib/oidc/provider.js';
@@ -50,12 +50,15 @@ export const applicationServiceCredentialRoutes: FastifyPluginAsync = async (fas
     const app = await findApp((request.params as { id: string }).id);
     const data = createSchema.parse(request.body);
     const secret = newServiceSecret();
-    const created = await controlDb.productServiceCredential.create({
-      data: { applicationId: app.id, name: data.name, clientId: newServiceClientId(), serviceClientSecret: secret, scopes: [...new Set(data.scopes)], createdBy: request.user.userId },
-    });
-    await audit(request, 'application.service_credential_created', {
-      resource: { type: 'application', id: app.id, label: app.name },
-      details: { credential: created.name, clientId: created.clientId, scopes: created.scopes },
+    const created = await withPlatformAudit(request, async (tx, record) => {
+      const created = await tx.productServiceCredential.create({
+        data: { applicationId: app.id, name: data.name, clientId: newServiceClientId(), serviceClientSecret: secret, scopes: [...new Set(data.scopes)], createdBy: request.user.userId },
+      });
+      await record('application.service_credential_created', {
+        resource: { type: 'application', id: app.id, label: app.name },
+        details: { credential: created.name, clientId: created.clientId, scopes: created.scopes },
+      });
+      return created;
     });
     return reply.status(201).send({ ...view(created), clientSecret: secret });
   });
