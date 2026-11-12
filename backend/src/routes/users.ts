@@ -17,11 +17,12 @@ import { audit, diff } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { assertWithinLimitFor } from '../lib/billing/plans.js';
+import { emailInput, findUserByEmail } from '../lib/emails.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
 const createUserSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   name: z.string().min(2),
   // This API manages users inside a tenant, so only tenant user types can be assigned.
   userType: z.enum(TENANT_USER_TYPES).default('TENANT_USER'),
@@ -222,14 +223,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     requireCanManageUserType(request.user.userType, data.userType);
 
     // Check if user already exists
-    const existingUser = await request.db.user.findUnique({
-      where: {
-        tenantId_email: {
-          tenantId: request.tenant.id,
-          email: data.email,
-        },
-      },
-    });
+    // Whatever capitals either was typed with
+    const existingUser = await findUserByEmail(request.db, request.tenant.id, data.email);
 
     if (existingUser) {
       throw new AppError('User with this email already exists', 409);

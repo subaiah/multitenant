@@ -21,21 +21,22 @@ import { finishSso, SsoError, ssoRedirectUriFor, startSso, userForIdentity } fro
 import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
+import { emailInput, findUserByEmail } from '../lib/emails.js';
 
 // Validation schemas
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
   password: z.string().min(1),
 });
 
 const otpRequestSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
 });
 
 const otpVerifySchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
   code: z.string().length(6),
 });
@@ -104,7 +105,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { tenant, db } = await tenantForSignIn(tenantSlug);
-    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
+    const user = await findUserByEmail(db, tenant.id, email);
 
     const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
     const refuse = (reason: string) => recordSignInFailure(request, owner, { email, userId: user?.id, method: 'password', reason });
@@ -170,12 +171,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Find user
-    const user = await db.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        email,
-      },
-    });
+    const user = await findUserByEmail(db, tenant.id, email);
 
     if (!user) {
       if (config.devExposeOtp) {
@@ -280,7 +276,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
     await db.otpCode.update({ where: { id: otpRecord.id }, data: { verified: true } });
 
-    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
+    const user = await findUserByEmail(db, tenant.id, email);
     if (!user) {
       throw new AppError('User not found', 404);
     }

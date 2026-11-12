@@ -13,6 +13,7 @@ import { emailChangedEmail, passwordResetEmail } from '../lib/email-templates.js
 import { RESET_TTL_MINUTES, consumeUserToken, findValidUserToken, issueUserToken, type ValidUserToken } from '../lib/user-tokens.js';
 import { otpRequestRateLimit } from '../lib/rate-limits.js';
 import { PLATFORM_SLUG, isPlatformSlug } from '../lib/platform.js';
+import { emailInput, findUserByEmail } from '../lib/emails.js';
 import { checkPasswordPolicy, hashPassword, type PasswordPolicy } from '../utils/auth.js';
 
 /**
@@ -24,7 +25,7 @@ const acceptSchema = z.object({
   password: z.string().min(1).max(200),
   name: z.string().min(2).max(100).optional(),
 });
-const forgotSchema = z.object({ email: z.string().email(), tenantSlug: z.string().min(1) });
+const forgotSchema = z.object({ email: emailInput(), tenantSlug: z.string().min(1) });
 const resetSchema = z.object({ token: z.string().min(10), password: z.string().min(1).max(200) });
 
 const PLATFORM_POLICY: PasswordPolicy = 'STRONG';
@@ -103,7 +104,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     if (!platform && (!tenant || tenant.status === 'SUSPENDED' || tenant.provisioningStatus !== 'READY')) return { message: GENERIC_FORGOT };
 
     const user = tenant
-      ? await (await dbForTenant(tenant.id)).user.findFirst({ where: { tenantId: tenant.id, email } })
+      ? await findUserByEmail(await dbForTenant(tenant.id), tenant.id, email)
       : await controlDb.platformUser.findUnique({ where: { email } });
     if (!user || user.status !== 'ACTIVE') return { message: GENERIC_FORGOT };
 
