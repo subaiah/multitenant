@@ -160,6 +160,10 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const { tenant, db } = await tenantForSignIn(tenantSlug);
     const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
+    // Single sign-on only means exactly that: emailed codes are off too
+    if (authConfig?.ssoOnly) {
+      throw new AppError('SSO authentication required', 403);
+    }
     // Check if OTP is enabled
     if (!authConfig?.otpEnabled) {
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
@@ -249,6 +253,18 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const { tenant, db } = await tenantForSignIn(tenantSlug);
     const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
+
+    // The settings as they are now: a code sent before emailed codes were
+    // turned off, or before single sign-on became the only way in, is no use
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
+    if (authConfig?.ssoOnly) {
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'single sign-on only' });
+      throw new AppError('SSO authentication required', 403);
+    }
+    if (!authConfig?.otpEnabled) {
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'emailed codes are off' });
+      throw new AppError('OTP authentication is not enabled for this tenant', 400);
+    }
 
     const otpRecord = await db.otpCode.findFirst({
       where: { tenantId: tenant.id, email, code, verified: false },
