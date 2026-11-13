@@ -21,8 +21,8 @@ import crypto from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from '../config/env.js';
-import { controlDb } from './prisma.js';
-import { dbForTenant } from './tenant-db.js';
+import { controlDb, type ControlDb } from './prisma.js';
+import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { issueRefreshToken, type SessionOwner, type StoredRefreshToken } from './auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -170,6 +170,8 @@ export async function saveMfaState(
   owner: SessionOwner,
   userId: string,
   change: { secret?: string | null; enabledAt?: Date | null; lastStep?: number | null; recoveryHashes?: string[] },
+  /** A transaction of the owner's database to save it in (so it's saved with its audit entry) */
+  within?: Pick<TenantDb, 'user'> | Pick<ControlDb, 'platformUser'>,
 ): Promise<void> {
   const common = {
     ...(change.enabledAt !== undefined && { mfaEnabledAt: change.enabledAt }),
@@ -177,12 +179,12 @@ export async function saveMfaState(
     ...(change.recoveryHashes !== undefined && { mfaRecoveryCodes: change.recoveryHashes }),
   };
   if (owner === 'platform') {
-    await controlDb.platformUser.update({
+    await ((within as Pick<ControlDb, 'platformUser'> | undefined) ?? controlDb).platformUser.update({
       where: { id: userId },
       data: { ...common, ...(change.secret !== undefined && { platformTotpSecret: change.secret }) },
     });
   } else {
-    await (await dbForTenant(owner.tenantId)).user.updateMany({
+    await ((within as Pick<TenantDb, 'user'> | undefined) ?? (await dbForTenant(owner.tenantId))).user.updateMany({
       where: { id: userId, tenantId: owner.tenantId },
       data: { ...common, ...(change.secret !== undefined && { totpSecret: change.secret }) },
     });

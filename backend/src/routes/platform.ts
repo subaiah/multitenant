@@ -7,7 +7,7 @@ import { isPlatformUser } from '../utils/authorization.js';
 import { countBy } from '../lib/stats.js';
 import { latestMigration, startRollout, tenantsBehind } from '../lib/tenant-migrations.js';
 import { logPlatformActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
 import { describeMailError, emailSetup, sendMail } from '../lib/mailer.js';
 import { testEmail } from '../lib/email-templates.js';
@@ -157,9 +157,11 @@ export const platformRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const user = await controlDb.platformUser.findUnique({ where: { id }, select: { id: true, email: true } });
     if (!user) throw new AppError('User not found', 404);
-    await resetTwoFactor('platform', user.id);
+    await withPlatformAudit(request, async (tx, record) => {
+      await resetTwoFactor('platform', user.id, tx);
+      await record('platform_user.mfa_reset', { resource: { type: 'platform_user', id: user.id, label: user.email } });
+    });
     await logPlatformActivity({ userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
-    await audit(request, 'platform_user.mfa_reset', { resource: { type: 'platform_user', id: user.id, label: user.email } });
     return { mfaEnabled: false };
   });
 };
