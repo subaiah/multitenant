@@ -423,6 +423,7 @@ In Sentry, set up an alert rule ("a new issue is created" → email) to hear abo
   - "Tenant database server" errors at start-up;
   - emails failing (shown as Failed on the Notifications settings page);
   - an audit chain that doesn't verify: checked daily (`AUDIT_VERIFY_INTERVAL_MS`), logged as an error starting `AUDIT LOG DOES NOT VERIFY` and sent to error tracking. `node dist/cli/audit.js verify` checks the archive files too.
+- **Metrics.** `GET /internal/metrics` on the API's own port (4000) answers in the Prometheus text format: the process (CPU, memory, event-loop lag), `http_request_duration_seconds` by method, route and status, `tenant_database_clients` (multiply by `TENANT_POOL_MAX` for the most connections tenants can hold), and `background_job_failures_total`. The web server doesn't pass `/internal` on, so point a collector on the same Docker network at `api:4000`, and set `METRICS_TOKEN` if anything else can reach that port. Each API server reports its own numbers.
 
 ## Operations reference
 

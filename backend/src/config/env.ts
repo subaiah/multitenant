@@ -181,6 +181,8 @@ const envSchema = z.object({
   // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
   // allows private ones and plain http (development and tests only)
   WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+  // GET /internal/metrics (lib/metrics.ts): when set, the request must carry it as a bearer token
+  METRICS_TOKEN: z.string().optional(),
   // Identity providers for single sign-on (lib/sso.ts) must be at public
   // addresses in production; true allows private ones, for an installation
   // whose identity provider is on its own network
@@ -399,6 +401,7 @@ export const config = {
   },
   webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
   ssoAllowPrivate: env.SSO_ALLOW_PRIVATE === 'true',
+  metricsToken: env.METRICS_TOKEN || undefined,
   productCallbackAllowedHosts: env.PRODUCT_CALLBACK_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,
