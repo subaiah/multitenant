@@ -7,7 +7,7 @@ import { platformDb } from '../lib/tenant-targets.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withPlatformAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 import { applicationPermissionProblem, forgetApplicationPermissions } from '../lib/application-permissions.js';
 import { CATALOGUE_FIELDS, PLATFORM_FIELDS, dataAccessOf, isPlatformCaller } from '../lib/application-fields.js';
@@ -175,11 +175,15 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Application key already exists', 409);
     }
     
-    const application = await controlDb.applicationRegistry.create({
-      data: {
-        ...data,
-      },
-      select: PLATFORM_FIELDS,
+    const application = await withPlatformAudit(request, async (tx, record) => {
+      const application = await tx.applicationRegistry.create({
+        data: {
+          ...data,
+        },
+        select: PLATFORM_FIELDS,
+      });
+      await record('application.created', { resource: { type: 'application', id: application.id, label: application.name }, details: { ...data } });
+      return application;
     });
     
     // Log activity
@@ -190,7 +194,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
-    await audit(request, 'application.created', { resource: { type: 'application', id: application.id, label: application.name }, details: { ...data } });
     
     return reply.status(201).send(application);
   });
@@ -227,10 +230,14 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateApplicationSchema.parse(request.body);
     
     const before = await controlDb.applicationRegistry.findUnique({ where: { id } });
-    const application = await controlDb.applicationRegistry.update({
-      where: { id },
-      data,
-      select: PLATFORM_FIELDS,
+    const application = await withPlatformAudit(request, async (tx, record) => {
+      const application = await tx.applicationRegistry.update({
+        where: { id },
+        data,
+        select: PLATFORM_FIELDS,
+      });
+      await record('application.updated', { resource: { type: 'application', id: application.id, label: application.name }, changes: diff(before, data) });
+      return application;
     });
     
     // Log activity
@@ -241,7 +248,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
-    await audit(request, 'application.updated', { resource: { type: 'application', id: application.id, label: application.name }, changes: diff(before, data) });
     
     return application;
   });
@@ -284,8 +290,12 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete application with tenant entitlements. Remove all entitlements first.', 400);
     }
     
-    const application = await controlDb.applicationRegistry.delete({
-      where: { id },
+    const application = await withPlatformAudit(request, async (tx, record) => {
+      const application = await tx.applicationRegistry.delete({
+        where: { id },
+      });
+      await record('application.deleted', { resource: { type: 'application', id: application.id, label: application.name } });
+      return application;
     });
     
     // Log activity
@@ -296,7 +306,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: application.name,
         type: 'CONFIG',
       });
-    await audit(request, 'application.deleted', { resource: { type: 'application', id: application.id, label: application.name } });
     
     return reply.status(204).send();
   });
@@ -388,8 +397,12 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Permission name already exists', 409);
     }
     
-    const permission = await controlDb.permission.create({
-      data: { applicationId: id, name: data.name, description: data.description, resource, action },
+    const permission = await withPlatformAudit(request, async (tx, record) => {
+      const permission = await tx.permission.create({
+        data: { applicationId: id, name: data.name, description: data.description, resource, action },
+      });
+      await record('permission.created', { resource: { type: 'permission', id: permission.id, label: permission.name }, details: { application: application.name } });
+      return permission;
     });
     
     // Log activity
@@ -400,7 +413,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${permission.name} for ${application.name}`,
         type: 'CONFIG',
       });
-    await audit(request, 'permission.created', { resource: { type: 'permission', id: permission.id, label: permission.name }, details: { application: application.name } });
     forgetApplicationPermissions();
     
     return reply.status(201).send(permission);
@@ -441,8 +453,12 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete permission that is used in roles. Remove from all roles first.', 400);
     }
     
-    const permission = await controlDb.permission.delete({
-      where: { id: permissionId },
+    const permission = await withPlatformAudit(request, async (tx, record) => {
+      const permission = await tx.permission.delete({
+        where: { id: permissionId },
+      });
+      await record('permission.deleted', { resource: { type: 'permission', id: permission.id, label: permission.name } });
+      return permission;
     });
     
     // Log activity
@@ -453,7 +469,6 @@ export const applicationRoutes: FastifyPluginAsync = async (fastify) => {
         target: permission.name,
         type: 'CONFIG',
       });
-    await audit(request, 'permission.deleted', { resource: { type: 'permission', id: permission.id, label: permission.name } });
     forgetApplicationPermissions();
     
     return reply.status(204).send();

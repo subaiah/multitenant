@@ -11,7 +11,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config/env.js';
 import { controlDb } from '../lib/prisma.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { forgetPlans, PLAN_CODES, type PlanCode } from '../lib/billing/plans.js';
 import { enabledProviders, providerForCurrency } from '../lib/billing/providers.js';
@@ -98,9 +98,11 @@ export const platformBillingRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     const { code } = codeParam.parse(request.params);
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
-    const updated = await controlDb.billingPrice.updateMany({ where: { id, planCode: code, active: true }, data: { active: false } });
-    if (!updated.count) throw new AppError('Price not found', 404);
-    await audit(request, 'billing.price_set', { resource: { type: 'billing_plan', id: code, label: code }, details: { retired: id } });
+    await withPlatformAudit(request, async (tx, record) => {
+      const updated = await tx.billingPrice.updateMany({ where: { id, planCode: code, active: true }, data: { active: false } });
+      if (!updated.count) throw new AppError('Price not found', 404);
+      await record('billing.price_set', { resource: { type: 'billing_plan', id: code, label: code }, details: { retired: id } });
+    });
     return reply.status(204).send();
   });
 

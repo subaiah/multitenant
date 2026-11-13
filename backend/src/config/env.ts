@@ -90,6 +90,11 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
+  // Two requests can cross while a session is renewed (two tabs, a retry): for
+  // this long after a refresh token is replaced, presenting it again is told to
+  // try again with the new cookies instead of being treated as a stolen token
+  // (which ends the session). 0 = every second use ends the session.
+  REFRESH_REUSE_GRACE_MS: z.string().default('10000').transform(Number),
   // Platform users' sessions (tenants set their own in Authentication settings):
   // signed out after this many idle minutes, and after this many hours in all
   PLATFORM_SESSION_IDLE_MINUTES: z.string().default('30').transform(Number),
@@ -176,6 +181,14 @@ const envSchema = z.object({
   // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
   // allows private ones and plain http (development and tests only)
   WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+  // How long a person's permissions are kept between requests (ms), while
+  // nothing about who may do what has changed in their tenant
+  // (middleware/authorize.ts). Any such change is seen on the next request;
+  // access that starts or ends at a set time is seen within this long. 0 =
+  // worked out on every request.
+  PERMISSION_CACHE_TTL_MS: z.string().default('10000').transform(Number),
+  // GET /internal/metrics (lib/metrics.ts): when set, the request must carry it as a bearer token
+  METRICS_TOKEN: z.string().optional(),
   // Identity providers for single sign-on (lib/sso.ts) must be at public
   // addresses in production; true allows private ones, for an installation
   // whose identity provider is on its own network
@@ -354,6 +367,7 @@ export const config = {
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
+  refreshReuseGraceMs: env.REFRESH_REUSE_GRACE_MS,
   platformSessionIdleMinutes: env.PLATFORM_SESSION_IDLE_MINUTES,
   platformSessionMaxHours: env.PLATFORM_SESSION_MAX_HOURS,
   platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',
@@ -393,6 +407,8 @@ export const config = {
   },
   webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
   ssoAllowPrivate: env.SSO_ALLOW_PRIVATE === 'true',
+  metricsToken: env.METRICS_TOKEN || undefined,
+  permissionCacheTtlMs: env.PERMISSION_CACHE_TTL_MS,
   productCallbackAllowedHosts: env.PRODUCT_CALLBACK_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,

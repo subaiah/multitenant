@@ -5,7 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 
 const createCertificationSchema = z.object({
@@ -181,12 +181,16 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Due date must be in the future', 400);
     }
     
-    const certification = await request.db.accessCertification.create({
-      data: {
-        tenantId,
-        ...data,
-        dueDate,
-      },
+    const certification = await withAudit(request, async (tx, record) => {
+      const certification = await tx.accessCertification.create({
+        data: {
+          tenantId,
+          ...data,
+          dueDate,
+        },
+      });
+      await record('certification.created', { resource: { type: 'certification', id: certification.id, label: certification.name } });
+      return certification;
     });
     
     // Log activity
@@ -197,7 +201,6 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
         target: certification.name,
         type: 'CONFIG',
       });
-    await audit(request, 'certification.created', { resource: { type: 'certification', id: certification.id, label: certification.name } });
     
     return reply.status(201).send(certification);
   });
@@ -328,12 +331,16 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Certification is already completed', 400);
     }
     
-    const completed = await request.db.accessCertification.update({
-      where: { id },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
+    const completed = await withAudit(request, async (tx, record) => {
+      const completed = await tx.accessCertification.update({
+        where: { id },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+        },
+      });
+      await record('certification.completed', { resource: { type: 'certification', id, label: certification.name } });
+      return completed;
     });
     
     // Log activity
@@ -344,7 +351,6 @@ export const certificationRoutes: FastifyPluginAsync = async (fastify) => {
         target: certification.name,
         type: 'CONFIG',
       });
-    await audit(request, 'certification.completed', { resource: { type: 'certification', id, label: certification.name } });
     
     return completed;
   });

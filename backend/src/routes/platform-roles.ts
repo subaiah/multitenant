@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
 import { requireCanGrant } from '../middleware/authorize.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withPlatformAudit } from '../lib/audit.js';
 import { isPlatformUser } from '../utils/authorization.js';
 import { PERMISSIONS, PERMISSION_INFO, isPlatformGrantable } from '../utils/permissions.js';
 
@@ -50,8 +50,11 @@ export const platformRoleRoutes: FastifyPluginAsync = async (fastify) => {
     checkPermissions(data.permissions);
     await requireCanGrant(request, data.permissions, 'create this role');
     if (await controlDb.platformRole.findUnique({ where: { name: data.name } })) throw new AppError('A role with this name already exists', 409);
-    const role = await controlDb.platformRole.create({ data: { ...data, isSystem: false } });
-    await audit(request, 'platform_role.created', { resource: { type: 'platform_role', id: role.id, label: role.name }, details: { permissions: role.permissions } });
+    const role = await withPlatformAudit(request, async (tx, record) => {
+      const role = await tx.platformRole.create({ data: { ...data, isSystem: false } });
+      await record('platform_role.created', { resource: { type: 'platform_role', id: role.id, label: role.name }, details: { permissions: role.permissions } });
+      return role;
+    });
     return reply.status(201).send(role);
   });
 
@@ -72,8 +75,11 @@ export const platformRoleRoutes: FastifyPluginAsync = async (fastify) => {
     if (data.name && data.name !== role.name && (await controlDb.platformRole.findUnique({ where: { name: data.name } }))) {
       throw new AppError('A role with this name already exists', 409);
     }
-    const updated = await controlDb.platformRole.update({ where: { id }, data });
-    await audit(request, 'platform_role.updated', { resource: { type: 'platform_role', id, label: updated.name }, changes: diff(role, data) });
+    const updated = await withPlatformAudit(request, async (tx, record) => {
+      const updated = await tx.platformRole.update({ where: { id }, data });
+      await record('platform_role.updated', { resource: { type: 'platform_role', id, label: updated.name }, changes: diff(role, data) });
+      return updated;
+    });
     return updated;
   });
 
@@ -86,10 +92,12 @@ export const platformRoleRoutes: FastifyPluginAsync = async (fastify) => {
     if (!role) throw new AppError('Role not found', 404);
     if (role.isSystem) throw new AppError("Built-in roles can't be deleted", 403);
     await requireCanGrant(request, role.permissions, 'delete this role');
-    await controlDb.platformRole.delete({ where: { id } });
-    await audit(request, 'platform_role.deleted', {
-      resource: { type: 'platform_role', id, label: role.name },
-      details: { permissions: role.permissions, heldBy: role.assignments.map((a) => a.platformUser.email) },
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.platformRole.delete({ where: { id } });
+      await record('platform_role.deleted', {
+        resource: { type: 'platform_role', id, label: role.name },
+        details: { permissions: role.permissions, heldBy: role.assignments.map((a) => a.platformUser.email) },
+      });
     });
     return reply.status(204).send();
   });
@@ -111,16 +119,17 @@ export const platformRoleRoutes: FastifyPluginAsync = async (fastify) => {
     // Giving a role, or taking one away, needs standing over what it grants
     await requireCanGrant(request, [...adding.flatMap((r) => r.permissions), ...removing.flatMap((c) => c.role.permissions)], "change this person's roles");
 
-    await controlDb.$transaction([
-      controlDb.platformRoleAssignment.deleteMany({ where: { platformUserId: userId, roleId: { in: removing.map((c) => c.roleId) } } }),
-      controlDb.platformRoleAssignment.createMany({ data: adding.map((r) => ({ platformUserId: userId, roleId: r.id, assignedBy: request.user.userId })) }),
-    ]);
-    for (const r of adding) {
-      await audit(request, 'platform_role.assigned', { resource: { type: 'platform_role', id: r.id, label: r.name }, details: { userId, user: user.email, permissions: r.permissions } });
-    }
-    for (const c of removing) {
-      await audit(request, 'platform_role.unassigned', { resource: { type: 'platform_role', id: c.roleId, label: c.role.name }, details: { userId, user: user.email } });
-    }
+    // The roles and the record of who was given or lost which: one transaction
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.platformRoleAssignment.deleteMany({ where: { platformUserId: userId, roleId: { in: removing.map((c) => c.roleId) } } });
+      await tx.platformRoleAssignment.createMany({ data: adding.map((r) => ({ platformUserId: userId, roleId: r.id, assignedBy: request.user.userId })) });
+      for (const r of adding) {
+        await record('platform_role.assigned', { resource: { type: 'platform_role', id: r.id, label: r.name }, details: { userId, user: user.email, permissions: r.permissions } });
+      }
+      for (const c of removing) {
+        await record('platform_role.unassigned', { resource: { type: 'platform_role', id: c.roleId, label: c.role.name }, details: { userId, user: user.email } });
+      }
+    });
     return { roles: roles.map((r) => ({ id: r.id, name: r.name })) };
   });
 };

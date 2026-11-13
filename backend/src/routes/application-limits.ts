@@ -7,7 +7,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { scheduleLimitsCheck, type LimitValue } from '../lib/product-limits.js';
 import { monthOf, usageTotals } from '../lib/product-usage.js';
@@ -55,7 +55,7 @@ export const applicationLimitRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
     const before = Object.fromEntries(limit.planValues.map((p) => [p.planCode, v(p.value)]));
-    await controlDb.$transaction(async (tx) => {
+    await withPlatformAudit(request, async (tx, record) => {
       await tx.productPlanLimit.deleteMany({ where: { limitId: limit.id, planCode: { notIn: Object.keys(body.values) as PlanCode[] } } });
       for (const [plan, value] of Object.entries(body.values)) {
         await tx.productPlanLimit.upsert({
@@ -64,11 +64,11 @@ export const applicationLimitRoutes: FastifyPluginAsync = async (fastify) => {
           update: { value: { v: value } },
         });
       }
-    });
-    await audit(request, 'application.plan_limits_changed', {
-      resource: { type: 'application', id, label: limit.application.name },
-      changes: { values: [before, body.values] },
-      details: { limit: key },
+      await record('application.plan_limits_changed', {
+        resource: { type: 'application', id, label: limit.application.name },
+        changes: { values: [before, body.values] },
+        details: { limit: key },
+      });
     });
     scheduleLimitsCheck({ applicationId: id });
     return { key, values: body.values };
@@ -123,15 +123,15 @@ export const applicationLimitRoutes: FastifyPluginAsync = async (fastify) => {
       if (seen.has(k)) throw new AppError(`Two prices for ${m.key} in ${m.currency}`, 400, true, 'INVALID_PRICE');
       seen.add(k);
     }
-    await controlDb.$transaction(async (tx) => {
+    await withPlatformAudit(request, async (tx, record) => {
       await tx.applicationPrice.deleteMany({ where: { applicationId: id } });
       if (body.prices.length) await tx.applicationPrice.createMany({ data: body.prices.map((p) => ({ applicationId: id, ...p })) });
       await tx.meterPrice.deleteMany({ where: { meterId: { in: [...meterId.values()] } } });
       if (body.meters.length) {
         await tx.meterPrice.createMany({ data: body.meters.map((m) => ({ meterId: meterId.get(m.key)!, currency: m.currency, unitAmount: m.unitAmount, perQuantity: m.perQuantity, includedQuantity: m.includedQuantity })) });
       }
+      await record('application.prices_changed', { resource: { type: 'application', id, label: app.name }, details: { prices: body.prices, meters: body.meters } });
     });
-    await audit(request, 'application.prices_changed', { resource: { type: 'application', id, label: app.name }, details: { prices: body.prices, meters: body.meters } });
     return { prices: body.prices, meters: body.meters };
   });
 

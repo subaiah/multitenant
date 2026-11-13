@@ -6,6 +6,7 @@
  * Every job is safe with several servers running it: each takes an advisory
  * lock or claims its rows, so one server does each piece of work.
  */
+import { countJobFailure } from './metrics.js';
 import { startHealthChecks, stopHealthChecks } from './product-health.js';
 import { startLimitsSweep, stopLimitsSweep } from './product-limits.js';
 import { config } from '../config/env.js';
@@ -73,6 +74,7 @@ function startOidcCleanup(warn: (msg: string) => void) {
 export async function startJobs(log: JobLogger) {
   const failed = (msg: string, err?: unknown) => {
     log.error(err, msg);
+    countJobFailure(msg);
     if (err) reportError(err, { job: msg });
   };
   // Finish provisioning interrupted by a restart

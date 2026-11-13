@@ -6,7 +6,7 @@ import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '..
 import { isScopeAware, permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { PREVIEW_MENU_PATHS, previewEnabled } from '../lib/preview.js';
 import { productSections } from '../lib/product-menu.js';
 
@@ -222,8 +222,12 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
     
-    const menuItem = await controlDb.menuItem.create({
-      data,
+    const menuItem = await withPlatformAudit(request, async (tx, record) => {
+      const menuItem = await tx.menuItem.create({
+        data,
+      });
+      await record('menu.changed', { resource: { type: 'menu_item', label: 'created menu item' }, details: { action: 'created menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
+      return menuItem;
     });
     
     // Log activity
@@ -234,7 +238,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
-    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'created menu item' }, details: { action: 'created menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return reply.status(201).send(menuItem);
   });
@@ -289,9 +292,13 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
     
-    const menuItem = await controlDb.menuItem.update({
-      where: { id },
-      data,
+    const menuItem = await withPlatformAudit(request, async (tx, record) => {
+      const menuItem = await tx.menuItem.update({
+        where: { id },
+        data,
+      });
+      await record('menu.changed', { resource: { type: 'menu_item', label: 'updated menu item' }, details: { action: 'updated menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
+      return menuItem;
     });
     
     // Log activity
@@ -302,7 +309,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
-    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'updated menu item' }, details: { action: 'updated menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return menuItem;
   });
@@ -327,8 +333,12 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     
     
-    const menuItem = await controlDb.menuItem.delete({
-      where: { id },
+    const menuItem = await withPlatformAudit(request, async (tx, record) => {
+      const menuItem = await tx.menuItem.delete({
+        where: { id },
+      });
+      await record('menu.changed', { resource: { type: 'menu_item', label: 'deleted menu item' }, details: { action: 'deleted menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
+      return menuItem;
     });
     
     // Log activity
@@ -339,7 +349,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: menuItem.label,
         type: 'CONFIG',
       });
-    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'deleted menu item' }, details: { action: 'deleted menu item', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return reply.status(204).send();
   });

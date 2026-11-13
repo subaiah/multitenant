@@ -52,7 +52,7 @@ test('every audit event used in the code is in the catalog', () => {
         if (name !== 'generated') walk(path);
       } else if (path.endsWith('.ts')) {
         const src = readFileSync(path, 'utf8');
-        for (const m of src.matchAll(/(?:audit\(request,\s*|recordAudit\([^)]*?\},\s*)'([a-z_.]+)'/g)) used.add(m[1]);
+        for (const m of src.matchAll(/(?:audit\(request,\s*|await record\(|recordAudit\([^)]*?\},\s*)'([a-z_.]+)'/g)) used.add(m[1]);
         for (const m of src.matchAll(/\?\s*'([a-z_]+\.[a-z_.]+)'\s*:\s*'([a-z_]+\.[a-z_.]+)'/g)) used.add(m[1]).add(m[2]);
       }
     }

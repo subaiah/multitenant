@@ -11,7 +11,7 @@ import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
 import { AUTHENTICATED, hasPermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, type AuditActor } from '../lib/audit.js';
+import { audit, type AuditActor, withPlatformAudit } from '../lib/audit.js';
 import { PERMISSIONS, PERMISSION_INFO, isReadPermission, isTenantGrantable } from '../utils/permissions.js';
 import { expireSupportSessions, supportMaxMinutes } from '../lib/support.js';
 
@@ -44,8 +44,10 @@ async function started(request: FastifyRequest, s: NonNullable<SessionWithPeople
 
 async function end(request: FastifyRequest, s: NonNullable<SessionWithPeople>, by: 'platform' | 'tenant') {
   const wasActive = s.status === 'ACTIVE';
-  await controlDb.supportSession.update({ where: { id: s.id }, data: { status: 'REVOKED', revokedAt: new Date() } });
-  await audit(request, 'support_session.revoked', { tenantId: s.tenantId, resource: { type: 'support_session', id: s.id, label: s.tenant.name }, details: { requester: s.platformUser.email, endedBy: by } });
+  await withPlatformAudit(request, async (tx, record) => {
+    await tx.supportSession.update({ where: { id: s.id }, data: { status: 'REVOKED', revokedAt: new Date() } });
+    await record('support_session.revoked', { tenantId: s.tenantId, resource: { type: 'support_session', id: s.id, label: s.tenant.name }, details: { requester: s.platformUser.email, endedBy: by } });
+  });
   if (wasActive) {
     await audit(request, 'support.session_ended', { resource: { type: 'support_session', id: s.id }, details: { staff: s.platformUser.email, endedBy: by } }, by === 'tenant' ? undefined : { tenantId: s.tenantId });
   }
@@ -98,32 +100,38 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     });
     if (open) throw new AppError(`You already have a ${open.status === 'PENDING' ? 'pending' : 'active'} support session for ${tenant.name}`, 409);
 
-    const created = await controlDb.supportSession.create({
-      data: {
-        platformUserId: me,
+    const created = await withPlatformAudit(request, async (tx, record) => {
+      const created = await tx.supportSession.create({
+        data: {
+          platformUserId: me,
+          tenantId: data.tenantId,
+          reason: data.reason,
+          access: data.access,
+          permissions: data.access === 'READ_WRITE' ? data.permissions : [],
+          durationMinutes: data.durationMinutes,
+          status: 'PENDING',
+        },
+      });
+      await record('support_session.requested', {
         tenantId: data.tenantId,
-        reason: data.reason,
-        access: data.access,
-        permissions: data.access === 'READ_WRITE' ? data.permissions : [],
-        durationMinutes: data.durationMinutes,
-        status: 'PENDING',
-      },
-    });
-    await audit(request, 'support_session.requested', {
-      tenantId: data.tenantId,
-      resource: { type: 'support_session', id: created.id, label: tenant.name },
-      details: { reason: data.reason, access: data.access, permissions: created.permissions, durationMinutes: data.durationMinutes },
+        resource: { type: 'support_session', id: created.id, label: tenant.name },
+        details: { reason: data.reason, access: data.access, permissions: created.permissions, durationMinutes: data.durationMinutes },
+      });
+      return created;
     });
 
     // One-person teams: someone who may approve can start their own, if allowed
     if (config.supportSelfApproval && (await hasPermission(request, 'support:manage'))) {
       const now = new Date();
-      await controlDb.supportSession.update({
-        where: { id: created.id },
-        data: { status: 'ACTIVE', approvedBy: me, approvedAt: now, validFrom: now, validTo: new Date(now.getTime() + data.durationMinutes * 60_000), decisionNote: 'Self-approved' },
+      const validTo = new Date(now.getTime() + data.durationMinutes * 60_000);
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.supportSession.update({
+          where: { id: created.id },
+          data: { status: 'ACTIVE', approvedBy: me, approvedAt: now, validFrom: now, validTo, decisionNote: 'Self-approved' },
+        });
+        await record('support_session.approved', { tenantId: created.tenantId, resource: { type: 'support_session', id: created.id, label: tenant.name }, details: { selfApproved: true, requesterId: me, validTo } });
       });
       const s = (await findSession(created.id))!;
-      await audit(request, 'support_session.approved', { tenantId: s.tenantId, resource: { type: 'support_session', id: s.id, label: tenant.name }, details: { selfApproved: true, requesterId: me, validTo: s.validTo } });
       await started(request, s);
       return reply.status(201).send(s);
     }
@@ -143,19 +151,22 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Someone else has to approve your own support session', 403);
     }
     const now = new Date();
-    const claimed = await controlDb.supportSession.updateMany({
-      where: { id, status: 'PENDING' },
-      data: approved
-        ? { status: 'ACTIVE', approvedBy: request.user.userId, approvedAt: now, validFrom: now, validTo: new Date(now.getTime() + s.durationMinutes * 60_000), decisionNote: note ?? null }
-        : { status: 'REJECTED', approvedBy: request.user.userId, approvedAt: now, decisionNote: note ?? null },
+    // The decision and the record of it: both or neither
+    await withPlatformAudit(request, async (tx, record) => {
+      const claimed = await tx.supportSession.updateMany({
+        where: { id, status: 'PENDING' },
+        data: approved
+          ? { status: 'ACTIVE', approvedBy: request.user.userId, approvedAt: now, validFrom: now, validTo: new Date(now.getTime() + s.durationMinutes * 60_000), decisionNote: note ?? null }
+          : { status: 'REJECTED', approvedBy: request.user.userId, approvedAt: now, decisionNote: note ?? null },
+      });
+      if (claimed.count !== 1) throw new AppError('This request has already been decided', 409);
+      await record(approved ? 'support_session.approved' : 'support_session.rejected', {
+        tenantId: s.tenantId,
+        resource: { type: 'support_session', id, label: s.tenant.name },
+        details: { requesterId: s.platformUserId, requester: s.platformUser.email, note: note ?? null, validTo: approved ? new Date(now.getTime() + s.durationMinutes * 60_000) : null },
+      });
     });
-    if (claimed.count !== 1) throw new AppError('This request has already been decided', 409);
     const after = (await findSession(id))!;
-    await audit(request, approved ? 'support_session.approved' : 'support_session.rejected', {
-      tenantId: s.tenantId,
-      resource: { type: 'support_session', id, label: s.tenant.name },
-      details: { requesterId: s.platformUserId, requester: s.platformUser.email, note: note ?? null, validTo: after.validTo },
-    });
     if (approved) await started(request, after);
     return after;
   });
