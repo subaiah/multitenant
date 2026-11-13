@@ -342,9 +342,11 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
     if (!user) throw new AppError('User not found', 404);
     requireCanManageUserType(request.user.userType, user.userType);
-    await resetTwoFactor({ tenantId: request.tenant.id, tenantSlug: request.tenant.slug }, user.id);
+    await withAudit(request, async (tx, record) => {
+      await resetTwoFactor({ tenantId: request.tenant.id, tenantSlug: request.tenant.slug }, user.id, tx);
+      await record('user.mfa_reset', { resource: { type: 'user', id: user.id, label: user.email } });
+    });
     await logActivity({ tenantId: request.tenant.id, userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
-    await audit(request, 'user.mfa_reset', { resource: { type: 'user', id: user.id, label: user.email } });
     return { mfaEnabled: false };
   });
 

@@ -5,7 +5,8 @@
  * - the process (CPU, memory, event-loop lag, garbage collection): prom-client's defaults;
  * - http_request_duration_seconds, by method, route pattern and status;
  * - tenant_database_clients: tenant database clients held open, each with its own small pool;
- * - background_job_failures_total: failures the job runner logged, by job.
+ * - background_job_failures_total: failures the job runner logged, by job;
+ * - permission_lookups_total: permissions kept from an earlier request (hit) or worked out (miss).
  *
  * Who can read it. /internal is not reachable through the bundled web server
  * (deploy/Caddyfile), only on the API's own port. With METRICS_TOKEN set,
@@ -46,6 +47,18 @@ const jobFailures = new Counter({
   labelNames: ['job'] as const,
   registers: [registry],
 });
+
+const permissionLookups = new Counter({
+  name: 'permission_lookups_total',
+  help: "A tenant user's permissions for a request: kept from an earlier request (hit) or worked out (miss)",
+  labelNames: ['result'] as const,
+  registers: [registry],
+});
+
+/** A person's permissions were needed for a request (middleware/authorize.ts) */
+export function countPermissionLookup(result: 'hit' | 'miss') {
+  permissionLookups.inc({ result });
+}
 
 /** A background job failed (lib/jobs.ts). The label is the message without its variable part. */
 export function countJobFailure(message: string) {

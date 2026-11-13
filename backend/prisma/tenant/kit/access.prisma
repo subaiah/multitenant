@@ -226,6 +226,18 @@ model CertificationDecision {
   @@map("certification_decisions")
 }
 
+// One row per tenant. A database trigger adds one to `version` whenever who
+// may do what changes (roles, their permissions, assignments, groups,
+// memberships, delegations); the server keeps each person's permissions only
+// while the version stands (middleware/authorize.ts). Never written by code.
+model AccessVersion {
+  tenantId  String   @id @map("tenant_id")
+  version   Int      @default(0)
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("access_versions")
+}
+
 // Maps a tenant's Postgres role to its tenant id, for row-level security.
 // Written only by the migration owner (phase 3 of the isolation design).
 model TenantDbRole {
