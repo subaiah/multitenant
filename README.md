@@ -1,11 +1,27 @@
 # Multitenant platform
 
-A starter kit for multi-tenant SaaS products. It has two portals:
+The hub that a set of applications runs under. It holds the organizations (tenants), their people and what each person may do, and every application signs in through it, gets its permissions from it and is billed by it.
 
-- **Platform portal**, for the people who run the service: tenants, platform staff, support access, the platform audit log.
-- **Tenant portal**, for each customer organization: its users, groups, roles, sign-in settings, audit and activity logs, notifications.
+It has two portals:
 
-A product forks the kit and adds its own tables, API and screens behind a few extension points ([docs/extending.md](docs/extending.md)).
+- **Platform portal**, for the people who run the service: tenants, the application catalogue, platform staff, support access, the platform audit log.
+- **Tenant portal**, for each customer organization: its users, groups, roles, sign-in settings, the applications it has turned on, audit and activity logs, notifications.
+
+Applications are separate programs with their own repositories, and come in two kinds ([docs/hub/HUB_GAPS.md](docs/hub/HUB_GAPS.md)):
+
+- **Specific applications** serve one domain, such as AppForge.
+- **Generic applications** provide something other applications use, and also run on their own, such as Hearth (chat).
+
+An application joins by publishing a manifest ([docs/PRODUCT_INTEGRATION.md](docs/PRODUCT_INTEGRATION.md), [docs/hub/MANIFEST_V2.md](docs/hub/MANIFEST_V2.md)). From then on the hub:
+
+- signs its users in with their organization account ([docs/SIGN_IN_WITH.md](docs/SIGN_IN_WITH.md));
+- lets organizations turn it on and grant its permissions through their roles;
+- tells it when organizations and people change;
+- gives it tokens to call the hub and other applications;
+- shows its pages in the tenant portal's sidebar;
+- applies its plan limits and prices.
+
+The hub can also be used the way it started, as a starter kit: a product forks it and adds its own tables, API and screens behind a few extension points ([docs/extending.md](docs/extending.md)).
 
 | Part | Stack | Where |
 | --- | --- | --- |
