@@ -25,6 +25,7 @@ There are two ways to build on the platform:
 | Part | Status | Detail |
 | --- | --- | --- |
 | A catalogue entry for the application, registered from a **manifest** | Available | [The manifest](#the-manifest) |
+| **Connecting in one step**: an administrator approves, the application collects its own credentials | Available | [hub/CONNECT.md](hub/CONNECT.md) |
 | **Sign-in** with the person's organization account (OpenID Connect) | Available | [SIGN_IN_WITH.md](SIGN_IN_WITH.md) |
 | **Permissions** the application declares, granted in organizations' roles | Available | [SIGN_IN_WITH.md](SIGN_IN_WITH.md#the-applications-permissions) |
 | **Menu entries** in the tenant portal, linking to the application's pages | Available | [The manifest](#the-manifest) |

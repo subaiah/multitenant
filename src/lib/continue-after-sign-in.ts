@@ -47,10 +47,47 @@ export function continuing(search: string): boolean {
   }
 }
 
+// Connecting an application (pages/ConnectApplication.tsx): a platform
+// administrator who isn't signed in yet comes back to the request after
+// signing in. Only that page, on this site, is accepted.
+const CONNECT_KEY = 'connect-after-sign-in';
+const CONNECT_PATH = '/platform/applications/connect';
+
+function connectPath(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const target = new URL(value, window.location.origin);
+    return target.origin === window.location.origin && target.pathname === CONNECT_PATH && !target.hash ? `${target.pathname}${target.search}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep the Connect page's address (with its request) for after signing in */
+export function rememberConnect(pathAndQuery: string): void {
+  const target = connectPath(pathAndQuery);
+  if (!target) return;
+  try {
+    sessionStorage.setItem(CONNECT_KEY, target);
+  } catch {
+    // storage unavailable: the person starts again from the application
+  }
+}
+
 function takeContinue(): string | null {
   try {
     const value = interactionUrl(sessionStorage.getItem(KEY));
     sessionStorage.removeItem(KEY);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function takeConnect(): string | null {
+  try {
+    const value = connectPath(sessionStorage.getItem(CONNECT_KEY));
+    sessionStorage.removeItem(CONNECT_KEY);
     return value;
   } catch {
     return null;
@@ -67,5 +104,6 @@ export function goAfterSignIn(navigate: (to: string, opts?: { replace?: boolean 
     window.location.assign(target);
     return;
   }
-  navigate(portalHome(portal), { replace: true });
+  const connect = portal === 'PLATFORM' ? takeConnect() : null;
+  navigate(connect ?? portalHome(portal), { replace: true });
 }
