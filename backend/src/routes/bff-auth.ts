@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import {
-  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
+  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, sessionContinues, tenantForSignIn,
   type SessionOwner,
 } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -398,8 +398,16 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    // Token reuse: someone presented a rotated-out token. Revoke the whole family.
     if (storedToken.revokedAt) {
+      // Replaced a moment ago, and the session carries on with the new token:
+      // two requests crossed (another tab, a retry). The other one's answer
+      // set the new cookies; this one is told to use them. Nothing is issued
+      // here, so a copied token gains nothing from the allowance.
+      const sinceReplaced = Date.now() - storedToken.revokedAt.getTime();
+      if (sinceReplaced < config.refreshReuseGraceMs && (await sessionContinues(storedToken))) {
+        throw new AppError('The session was just renewed by another request', 409, true, 'REFRESH_SUPERSEDED');
+      }
+      // Token reuse: someone presented a rotated-out token. Revoke the whole family.
       await revokeRefreshToken(storedToken, 'family');
       throw new AppError('Token reuse detected - all sessions revoked', 401);
     }

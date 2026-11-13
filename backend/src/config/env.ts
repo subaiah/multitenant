@@ -90,6 +90,11 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
+  // Two requests can cross while a session is renewed (two tabs, a retry): for
+  // this long after a refresh token is replaced, presenting it again is told to
+  // try again with the new cookies instead of being treated as a stolen token
+  // (which ends the session). 0 = every second use ends the session.
+  REFRESH_REUSE_GRACE_MS: z.string().default('10000').transform(Number),
   // Platform users' sessions (tenants set their own in Authentication settings):
   // signed out after this many idle minutes, and after this many hours in all
   PLATFORM_SESSION_IDLE_MINUTES: z.string().default('30').transform(Number),
@@ -354,6 +359,7 @@ export const config = {
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
+  refreshReuseGraceMs: env.REFRESH_REUSE_GRACE_MS,
   platformSessionIdleMinutes: env.PLATFORM_SESSION_IDLE_MINUTES,
   platformSessionMaxHours: env.PLATFORM_SESSION_MAX_HOURS,
   platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',

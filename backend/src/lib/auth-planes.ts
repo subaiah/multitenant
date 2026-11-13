@@ -140,6 +140,19 @@ export async function revokeRefreshToken(t: StoredRefreshToken, scope: 'token' |
   }
 }
 
+/**
+ * Whether the session a token belonged to carries on with a newer token: the
+ * token was rotated out by a refresh, not ended by signing out or by reuse.
+ */
+export async function sessionContinues(t: StoredRefreshToken): Promise<boolean> {
+  const where = { familyId: t.familyId, revokedAt: null, expiresAt: { gt: new Date() } };
+  const live =
+    t.owner === 'platform'
+      ? await controlDb.platformRefreshToken.count({ where })
+      : await (await dbForTenant(t.owner.tenantId)).refreshToken.count({ where: { ...where, tenantId: t.owner.tenantId } });
+  return live > 0;
+}
+
 /** Revoke a token by its cookie value, if it exists (sign-out). */
 export async function revokeRefreshTokenValue(value: string) {
   const t = await findRefreshToken(value);

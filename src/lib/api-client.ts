@@ -66,7 +66,15 @@ async function refreshOnce(askedAt: number): Promise<boolean> {
   if (lastRefreshedAt() > askedAt) return true;
   const res = await fetch(`${API_URL}/bff/auth/refresh`, { method: 'POST', credentials: 'include' });
   if (!res.ok) {
-    endReason = ((await res.json().catch(() => ({}))) as { code?: string }).code;
+    const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
+    // Another request renewed the session a moment before this one (a tab
+    // that couldn't take the lock, a retry): its answer carries the new
+    // cookies. Give it a moment to arrive, then carry on with them.
+    if (res.status === 409 && code === 'REFRESH_SUPERSEDED') {
+      await new Promise((r) => setTimeout(r, 400));
+      return true;
+    }
+    endReason = code;
     return false;
   }
   try {

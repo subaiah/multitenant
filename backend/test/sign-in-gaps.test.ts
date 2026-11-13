@@ -3,7 +3,8 @@
  * - "single sign-on only" also turns off emailed codes;
  * - an email address is the same person whatever capitals it's typed with;
  * - passwords are scrypt hashes, and older hashes are replaced at sign-in;
- * - refresh tokens and emailed codes are stored as hashes;
+ * - refresh tokens and emailed codes are stored as hashes, and two renewals
+ *   that cross don't end the session;
  * - in production, identity providers must be at public addresses;
  * - every audit chain can be checked in one go (the scheduled check).
  */
@@ -153,9 +154,30 @@ test('refresh tokens are stored as hashes; sessions from before still refresh', 
   assert.equal(row.token, crypto.createHash('sha256').update(value).digest('hex'));
   assert.ok(!row.token.includes(value));
 
-  // It still works as a session, and a rotated-out token is still noticed
-  assert.equal((await api('POST', '/bff/auth/refresh', { cookie: s.cookie })).status, 200);
-  assert.equal((await api('POST', '/bff/auth/refresh', { cookie: s.cookie })).status, 401, 'the old token again');
+  // It still works as a session
+  const renewedOnce = await api('POST', '/bff/auth/refresh', { cookie: s.cookie });
+  assert.equal(renewedOnce.status, 200);
+  const newCookie = sessionCookies(renewedOnce).map((c) => c.split(';')[0]).join('; ');
+
+  // The old token again straight away: two requests that crossed. Told to
+  // use the new cookies; nothing is issued and the session carries on.
+  const crossed = await api('POST', '/bff/auth/refresh', { cookie: s.cookie });
+  assert.equal(crossed.status, 409, JSON.stringify(crossed.json));
+  assert.equal(crossed.json.code, 'REFRESH_SUPERSEDED');
+  assert.equal(sessionCookies(crossed).length, 0, 'no new tokens for the old one');
+  const renewedTwice = await api('POST', '/bff/auth/refresh', { cookie: newCookie });
+  assert.equal(renewedTwice.status, 200, 'the session carries on');
+  const latestCookie = sessionCookies(renewedTwice).map((c) => c.split(';')[0]).join('; ');
+
+  // The old token after the allowance: a copied token. The whole session ends.
+  await A.db.refreshToken.updateMany({ where: { tenantId: A.tenantId, familyId: sid, revokedAt: { not: null } }, data: { revokedAt: new Date(Date.now() - 60_000) } });
+  assert.equal((await api('POST', '/bff/auth/refresh', { cookie: s.cookie })).status, 401, 'the old token later');
+  assert.equal((await api('POST', '/bff/auth/refresh', { cookie: latestCookie })).status, 401, 'and the session it belonged to is over');
+
+  // Signed out: the token is not "just renewed", whatever the timing
+  const out = await loginSession(A.slug, A.managerEmail);
+  assert.ok((await api('POST', '/bff/auth/logout', { cookie: out.cookie })).status < 300);
+  assert.equal((await api('POST', '/bff/auth/refresh', { cookie: out.cookie })).status, 401, 'after signing out');
 
   // A session whose token was stored as sent, before this
   const manager = await A.db.user.findFirstOrThrow({ where: { tenantId: A.tenantId, email: A.managerEmail } });
