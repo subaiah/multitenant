@@ -7,7 +7,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { decryptSecret, secretContext } from '../lib/secrets.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { userEventsChanged } from '../lib/product-user-events.js';
 import { ROTATION_OVERLAP_MS, callbackChanged, callbackUrlSchema, newCallbackSecret, retryLifecycleEvent } from '../lib/product-lifecycle.js';
@@ -90,16 +90,18 @@ export const applicationLifecycleRoutes: FastifyPluginAsync = async (fastify) =>
     const secret = newCallbackSecret();
     // The old secret keeps signing alongside, so the application can switch over without missing events
     const previousExpiresAt = new Date(Date.now() + ROTATION_OVERLAP_MS);
-    await controlDb.applicationRegistry.update({
-      where: { id: app.id },
-      // Decrypted, so it's stored encrypted for its own column (secrets are bound to their column)
-      data: {
-        callbackSigningSecret: secret,
-        previousCallbackSigningSecret: app.callbackSigningSecret ? decryptSecret(app.callbackSigningSecret, secretContext('callbackSigningSecret')) : null,
-        previousCallbackSecretExpiresAt: app.callbackSigningSecret ? previousExpiresAt : null,
-      },
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.applicationRegistry.update({
+        where: { id: app.id },
+        // Decrypted, so it's stored encrypted for its own column (secrets are bound to their column)
+        data: {
+          callbackSigningSecret: secret,
+          previousCallbackSigningSecret: app.callbackSigningSecret ? decryptSecret(app.callbackSigningSecret, secretContext('callbackSigningSecret')) : null,
+          previousCallbackSecretExpiresAt: app.callbackSigningSecret ? previousExpiresAt : null,
+        },
+      });
+      await record('application.lifecycle_updated', { resource: { type: 'application', id: app.id, label: app.name }, details: { newSigningSecret: true, previousSecretValidUntil: previousExpiresAt.toISOString() } });
     });
-    await audit(request, 'application.lifecycle_updated', { resource: { type: 'application', id: app.id, label: app.name }, details: { newSigningSecret: true, previousSecretValidUntil: previousExpiresAt.toISOString() } });
     return { signingSecret: secret, previousSecretValidUntil: app.callbackSigningSecret ? previousExpiresAt : null };
   });
 

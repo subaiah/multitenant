@@ -3,7 +3,7 @@ import Bundles from '../components/Bundles';
 import AppConnections from '../components/AppConnections';
 import AppEvents from '../components/AppEvents';
 import { usePermissions } from '../hooks/usePermissions';
-import { Package, Plus, Trash2, CheckCircle, XCircle, Calendar, Eye, Link2, AlertTriangle } from 'lucide-react';
+import { Package, Plus, Trash2, Calendar, Eye, Link2, AlertTriangle } from 'lucide-react';
 import { apiPost, apiPatch, apiDelete } from '../lib/api-client';
 import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';

@@ -1,9 +1,10 @@
+import crypto from 'node:crypto';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import {
-  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
+  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, sessionContinues, tenantForSignIn,
   type SessionOwner,
 } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -40,6 +41,15 @@ const otpVerifySchema = z.object({
   tenantSlug: z.string(),
   code: z.string().length(6),
 });
+
+/**
+ * Emailed sign-in codes are kept as a keyed hash, bound to the organization
+ * and address they were sent to. Six digits are too few for a plain hash (a
+ * copy of the table could be tried against every code in a moment), so the
+ * key is derived from JWT_SECRET, which isn't in the database.
+ */
+const otpKey = crypto.createHmac('sha256', config.jwtSecret).update('emailed sign-in codes').digest();
+const hashOtp = (tenantId: string, email: string, code: string) => crypto.createHmac('sha256', otpKey).update(`${tenantId}:${email}:${code}`).digest('hex');
 
 /** What a sign-in step returns when two-factor comes next (no session yet). */
 const mfaNext = (r: NonNullable<SignInResult>) => ({
@@ -213,7 +223,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         tenantId: tenant.id,
         email,
-        code,
+        code: hashOtp(tenant.id, email, code),
         expiresAt,
       },
     });
@@ -273,7 +283,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const otpRecord = await db.otpCode.findFirst({
-      where: { tenantId: tenant.id, email, code, verified: false },
+      where: { tenantId: tenant.id, email, code: hashOtp(tenant.id, email, code), verified: false },
     });
     if (!otpRecord) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });
@@ -388,8 +398,16 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    // Token reuse: someone presented a rotated-out token. Revoke the whole family.
     if (storedToken.revokedAt) {
+      // Replaced a moment ago, and the session carries on with the new token:
+      // two requests crossed (another tab, a retry). The other one's answer
+      // set the new cookies; this one is told to use them. Nothing is issued
+      // here, so a copied token gains nothing from the allowance.
+      const sinceReplaced = Date.now() - storedToken.revokedAt.getTime();
+      if (sinceReplaced < config.refreshReuseGraceMs && (await sessionContinues(storedToken))) {
+        throw new AppError('The session was just renewed by another request', 409, true, 'REFRESH_SUPERSEDED');
+      }
+      // Token reuse: someone presented a rotated-out token. Revoke the whole family.
       await revokeRefreshToken(storedToken, 'family');
       throw new AppError('Token reuse detected - all sessions revoked', 401);
     }

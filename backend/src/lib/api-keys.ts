@@ -15,7 +15,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { controlDb } from './prisma.js';
-import { dbForTenant } from './tenant-db.js';
+import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
 import { permissionMatches, PLATFORM_RESOURCES, PERMISSIONS } from '../utils/permissions.js';
 
@@ -65,9 +65,14 @@ export function grantableBy(effective: Set<string>): string[] {
   return PERMISSIONS.filter((p) => !NOT_FOR_KEYS.has(p) && !PLATFORM_RESOURCES.has(p.split(':')[0]) && permissionMatches(effective, p));
 }
 
-export async function createApiKey(tenantId: string, input: { name: string; permissions: string[]; expiresAt: Date | null; userType: string; createdById: string; createdByEmail: string | null }) {
+export async function createApiKey(
+  tenantId: string,
+  input: { name: string; permissions: string[]; expiresAt: Date | null; userType: string; createdById: string; createdByEmail: string | null },
+  /** A transaction to make the key in (so it's saved with its audit entry); the tenant's own client otherwise */
+  within?: Pick<TenantDb, 'apiKey'>,
+) {
   const secret = randomBytes(24).toString('base64url');
-  const db = await dbForTenant(tenantId);
+  const db = within ?? (await dbForTenant(tenantId));
   const row = await db.apiKey.create({
     data: {
       tenantId, name: input.name, permissions: input.permissions, userType: input.userType as never, expiresAt: input.expiresAt,

@@ -113,6 +113,11 @@ async function close(c: CachedClient) {
 }
 
 /** Close cached clients matching a predicate on their connection string (e.g. before dropping a database or role). */
+/** How many tenant clients (each with its own pool) this process holds open */
+export function tenantClientCount(): number {
+  return g.planes!.tenants.size;
+}
+
 export async function closeTenantClients(match: (connectionString: string, schema: string) => boolean) {
   const tenants = g.planes!.tenants;
   const closing: Promise<void>[] = [];

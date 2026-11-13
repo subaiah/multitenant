@@ -13,7 +13,7 @@ import { isPlatformAdmin, isPlatformUser, isTenantAdmin } from '../utils/authori
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity, logPlatformActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withPlatformAudit } from '../lib/audit.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { sendInvitation } from '../lib/invitations.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
@@ -188,8 +188,10 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     if (admin.status !== 'PENDING') throw new AppError(`${admin.email} has already accepted the invitation`, 409);
 
     const invite = await sendInvitation(tenant, admin, request.user.userId);
-    await controlDb.tenant.update({ where: { id }, data: { adminInvitedAt: new Date(), adminInviteError: invite.sent ? null : (invite.error ?? 'The email could not be sent') } });
-    await audit(request, 'tenant.invitation_resent', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { to: admin.email, emailed: invite.sent } });
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.tenant.update({ where: { id }, data: { adminInvitedAt: new Date(), adminInviteError: invite.sent ? null : (invite.error ?? 'The email could not be sent') } });
+      await record('tenant.invitation_resent', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { to: admin.email, emailed: invite.sent } });
+    });
     // The link only when the email didn't go out, to share another way
     return invite.sent
       ? { invitationSent: true, to: admin.email }
@@ -394,9 +396,12 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     // Any status but suspended cancels a pending closure (it would otherwise be deleted)
     if (data.status && data.status !== 'SUSPENDED' && before.closedAt) Object.assign(extra, { closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null });
     // Suspended or resumed: its external products are told, in the same transaction (lib/product-lifecycle.ts)
-    const tenant = await controlDb.$transaction(async (tx) => {
+    // By platform staff, the platform's audit entry is saved with it too
+    const changes = diff(before, data);
+    const tenant = await withPlatformAudit(request, async (tx, record) => {
       const updated = await tx.tenant.update({ where: { id }, data: { ...data, ...extra } });
       await organizationStatusChanged(tx, id, before.status, updated.status);
+      if (isPlatformUser(userType)) await record('tenant.updated', { tenantId: id, resource: { type: 'tenant', id, label: updated.slug }, changes });
       return updated;
     });
     // Another plan: its applications' limits may differ (lib/product-limits.ts)
@@ -407,10 +412,8 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     const entry = { tenantId: id, userId: request.user.userId, action: 'updated tenant', target: tenant.name, type: 'CONFIG' as const, metadata: data };
     await (tenant.provisioningStatus === 'READY' ? logActivity(entry) : logPlatformActivity(entry));
     // Platform staff in the platform's audit log; the tenant's own admins in the tenant's
-    const changes = diff(before, data);
-    if (isPlatformUser(userType)) {
-      await audit(request, 'tenant.updated', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, changes });
-    } else {
+    if (!isPlatformUser(userType)) {
+      // The tenant's log is in the tenant's database: recorded after the change
       await audit(request, 'tenant_profile.updated', { resource: { type: 'tenant', id, label: tenant.name }, changes });
     }
 

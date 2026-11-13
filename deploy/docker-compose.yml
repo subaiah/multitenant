@@ -49,6 +49,9 @@ x-api-env: &api-env
   CUSTOM_DOMAINS: ${CUSTOM_DOMAINS:-true}
   CUSTOM_DOMAIN_TARGET: ${CUSTOM_DOMAIN_TARGET:-}
   SSO_ALLOW_PRIVATE: ${SSO_ALLOW_PRIVATE:-false}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  PERMISSION_CACHE_TTL_MS: ${PERMISSION_CACHE_TTL_MS:-10000}
+  REFRESH_REUSE_GRACE_MS: ${REFRESH_REUSE_GRACE_MS:-10000}
   API_DOCS: ${API_DOCS:-false}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   # External products on the same network (docs/PRODUCT_INTEGRATION.md): hosts their lifecycle callbacks may use without https

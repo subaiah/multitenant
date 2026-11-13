@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { requireUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit } from '../lib/audit.js';
 import { canInScope, requireInScope, scopeOf, unitsWithin } from '../lib/scopes.js';
 
 const createOrgUnitSchema = z.object({
@@ -236,12 +236,16 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Unit name already exists in this organization', 409);
     }
     
-    const unit = await request.db.orgUnit.create({
-      data: {
-        tenantId,
-        organizationId: orgId,
-        ...data,
-      },
+    const unit = await withAudit(request, async (tx, record) => {
+      const unit = await tx.orgUnit.create({
+        data: {
+          tenantId,
+          organizationId: orgId,
+          ...data,
+        },
+      });
+      await record('org_unit.created', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { unitType: unit.unitType } });
+      return unit;
     });
     
     // Log activity
@@ -252,7 +256,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${unit.name} (${unit.unitType})`,
         type: 'CONFIG',
       });
-    await audit(request, 'org_unit.created', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { unitType: unit.unitType } });
     
     return reply.status(201).send(unit);
   });
@@ -320,9 +323,13 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
       await requireInScope(request, 'organizations:update', data.parentUnitId ? { orgUnitId: data.parentUnitId } : { organizationId: currentUnit.organizationId });
     }
     
-    const unit = await request.db.orgUnit.update({
-      where: { id, tenantId },
-      data,
+    const unit = await withAudit(request, async (tx, record) => {
+      const unit = await tx.orgUnit.update({
+        where: { id, tenantId },
+        data,
+      });
+      await record('org_unit.updated', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { set: data } });
+      return unit;
     });
     
     // Log activity
@@ -333,7 +340,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: unit.name,
         type: 'CONFIG',
       });
-    await audit(request, 'org_unit.updated', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { set: data } });
     
     return unit;
   });
@@ -378,8 +384,12 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Cannot delete unit with members. Remove all members first.', 400);
     }
     
-    const unit = await request.db.orgUnit.delete({
-      where: { id, tenantId },
+    const unit = await withAudit(request, async (tx, record) => {
+      const unit = await tx.orgUnit.delete({
+        where: { id, tenantId },
+      });
+      await record('org_unit.deleted', { resource: { type: 'org_unit', id: unit.id, label: unit.name } });
+      return unit;
     });
     
     // Log activity
@@ -390,7 +400,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: unit.name,
         type: 'CONFIG',
       });
-    await audit(request, 'org_unit.deleted', { resource: { type: 'org_unit', id: unit.id, label: unit.name } });
     
     return reply.status(204).send();
   });
@@ -513,13 +522,17 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('User is already a member of this unit', 409);
     }
     
-    const membership = await request.db.orgMembership.create({
-      data: {
-        tenantId,
-        userId: memberUserId,
-        organizationId: unit.organizationId,
-        orgUnitId: unitId,
-      },
+    const membership = await withAudit(request, async (tx, record) => {
+      const membership = await tx.orgMembership.create({
+        data: {
+          tenantId,
+          userId: memberUserId,
+          organizationId: unit.organizationId,
+          orgUnitId: unitId,
+        },
+      });
+      await record('org_unit.member_added', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { userId: user.id, user: user.email, membershipId: membership.id } });
+      return membership;
     });
     
     // Log activity
@@ -530,7 +543,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${user.email} to ${unit.name}`,
         type: 'USER',
       });
-    await audit(request, 'org_unit.member_added', { resource: { type: 'org_unit', id: unit.id, label: unit.name }, details: { userId: user.id, user: user.email, membershipId: membership.id } });
     
     return reply.status(201).send(membership);
   });
@@ -558,8 +570,11 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
     const tenantId = request.tenant.id;
     
     
-    await request.db.orgMembership.deleteMany({
-      where: { orgUnitId: unitId, userId: memberUserId, tenantId },
+    await withAudit(request, async (tx, record) => {
+      await tx.orgMembership.deleteMany({
+        where: { orgUnitId: unitId, userId: memberUserId, tenantId },
+      });
+      await record('org_unit.member_removed', { resource: { type: 'org_unit', id: unitId }, details: { userId: memberUserId } });
     });
     
     // Log activity
@@ -570,7 +585,6 @@ export const orgUnitRoutes: FastifyPluginAsync = async (fastify) => {
         target: `user ${memberUserId} from unit ${unitId}`,
         type: 'USER',
       });
-    await audit(request, 'org_unit.member_removed', { resource: { type: 'org_unit', id: unitId }, details: { userId: memberUserId } });
     
     return reply.status(204).send();
   });

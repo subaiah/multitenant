@@ -25,6 +25,12 @@
 (app) {
 	encode zstd gzip
 
+	# The API's /internal routes are for this web server alone (on_demand_tls
+	# asks the API directly, above): nothing outside reaches them
+	handle /api/internal/* {
+		respond 404
+	}
+
 	# The API. Stripping /api means the server's routes stay as they are;
 	# BFF_URL must be this address plus /api (single sign-on callbacks use it).
 	handle_path /api/* {

@@ -70,6 +70,8 @@ docker compose up -d --build
 `migrate` runs again before the new API starts. If it fails, the API doesn't start. The old containers are already stopped by then, so check `docker compose logs migrate`, fix the cause, and run `up` again.
 
 - **Migrations only ever add.** A migration that changes or removes something comes with a note in the release that says what to do.
+- **Rolling back brings back the code, not the schema.** Deploying an earlier commit leaves the migrations that have run in place, and the release step runs while the previous version is still serving. So a migration must work with the version before it as well as its own: add in one release, and stop using or remove in a later one.
+- **Migrations run in name order.** A new one must sort after those already released; CI refuses a pull request where it doesn't.
 - **The server checks the schema.** In production it won't start on a control plane that is missing migrations.
 - **Tenants that failed to migrate** are listed on the Tenants page. The rest keep working.
 - **Several API servers:** run the release step once (`docker compose run --rm migrate`), then roll the servers. The release step takes locks, so two copies running at once is safe too.
@@ -420,7 +422,8 @@ In Sentry, set up an alert rule ("a new issue is created" → email) to hear abo
   - log lines at level 50 (`error`) and above;
   - "Tenant database server" errors at start-up;
   - emails failing (shown as Failed on the Notifications settings page);
-  - an audit chain that doesn't verify (`node dist/cli/audit.js verify` from cron).
+  - an audit chain that doesn't verify: checked daily (`AUDIT_VERIFY_INTERVAL_MS`), logged as an error starting `AUDIT LOG DOES NOT VERIFY` and sent to error tracking. `node dist/cli/audit.js verify` checks the archive files too.
+- **Metrics.** `GET /internal/metrics` on the API's own port (4000) answers in the Prometheus text format: the process (CPU, memory, event-loop lag), `http_request_duration_seconds` by method, route and status, `tenant_database_clients` (multiply by `TENANT_POOL_MAX` for the most connections tenants can hold), and `background_job_failures_total`. The web server doesn't pass `/internal` on, so point a collector on the same Docker network at `api:4000`, and set `METRICS_TOKEN` if anything else can reach that port. Each API server reports its own numbers.
 
 ## Operations reference
 

@@ -166,7 +166,9 @@ test('the tree, who is in which unit, and permissions held in part of the organi
   assert.equal((await api('GET', `/v1/product-integrations/organizations/${A.tenantId}/org-units`, bearer(narrowToken))).status, 403, 'needs members.read');
 
   // Told: the unit grant as a permission change, the memberships as unit changes
-  const got = await eventsSince(from, (e) => e.length >= 3);
+  // The three it's about, however many passes they arrive in (a count could be met before the last one)
+  const has = (e: any[], type: string, email: string) => e.some((x) => x.type === type && x.data.user?.email === email);
+  const got = await eventsSince(from, (e) => has(e, 'user.permissions_changed', A.userEmail) && has(e, 'user.units_changed', A.userEmail) && has(e, 'user.units_changed', A.managerEmail));
   const user = got.filter((e) => e.data.user?.email === A.userEmail);
   const perm = user.find((e) => e.type === 'user.permissions_changed');
   assert.deepEqual([perm.data.added, perm.data.scopedAdded, perm.data.scopedRemoved], [[], [{ permission: `${P.key}.deals:edit`, scopeType: 'ORG_UNIT', scopeId: unit.Sales }], []]);
