@@ -8,7 +8,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
-import { audit } from '../lib/audit.js';
+import { audit, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 
 const bundleSchema = z.object({
@@ -43,11 +43,14 @@ export const applicationBundleRoutes: FastifyPluginAsync = async (fastify) => {
     const data = bundleSchema.parse(request.body);
     await checkApplications(data.applicationIds);
     if (await controlDb.bundle.findUnique({ where: { key: data.key } })) throw new AppError('A bundle with that key exists', 409);
-    const bundle = await controlDb.bundle.create({
-      data: { key: data.key, name: data.name, description: data.description ?? null, active: data.active, applications: { create: data.applicationIds.map((applicationId, position) => ({ applicationId, position })) } },
-      include,
+    const bundle = await withPlatformAudit(request, async (tx, record) => {
+      const bundle = await tx.bundle.create({
+        data: { key: data.key, name: data.name, description: data.description ?? null, active: data.active, applications: { create: data.applicationIds.map((applicationId, position) => ({ applicationId, position })) } },
+        include,
+      });
+      await record('bundle.created', { resource: { type: 'bundle', id: bundle.id, label: bundle.name }, details: { applications: bundle.applications.map((x) => x.application.key) } });
+      return bundle;
     });
-    await audit(request, 'bundle.created', { resource: { type: 'bundle', id: bundle.id, label: bundle.name }, details: { applications: bundle.applications.map((x) => x.application.key) } });
     return reply.status(201).send(view(bundle));
   });
 
@@ -61,15 +64,16 @@ export const applicationBundleRoutes: FastifyPluginAsync = async (fastify) => {
     const before = await controlDb.bundle.findUnique({ where: { id: bundleId } });
     if (!before) throw new AppError('Bundle not found', 404);
     if (data.key !== before.key && await controlDb.bundle.findUnique({ where: { key: data.key } })) throw new AppError('A bundle with that key exists', 409);
-    const bundle = await controlDb.$transaction(async (tx) => {
+    const bundle = await withPlatformAudit(request, async (tx, record) => {
       await tx.bundleApplication.deleteMany({ where: { bundleId } });
-      return tx.bundle.update({
+      const updated = await tx.bundle.update({
         where: { id: bundleId },
         data: { key: data.key, name: data.name, description: data.description ?? null, active: data.active, applications: { create: data.applicationIds.map((applicationId, position) => ({ applicationId, position })) } },
         include,
       });
+      await record('bundle.updated', { resource: { type: 'bundle', id: updated.id, label: updated.name }, details: { applications: updated.applications.map((x) => x.application.key), active: updated.active } });
+      return updated;
     });
-    await audit(request, 'bundle.updated', { resource: { type: 'bundle', id: bundle.id, label: bundle.name }, details: { applications: bundle.applications.map((x) => x.application.key), active: bundle.active } });
     return view(bundle);
   });
 
@@ -80,8 +84,10 @@ export const applicationBundleRoutes: FastifyPluginAsync = async (fastify) => {
     const { bundleId } = request.params as { bundleId: string };
     const bundle = await controlDb.bundle.findUnique({ where: { id: bundleId } });
     if (!bundle) throw new AppError('Bundle not found', 404);
-    await controlDb.bundle.delete({ where: { id: bundleId } });
-    await audit(request, 'bundle.deleted', { resource: { type: 'bundle', id: bundle.id, label: bundle.name } });
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.bundle.delete({ where: { id: bundleId } });
+      await record('bundle.deleted', { resource: { type: 'bundle', id: bundle.id, label: bundle.name } });
+    });
     return reply.status(204).send();
   });
 };

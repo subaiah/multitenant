@@ -5,7 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 
 const createDelegationSchema = z.object({
@@ -214,16 +214,20 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Active delegation already exists for this user and role', 409);
     }
     
-    const delegation = await request.db.delegation.create({
-      data: {
-        tenantId,
-        delegatorId: userId,
-        delegateId: data.delegateId,
-        roleAssignmentId: data.roleAssignmentId,
-        reason: data.reason,
-        validFrom,
-        validTo,
-      },
+    const delegation = await withAudit(request, async (tx, record) => {
+      const delegation = await tx.delegation.create({
+        data: {
+          tenantId,
+          delegatorId: userId,
+          delegateId: data.delegateId,
+          roleAssignmentId: data.roleAssignmentId,
+          reason: data.reason,
+          validFrom,
+          validTo,
+        },
+      });
+      await record('delegation.created', { resource: { type: 'delegation', id: delegation.id, label: `to ${delegate.email}` }, details: { delegateId: data.delegateId, roleAssignmentId: data.roleAssignmentId, reason: data.reason, validFrom, validTo } });
+      return delegation;
     });
     
     // Log activity
@@ -234,7 +238,6 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Delegation to ${delegate.email}`,
         type: 'USER',
       });
-    await audit(request, 'delegation.created', { resource: { type: 'delegation', id: delegation.id, label: `to ${delegate.email}` }, details: { delegateId: data.delegateId, roleAssignmentId: data.roleAssignmentId, reason: data.reason, validFrom, validTo } });
     
     return reply.status(201).send(delegation);
   });
@@ -283,13 +286,17 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Not authorized to revoke this delegation', 403);
     }
     
-    const revoked = await request.db.delegation.update({
-      where: { id },
-      data: {
-        status: 'REVOKED',
-        revokedAt: new Date(),
-        revokedBy: userId,
-      },
+    const revoked = await withAudit(request, async (tx, record) => {
+      const revoked = await tx.delegation.update({
+        where: { id },
+        data: {
+          status: 'REVOKED',
+          revokedAt: new Date(),
+          revokedBy: userId,
+        },
+      });
+      await record('delegation.revoked', { resource: { type: 'delegation', id }, details: { delegatorId: delegation.delegatorId, delegateId: delegation.delegateId } });
+      return revoked;
     });
     
     // Log activity
@@ -300,7 +307,6 @@ export const delegationRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Delegation ${id}`,
         type: 'USER',
       });
-    await audit(request, 'delegation.revoked', { resource: { type: 'delegation', id }, details: { delegatorId: delegation.delegatorId, delegateId: delegation.delegateId } });
     
     return revoked;
   });

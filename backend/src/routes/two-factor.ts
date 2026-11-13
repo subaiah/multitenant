@@ -137,6 +137,6 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
 };
 
 /** Clear a user's two-factor so they set it up again at their next sign-in (admin reset). */
-export async function resetTwoFactor(owner: SessionOwner, userId: string) {
-  await saveMfaState(owner, userId, { secret: null, enabledAt: null, lastStep: null, recoveryHashes: [] });
+export async function resetTwoFactor(owner: SessionOwner, userId: string, within?: Parameters<typeof saveMfaState>[3]) {
+  await saveMfaState(owner, userId, { secret: null, enabledAt: null, lastStep: null, recoveryHashes: [] }, within);
 }

@@ -6,13 +6,14 @@
  * Every job is safe with several servers running it: each takes an advisory
  * lock or claims its rows, so one server does each piece of work.
  */
+import { countJobFailure } from './metrics.js';
 import { startHealthChecks, stopHealthChecks } from './product-health.js';
 import { startLimitsSweep, stopLimitsSweep } from './product-limits.js';
 import { config } from '../config/env.js';
 import { resumeProvisioning } from './provisioning.js';
 import { startUsageRefresh, stopUsageRefresh } from './tenant-usage.js';
 import { startTenantLifecycle, stopTenantLifecycle } from './tenant-lifecycle.js';
-import { startAuditArchiving, stopAuditArchiving } from './audit.js';
+import { startAuditArchiving, startAuditVerification, stopAuditArchiving, stopAuditVerification } from './audit.js';
 import { notificationsSettled, startNotifications, stopNotifications } from './notifications.js';
 import { startRateLimitCleanup, stopRateLimitCleanup } from './rate-limit-store.js';
 import { startWebhooks, stopWebhooks, webhooksSettled } from './webhooks.js';
@@ -73,12 +74,14 @@ function startOidcCleanup(warn: (msg: string) => void) {
 export async function startJobs(log: JobLogger) {
   const failed = (msg: string, err?: unknown) => {
     log.error(err, msg);
+    countJobFailure(msg);
     if (err) reportError(err, { job: msg });
   };
   // Finish provisioning interrupted by a restart
   await resumeProvisioning().catch((err) => failed('Resuming provisioning failed', err));
   startUsageRefresh((msg) => log.warn(msg), resumeProvisioning);
   startAuditArchiving(failed);
+  startAuditVerification(failed);
   startNotifications(failed);
   startRateLimitCleanup((err) => log.warn(`Removing expired rate-limit counters failed: ${(err as Error)?.message ?? err}`));
   startTenantLifecycle(failed);
@@ -96,6 +99,7 @@ export async function startJobs(log: JobLogger) {
 export async function stopJobs() {
   stopUsageRefresh();
   stopAuditArchiving();
+  stopAuditVerification();
   stopNotifications();
   stopRateLimitCleanup();
   stopTenantLifecycle();

@@ -13,15 +13,16 @@ import { requireCanManageUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { resetTwoFactor } from './two-factor.js';
 import { limitSchema, pageSchema } from '../lib/pagination.js';
 import { assertWithinLimitFor } from '../lib/billing/plans.js';
+import { emailInput, findUserByEmail } from '../lib/emails.js';
 
 const TENANT_USER_TYPES = ['TENANT_ADMIN', 'TENANT_MANAGER', 'TENANT_DEVELOPER', 'TENANT_USER', 'TENANT_VIEWER'] as const;
 
 const createUserSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   name: z.string().min(2),
   // This API manages users inside a tenant, so only tenant user types can be assigned.
   userType: z.enum(TENANT_USER_TYPES).default('TENANT_USER'),
@@ -222,14 +223,8 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     requireCanManageUserType(request.user.userType, data.userType);
 
     // Check if user already exists
-    const existingUser = await request.db.user.findUnique({
-      where: {
-        tenantId_email: {
-          tenantId: request.tenant.id,
-          email: data.email,
-        },
-      },
-    });
+    // Whatever capitals either was typed with
+    const existingUser = await findUserByEmail(request.db, request.tenant.id, data.email);
 
     if (existingUser) {
       throw new AppError('User with this email already exists', 409);
@@ -238,20 +233,24 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     await assertWithinLimitFor(request, 'users');
 
     // New users are invited: they set their own password from the emailed link
-    const user = await request.db.user.create({
-      data: {
-        ...data,
-        tenantId: request.tenant.id,
-        status: 'PENDING',
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        userType: true,
-        status: true,
-        createdAt: true,
-      },
+    const user = await withAudit(request, async (tx, record) => {
+      const user = await tx.user.create({
+        data: {
+          ...data,
+          tenantId: request.tenant.id,
+          status: 'PENDING',
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          userType: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+      await record('user.invited', { resource: { type: 'user', id: user.id, label: user.email }, details: { name: user.name, userType: user.userType } });
+      return user;
     });
 
     // Log activity
@@ -262,7 +261,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         target: user.email,
         type: 'USER',
       });
-    await audit(request, 'user.invited', { resource: { type: 'user', id: user.id, label: user.email }, details: { name: user.name, userType: user.userType } });
 
     // The invitation exists even if the email didn't go out: hand back the link to share another way
     const invite = await sendInvitation(request.tenant, user, request.user.userId);
@@ -344,9 +342,11 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     });
     if (!user) throw new AppError('User not found', 404);
     requireCanManageUserType(request.user.userType, user.userType);
-    await resetTwoFactor({ tenantId: request.tenant.id, tenantSlug: request.tenant.slug }, user.id);
+    await withAudit(request, async (tx, record) => {
+      await resetTwoFactor({ tenantId: request.tenant.id, tenantSlug: request.tenant.slug }, user.id, tx);
+      await record('user.mfa_reset', { resource: { type: 'user', id: user.id, label: user.email } });
+    });
     await logActivity({ tenantId: request.tenant.id, userId: request.user.userId, action: `reset two-factor for ${user.email}`, target: 'user', type: 'USER' });
-    await audit(request, 'user.mfa_reset', { resource: { type: 'user', id: user.id, label: user.email } });
     return { mfaEnabled: false };
   });
 
@@ -402,25 +402,34 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     // Reactivating someone takes a seat again
     if (data.status === 'ACTIVE' && target.status === 'INACTIVE') await assertWithinLimitFor(request, 'users');
 
-    const update = request.db.user.update({
-      where: {
-        id,
-        tenantId: request.tenant.id,
-      },
-      data,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        userType: true,
-        status: true,
-        updatedAt: true,
-      },
+    const changes = diff(target, data);
+    const user = await withAudit(request, async (tx, record) => {
+      const updated = await tx.user.update({
+        where: {
+          id,
+          tenantId: request.tenant.id,
+        },
+        data,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          userType: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+      // Deactivating signs the person out everywhere, right away
+      if (data.status && data.status !== 'ACTIVE') {
+        for (const end of endAllSessions(tx, id)) await end;
+      }
+      if (Object.keys(changes).length) {
+        const event = changes.status && data.status === 'INACTIVE' ? 'user.deactivated'
+          : changes.status && data.status === 'ACTIVE' ? 'user.reactivated' : 'user.updated';
+        await record(event, { resource: { type: 'user', id: updated.id, label: updated.email }, changes });
+      }
+      return updated;
     });
-    // Deactivating signs the person out everywhere, right away
-    const [user] = data.status && data.status !== 'ACTIVE'
-      ? await request.db.$transaction([update, ...endAllSessions(request.db, id)])
-      : [await update];
 
     // Log activity
     await logActivity({
@@ -431,12 +440,6 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'USER',
         metadata: data,
       });
-    const changes = diff(target, data);
-    if (Object.keys(changes).length) {
-      const event = changes.status && data.status === 'INACTIVE' ? 'user.deactivated'
-        : changes.status && data.status === 'ACTIVE' ? 'user.reactivated' : 'user.updated';
-      await audit(request, event, { resource: { type: 'user', id: user.id, label: user.email }, changes });
-    }
 
     return user;
   });
@@ -474,13 +477,15 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
     }
     requireCanManageUserType(request.user.userType, target.userType);
 
-    await request.db.user.delete({
-      where: {
-        id,
-        tenantId: request.tenant.id,
-      },
+    await withAudit(request, async (tx, record) => {
+      await tx.user.delete({
+        where: {
+          id,
+          tenantId: request.tenant.id,
+        },
+      });
+      await record('user.deleted', { resource: { type: 'user', id, label: target.email }, details: { name: target.name, userType: target.userType, status: target.status } });
     });
-    await audit(request, 'user.deleted', { resource: { type: 'user', id, label: target.email }, details: { name: target.name, userType: target.userType, status: target.status } });
 
     return reply.status(204).send();
   });

@@ -21,6 +21,7 @@ if (!process.env.TENANT_DATABASE_URL) throw new Error('TENANT_DATABASE_URL must 
 process.env.TENANT_USAGE_REFRESH_MS ??= '0';
 process.env.TENANT_LIFECYCLE_INTERVAL_MS ??= '0';
 process.env.AUDIT_ARCHIVE_INTERVAL_MS ??= '0';
+process.env.AUDIT_VERIFY_INTERVAL_MS ??= '0';
 process.env.NOTIFICATION_POLL_MS ??= '0';
 // Audit archives (also written when test tenants are deleted) go somewhere disposable
 process.env.AUDIT_ARCHIVE_DIR ??= join(tmpdir(), 'multitenant-test-audit-archive');

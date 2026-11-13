@@ -13,7 +13,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { loadPermissions } from '../middleware/authorize.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit } from '../lib/audit.js';
 import { createApiKey, grantableBy } from '../lib/api-keys.js';
 import { PERMISSION_INFO, RESOURCE_INFO } from '../utils/permissions.js';
 
@@ -69,15 +69,18 @@ export const apiKeyRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(`An organization can have at most ${MAX_KEYS} keys: revoke ones you don't use`, 409);
     }
     const me = await request.db.user.findFirst({ where: { id: request.user.userId, tenantId: request.tenant.id }, select: { email: true } });
-    const created = await createApiKey(request.tenant.id, {
-      name: body.name,
-      permissions: [...new Set(body.permissions)].sort(),
-      expiresAt: body.expiresInDays ? new Date(Date.now() + body.expiresInDays * 86_400_000) : null,
-      userType: request.user.userType,
-      createdById: request.user.userId,
-      createdByEmail: me?.email ?? null,
+    const created = await withAudit(request, async (tx, record) => {
+      const key = await createApiKey(request.tenant.id, {
+        name: body.name,
+        permissions: [...new Set(body.permissions)].sort(),
+        expiresAt: body.expiresInDays ? new Date(Date.now() + body.expiresInDays * 86_400_000) : null,
+        userType: request.user.userType,
+        createdById: request.user.userId,
+        createdByEmail: me?.email ?? null,
+      }, tx);
+      await record('api_key.created', { resource: { type: 'api_key', id: key.id, label: key.name }, details: { permissions: key.permissions, expiresAt: key.expiresAt } });
+      return key;
     });
-    await audit(request, 'api_key.created', { resource: { type: 'api_key', id: created.id, label: created.name }, details: { permissions: created.permissions, expiresAt: created.expiresAt } });
     return reply.status(201).send({ ...view(created), key: created.key });
   });
 
@@ -90,8 +93,10 @@ export const apiKeyRoutes: FastifyPluginAsync = async (fastify) => {
     const key = await request.db.apiKey.findFirst({ where: { id, tenantId: request.tenant.id } });
     if (!key) throw new AppError('API key not found', 404);
     if (!key.revokedAt) {
-      await request.db.apiKey.updateMany({ where: { id, tenantId: request.tenant.id }, data: { revokedAt: new Date() } });
-      await audit(request, 'api_key.revoked', { resource: { type: 'api_key', id, label: key.name } });
+      await withAudit(request, async (tx, record) => {
+        await tx.apiKey.updateMany({ where: { id, tenantId: request.tenant.id }, data: { revokedAt: new Date() } });
+        await record('api_key.revoked', { resource: { type: 'api_key', id, label: key.name } });
+      });
     }
     return reply.status(204).send();
   });

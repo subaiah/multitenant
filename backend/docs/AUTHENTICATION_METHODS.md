@@ -36,6 +36,8 @@ callback that arrives at a different address than the one it started from is ref
 | Custom OIDC | Client ID, secret, issuer URL | OpenID Connect via the issuer's discovery document |
 | GitHub | Client ID, secret | OAuth 2; the primary verified email from the GitHub API |
 
+In production an identity provider must be at a public https address: the server fetches its discovery document, keys and tokens, and an address on the server's own network is refused. If your identity provider is on a private network, set `SSO_ALLOW_PRIVATE=true`.
+
 The flow uses the authorization code with PKCE, a `state` (single use, 10 minutes, kept in
 `oauth_sessions`) and, for OpenID Connect, a `nonce` and a signed ID token checked by
 `openid-client`.

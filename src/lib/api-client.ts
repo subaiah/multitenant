@@ -39,19 +39,59 @@ interface ApiOptions extends RequestInit {
   background?: boolean;
 }
 
-// One refresh at a time: refresh tokens rotate, so two parallel refreshes
-// would present the same token twice and trip reuse detection (logging the
-// user out everywhere).
+// One refresh at a time, in this tab and across every tab of the app: refresh
+// tokens rotate, so two refreshes presenting the same token would trip reuse
+// detection (logging the user out everywhere). Within a tab the promise is
+// shared; across tabs, which share the cookies, a Web Lock makes them take
+// turns, and a tab that waited for another tab's refresh uses its result.
 let refreshInFlight: Promise<boolean> | null = null;
 /** Why the last refresh was refused, when the server said (SESSION_IDLE, SESSION_MAX). */
 let endReason: string | undefined;
 
+const REFRESH_LOCK = 'session-refresh';
+/** When any tab last renewed the session (ms), so the others know */
+const REFRESHED_AT_KEY = 'session-refreshed-at';
+
+function lastRefreshedAt(): number {
+  try {
+    return Number(localStorage.getItem(REFRESHED_AT_KEY)) || 0;
+  } catch {
+    return 0; // storage turned off: every tab refreshes for itself
+  }
+}
+
+async function refreshOnce(askedAt: number): Promise<boolean> {
+  // Another tab renewed the session while this one waited for its turn: the
+  // new cookies are this tab's too
+  if (lastRefreshedAt() > askedAt) return true;
+  const res = await fetch(`${API_URL}/bff/auth/refresh`, { method: 'POST', credentials: 'include' });
+  if (!res.ok) {
+    const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
+    // Another request renewed the session a moment before this one (a tab
+    // that couldn't take the lock, a retry): its answer carries the new
+    // cookies. Give it a moment to arrive, then carry on with them.
+    if (res.status === 409 && code === 'REFRESH_SUPERSEDED') {
+      await new Promise((r) => setTimeout(r, 400));
+      return true;
+    }
+    endReason = code;
+    return false;
+  }
+  try {
+    localStorage.setItem(REFRESHED_AT_KEY, String(Date.now()));
+  } catch {
+    /* not kept */
+  }
+  return true;
+}
+
 function refreshSession(): Promise<boolean> {
-  refreshInFlight ??= fetch(`${API_URL}/bff/auth/refresh`, { method: 'POST', credentials: 'include' })
-    .then(async (res) => {
-      if (!res.ok) endReason = ((await res.json().catch(() => ({}))) as { code?: string }).code;
-      return res.ok;
-    })
+  refreshInFlight ??= (async () => {
+    const askedAt = Date.now();
+    // Not in every browser (or outside https): then it's one refresh per tab, as before
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    return locks ? await locks.request(REFRESH_LOCK, () => refreshOnce(askedAt)) : await refreshOnce(askedAt);
+  })()
     .catch(() => false)
     .finally(() => {
       refreshInFlight = null;

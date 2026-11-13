@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { ssoRedirectUrisForTenant } from '../lib/sso.js';
 import { assertFeature } from '../lib/billing/plans.js';
 
@@ -91,9 +91,13 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     const data = updateAuthConfigSchema.parse(request.body);
 
     const before = await request.db.authConfig.findUnique({ where: { tenantId: request.tenant.id } });
-    const config = await request.db.authConfig.update({
-      where: { tenantId: request.tenant.id },
-      data,
+    const config = await withAudit(request, async (tx, record) => {
+      const config = await tx.authConfig.update({
+        where: { tenantId: request.tenant.id },
+        data,
+      });
+      await record('auth_config.updated', { resource: { type: 'auth_config', label: 'Sign-in settings' }, changes: diff(before, data) });
+      return config;
     });
 
     await logActivity({
@@ -104,7 +108,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'CONFIG',
         metadata: data,
       });
-    await audit(request, 'auth_config.updated', { resource: { type: 'auth_config', label: 'Sign-in settings' }, changes: diff(before, data) });
 
     return config;
   });
@@ -176,14 +179,18 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { directoryId, ...fields } = data;
-    const provider = await request.db.authProvider.create({
-      data: {
-        ...fields,
-        idpTenantId: directoryId,
-        tenantId: request.tenant.id,
-        authConfigId: config.id,
-      },
-      omit: { clientSecret: true },
+    const provider = await withAudit(request, async (tx, record) => {
+      const provider = await tx.authProvider.create({
+        data: {
+          ...fields,
+          idpTenantId: directoryId,
+          tenantId: request.tenant.id,
+          authConfigId: config.id,
+        },
+        omit: { clientSecret: true },
+      });
+      await record('auth_provider.added', { resource: { type: 'auth_provider', id: provider.id, label: provider.provider }, details: { ...data, clientSecret: data.clientSecret ? '[set]' : undefined } });
+      return provider;
     });
 
     await logActivity({
@@ -193,7 +200,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         target: data.provider,
         type: 'AUTH',
       });
-    await audit(request, 'auth_provider.added', { resource: { type: 'auth_provider', id: provider.id, label: provider.provider }, details: { ...data, clientSecret: data.clientSecret ? '[set]' : undefined } });
 
     return reply.status(201).send(provider);
   });
@@ -232,10 +238,20 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     // Scoped to the caller's tenant: another tenant's provider is a 404
     const { directoryId, ...fields } = data;
     const before = await request.db.authProvider.findFirst({ where: { id, tenantId: request.tenant.id }, omit: { clientSecret: true } });
-    const provider = await request.db.authProvider.update({
-      where: { id, tenantId: request.tenant.id },
-      data: { ...fields, ...(directoryId !== undefined && { idpTenantId: directoryId }) },
-      omit: { clientSecret: true },
+    const provider = await withAudit(request, async (tx, record) => {
+      const provider = await tx.authProvider.update({
+        where: { id, tenantId: request.tenant.id },
+        data: { ...fields, ...(directoryId !== undefined && { idpTenantId: directoryId }) },
+        omit: { clientSecret: true },
+      });
+      await record('auth_provider.updated', {
+        resource: { type: 'auth_provider', id: provider.id, label: provider.provider },
+        changes: {
+          ...diff(before, { ...fields, ...(directoryId !== undefined && { idpTenantId: directoryId }) }, ['enabled', 'clientId', 'idpTenantId', 'domain', 'scopes', 'autoProvision']),
+          ...(data.clientSecret && { clientSecret: ['[redacted]', '[changed]'] }),
+        },
+      });
+      return provider;
     });
 
     await logActivity({
@@ -246,13 +262,6 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
         type: 'AUTH',
         metadata: { ...data, clientSecret: data.clientSecret ? '[redacted]' : undefined }, // never log secrets
       });
-    await audit(request, 'auth_provider.updated', {
-      resource: { type: 'auth_provider', id: provider.id, label: provider.provider },
-      changes: {
-        ...diff(before, { ...fields, ...(directoryId !== undefined && { idpTenantId: directoryId }) }, ['enabled', 'clientId', 'idpTenantId', 'domain', 'scopes', 'autoProvision']),
-        ...(data.clientSecret && { clientSecret: ['[redacted]', '[changed]'] }),
-      },
-    });
 
     return provider;
   });
@@ -275,11 +284,14 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { id } = request.params as { id: string };
 
-    const removed = await request.db.authProvider.delete({
-      where: { id, authConfig: { tenantId: request.tenant.id } },
-      select: { id: true, provider: true, clientId: true },
+    const removed = await withAudit(request, async (tx, record) => {
+      const removed = await tx.authProvider.delete({
+        where: { id, authConfig: { tenantId: request.tenant.id } },
+        select: { id: true, provider: true, clientId: true },
+      });
+      await record('auth_provider.removed', { resource: { type: 'auth_provider', id: removed.id, label: removed.provider }, details: { clientId: removed.clientId } });
+      return removed;
     });
-    await audit(request, 'auth_provider.removed', { resource: { type: 'auth_provider', id: removed.id, label: removed.provider }, details: { clientId: removed.clientId } });
 
     return reply.status(204).send();
   });

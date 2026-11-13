@@ -25,7 +25,7 @@ import { appOriginForTenant } from './domains.js';
 import { product } from '../product/index.js';
 
 /** Never exported: secrets and short-lived sign-in machinery */
-const KIT_EXCLUDED_TABLES = ['refresh_tokens', 'user_tokens', 'otp_codes', 'oauth_sessions', 'notification_outbox'];
+const KIT_EXCLUDED_TABLES = ['refresh_tokens', 'user_tokens', 'otp_codes', 'oauth_sessions', 'notification_outbox', 'access_versions'];
 const KIT_EXCLUDED_COLUMNS: Record<string, string[]> = {
   users: ['password_hash', 'totp_secret', 'mfa_recovery_codes'],
   auth_providers: ['client_secret'],

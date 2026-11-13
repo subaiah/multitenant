@@ -5,7 +5,7 @@ import { requireUserType } from '../utils/authorization.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { hasPermission, requirePermission } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
 
 const createAccessRequestSchema = z.object({
@@ -137,16 +137,20 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Pending request already exists for this role', 409);
     }
     
-    const accessRequest = await request.db.accessRequest.create({
-      data: {
-        tenantId,
-        requesterId: userId,
-        roleId: data.roleId,
-        scopeType: data.scopeType,
-        scopeId: data.scopeId,
-        reason: data.reason,
-        duration: data.duration,
-      },
+    const accessRequest = await withAudit(request, async (tx, record) => {
+      const accessRequest = await tx.accessRequest.create({
+        data: {
+          tenantId,
+          requesterId: userId,
+          roleId: data.roleId,
+          scopeType: data.scopeType,
+          scopeId: data.scopeId,
+          reason: data.reason,
+          duration: data.duration,
+        },
+      });
+      await record('access_request.created', { resource: { type: 'access_request', id: accessRequest.id, label: role.name }, details: { roleId: data.roleId, scopeType: data.scopeType, scopeId: data.scopeId, reason: data.reason, durationHours: data.duration } });
+      return accessRequest;
     });
     
     // Log activity
@@ -157,7 +161,6 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Access request for ${role.name}`,
         type: 'USER',
       });
-    await audit(request, 'access_request.created', { resource: { type: 'access_request', id: accessRequest.id, label: role.name }, details: { roleId: data.roleId, scopeType: data.scopeType, scopeId: data.scopeId, reason: data.reason, durationHours: data.duration } });
     
     return reply.status(201).send(accessRequest);
   });
@@ -207,36 +210,40 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
     const now = new Date();
     const validTo = new Date(now.getTime() + accessRequest.duration * 60 * 60 * 1000);
     
-    const updated = await request.db.accessRequest.update({
-      where: { id },
-      data: {
-        status: approved ? 'APPROVED' : 'DENIED',
-        approverId: userId,
-        approvedAt: approved ? now : null,
-        deniedAt: approved ? null : now,
-        denialReason: approved ? null : reason,
-        validFrom: approved ? now : null,
-        validTo: approved ? validTo : null,
-      },
-    });
-    
-    // If approved, create temporary role assignment
-    if (approved) {
-      await request.db.roleAssignment.create({
+    // The decision, the access it grants and the record of it: all or nothing
+    const updated = await withAudit(request, async (tx, record) => {
+      const decided = await tx.accessRequest.update({
+        where: { id },
         data: {
-          tenantId,
-          roleId: accessRequest.roleId,
-          principalType: 'USER',
-          userId: accessRequest.requesterId,
-          scopeType: accessRequest.scopeType,
-          scopeId: accessRequest.scopeId,
-          validFrom: now,
-          validTo,
-          status: 'ACTIVE',
+          status: approved ? 'APPROVED' : 'DENIED',
+          approverId: userId,
+          approvedAt: approved ? now : null,
+          deniedAt: approved ? null : now,
+          denialReason: approved ? null : reason,
+          validFrom: approved ? now : null,
+          validTo: approved ? validTo : null,
         },
       });
-    }
-    
+      // If approved, create temporary role assignment
+      if (approved) {
+        await tx.roleAssignment.create({
+          data: {
+            tenantId,
+            roleId: accessRequest.roleId,
+            principalType: 'USER',
+            userId: accessRequest.requesterId,
+            scopeType: accessRequest.scopeType,
+            scopeId: accessRequest.scopeId,
+            validFrom: now,
+            validTo,
+            status: 'ACTIVE',
+          },
+        });
+      }
+      await record('access_request.decided', { resource: { type: 'access_request', id }, details: { decision: approved ? 'APPROVED' : 'DENIED', requesterId: accessRequest.requesterId, roleId: accessRequest.roleId, reason: approved ? undefined : reason, validTo: approved ? validTo : undefined } });
+      return decided;
+    });
+
     // Log activity
     await logActivity({
         tenantId,
@@ -245,7 +252,6 @@ export const accessRequestRoutes: FastifyPluginAsync = async (fastify) => {
         target: `Access request ${id}`,
         type: 'USER',
       });
-    await audit(request, 'access_request.decided', { resource: { type: 'access_request', id }, details: { decision: approved ? 'APPROVED' : 'DENIED', requesterId: accessRequest.requesterId, roleId: accessRequest.roleId, reason: approved ? undefined : reason, validTo: approved ? validTo : undefined } });
     
     return updated;
   });

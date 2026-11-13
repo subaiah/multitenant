@@ -90,6 +90,11 @@ const envSchema = z.object({
   COOKIE_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_EXPIRY: z.string().default('15m'), // Short-lived access tokens
   REFRESH_TOKEN_EXPIRY: z.string().default('7d'), // Longer-lived refresh tokens
+  // Two requests can cross while a session is renewed (two tabs, a retry): for
+  // this long after a refresh token is replaced, presenting it again is told to
+  // try again with the new cookies instead of being treated as a stolen token
+  // (which ends the session). 0 = every second use ends the session.
+  REFRESH_REUSE_GRACE_MS: z.string().default('10000').transform(Number),
   // Platform users' sessions (tenants set their own in Authentication settings):
   // signed out after this many idle minutes, and after this many hours in all
   PLATFORM_SESSION_IDLE_MINUTES: z.string().default('30').transform(Number),
@@ -102,6 +107,8 @@ const envSchema = z.object({
   AUDIT_ARCHIVE_DIR: z.string().default('./audit-archive'),
   // How often to archive (0 = never automatically; run npm run audit:archive)
   AUDIT_ARCHIVE_INTERVAL_MS: z.string().default('86400000').transform(Number),
+  // How often every audit chain is checked (ms); 0 = only with npm run audit:verify
+  AUDIT_VERIFY_INTERVAL_MS: z.string().default('86400000').transform(Number),
   // Organizations' data exports (lib/data-export.ts): where the files go
   // (shared storage when running several API servers), and for how many days
   // each can be downloaded
@@ -174,6 +181,18 @@ const envSchema = z.object({
   // Outgoing webhooks (lib/webhooks.ts) only go to public addresses; true
   // allows private ones and plain http (development and tests only)
   WEBHOOK_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
+  // How long a person's permissions are kept between requests (ms), while
+  // nothing about who may do what has changed in their tenant
+  // (middleware/authorize.ts). Any such change is seen on the next request;
+  // access that starts or ends at a set time is seen within this long. 0 =
+  // worked out on every request.
+  PERMISSION_CACHE_TTL_MS: z.string().default('10000').transform(Number),
+  // GET /internal/metrics (lib/metrics.ts): when set, the request must carry it as a bearer token
+  METRICS_TOKEN: z.string().optional(),
+  // Identity providers for single sign-on (lib/sso.ts) must be at public
+  // addresses in production; true allows private ones, for an installation
+  // whose identity provider is on its own network
+  SSO_ALLOW_PRIVATE: z.enum(['true', 'false']).default('false'),
   // Hosts an external product's lifecycle callback may use in production
   // without https or on an inside address (a product on the same network,
   // e.g. "appforge"), comma-separated (lib/product-lifecycle.ts)
@@ -348,6 +367,7 @@ export const config = {
   devExposeOtp: env.NODE_ENV === 'development' && env.DEV_EXPOSE_OTP === 'true',
   accessTokenExpiry: env.ACCESS_TOKEN_EXPIRY,
   refreshTokenExpiry: env.REFRESH_TOKEN_EXPIRY,
+  refreshReuseGraceMs: env.REFRESH_REUSE_GRACE_MS,
   platformSessionIdleMinutes: env.PLATFORM_SESSION_IDLE_MINUTES,
   platformSessionMaxHours: env.PLATFORM_SESSION_MAX_HOURS,
   platformMfaRequired: env.PLATFORM_MFA_REQUIRED === 'true',
@@ -356,6 +376,7 @@ export const config = {
   exportDir: env.EXPORT_DIR,
   exportRetentionDays: env.EXPORT_RETENTION_DAYS,
   auditArchiveIntervalMs: env.AUDIT_ARCHIVE_INTERVAL_MS,
+  auditVerifyIntervalMs: env.AUDIT_VERIFY_INTERVAL_MS,
   notificationPollMs: env.NOTIFICATION_POLL_MS,
   supportMaxHours: env.SUPPORT_MAX_HOURS,
   selfSignup: env.SELF_SIGNUP === 'true',
@@ -385,6 +406,9 @@ export const config = {
     graceDays: env.BILLING_GRACE_DAYS,
   },
   webhookAllowPrivate: env.WEBHOOK_ALLOW_PRIVATE === 'true',
+  ssoAllowPrivate: env.SSO_ALLOW_PRIVATE === 'true',
+  metricsToken: env.METRICS_TOKEN || undefined,
+  permissionCacheTtlMs: env.PERMISSION_CACHE_TTL_MS,
   productCallbackAllowedHosts: env.PRODUCT_CALLBACK_ALLOWED_HOSTS.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
   runJobs: env.RUN_JOBS === 'true',
   exportPollMs: env.EXPORT_POLL_MS,

@@ -1,9 +1,10 @@
+import crypto from 'node:crypto';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import {
-  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, tenantForSignIn,
+  activeSessions, findRefreshToken, revokeRefreshToken, revokeRefreshTokenValue, sessionContinues, tenantForSignIn,
   type SessionOwner,
 } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -11,7 +12,7 @@ import { loginRateLimit, otpRequestRateLimit, otpVerifyRateLimit } from '../lib/
 import { config } from '../config/env.js';
 import { sendMail } from '../lib/mailer.js';
 import { otpEmail } from '../lib/email-templates.js';
-import { verifyPassword } from '../utils/auth.js';
+import { checkSignInPassword, hashPassword, passwordNeedsRehash } from '../utils/auth.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
 import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
@@ -21,24 +22,34 @@ import { finishSso, SsoError, ssoRedirectUriFor, startSso, userForIdentity } fro
 import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
+import { emailInput, findUserByEmail } from '../lib/emails.js';
 
 // Validation schemas
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
   password: z.string().min(1),
 });
 
 const otpRequestSchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
 });
 
 const otpVerifySchema = z.object({
-  email: z.string().email(),
+  email: emailInput(),
   tenantSlug: z.string(),
   code: z.string().length(6),
 });
+
+/**
+ * Emailed sign-in codes are kept as a keyed hash, bound to the organization
+ * and address they were sent to. Six digits are too few for a plain hash (a
+ * copy of the table could be tried against every code in a moment), so the
+ * key is derived from JWT_SECRET, which isn't in the database.
+ */
+const otpKey = crypto.createHmac('sha256', config.jwtSecret).update('emailed sign-in codes').digest();
+const hashOtp = (tenantId: string, email: string, code: string) => crypto.createHmac('sha256', otpKey).update(`${tenantId}:${email}:${code}`).digest('hex');
 
 /** What a sign-in step returns when two-factor comes next (no session yet). */
 const mfaNext = (r: NonNullable<SignInResult>) => ({
@@ -85,13 +96,18 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     // tenant users through their tenant's slug, in its database
     if (isPlatformSlug(tenantSlug)) {
       const user = await controlDb.platformUser.findUnique({ where: { email } });
-      if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+      if (!(await checkSignInPassword(password, user?.passwordHash)) || !user?.passwordHash) {
         await recordSignInFailure(request, 'platform', { email, userId: user?.id, method: 'password', reason: user ? 'wrong password' : 'no such account' });
         throw new AppError('Invalid credentials', 401);
       }
       if (user.status !== 'ACTIVE') {
         await recordSignInFailure(request, 'platform', { email, userId: user.id, method: 'password', reason: 'account not active' });
         throw new AppError('User account is not active', 403);
+      }
+      // A hash from before the current cost: replace it now that the password is known to be right
+      if (passwordNeedsRehash(user.passwordHash)) {
+        await controlDb.platformUser.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } })
+          .catch((err) => request.log.warn({ err }, 'Password hash not upgraded'));
       }
       const next = await completeSignIn(fastify, request, reply, 'platform', user);
       if (next) return mfaNext(next);
@@ -104,13 +120,13 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { tenant, db } = await tenantForSignIn(tenantSlug);
-    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
+    const user = await findUserByEmail(db, tenant.id, email);
 
     const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
     const refuse = (reason: string) => recordSignInFailure(request, owner, { email, userId: user?.id, method: 'password', reason });
 
     // Password is required. Verify it before revealing anything else about the account.
-    if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+    if (!(await checkSignInPassword(password, user?.passwordHash)) || !user?.passwordHash) {
       await refuse(user ? 'wrong password' : 'no such account');
       throw new AppError('Invalid credentials', 401);
     }
@@ -122,6 +138,11 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     if (user.status !== 'ACTIVE') {
       await refuse('account not active');
       throw new AppError('User account is not active', 403);
+    }
+
+    if (passwordNeedsRehash(user.passwordHash)) {
+      await db.user.updateMany({ where: { id: user.id, tenantId: tenant.id }, data: { passwordHash: await hashPassword(password) } })
+        .catch((err) => request.log.warn({ err }, 'Password hash not upgraded'));
     }
 
     const next = await completeSignIn(fastify, request, reply, owner, user);
@@ -160,18 +181,17 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const { tenant, db } = await tenantForSignIn(tenantSlug);
     const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
 
+    // Single sign-on only means exactly that: emailed codes are off too
+    if (authConfig?.ssoOnly) {
+      throw new AppError('SSO authentication required', 403);
+    }
     // Check if OTP is enabled
     if (!authConfig?.otpEnabled) {
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
     }
 
     // Find user
-    const user = await db.user.findFirst({
-      where: {
-        tenantId: tenant.id,
-        email,
-      },
-    });
+    const user = await findUserByEmail(db, tenant.id, email);
 
     if (!user) {
       if (config.devExposeOtp) {
@@ -203,7 +223,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       data: {
         tenantId: tenant.id,
         email,
-        code,
+        code: hashOtp(tenant.id, email, code),
         expiresAt,
       },
     });
@@ -250,8 +270,20 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     const { tenant, db } = await tenantForSignIn(tenantSlug);
     const owner = { tenantId: tenant.id, tenantSlug: tenant.slug };
 
+    // The settings as they are now: a code sent before emailed codes were
+    // turned off, or before single sign-on became the only way in, is no use
+    const authConfig = await db.authConfig.findUnique({ where: { tenantId: tenant.id } });
+    if (authConfig?.ssoOnly) {
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'single sign-on only' });
+      throw new AppError('SSO authentication required', 403);
+    }
+    if (!authConfig?.otpEnabled) {
+      await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'emailed codes are off' });
+      throw new AppError('OTP authentication is not enabled for this tenant', 400);
+    }
+
     const otpRecord = await db.otpCode.findFirst({
-      where: { tenantId: tenant.id, email, code, verified: false },
+      where: { tenantId: tenant.id, email, code: hashOtp(tenant.id, email, code), verified: false },
     });
     if (!otpRecord) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });
@@ -264,7 +296,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
     await db.otpCode.update({ where: { id: otpRecord.id }, data: { verified: true } });
 
-    const user = await db.user.findFirst({ where: { tenantId: tenant.id, email } });
+    const user = await findUserByEmail(db, tenant.id, email);
     if (!user) {
       throw new AppError('User not found', 404);
     }
@@ -366,8 +398,16 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    // Token reuse: someone presented a rotated-out token. Revoke the whole family.
     if (storedToken.revokedAt) {
+      // Replaced a moment ago, and the session carries on with the new token:
+      // two requests crossed (another tab, a retry). The other one's answer
+      // set the new cookies; this one is told to use them. Nothing is issued
+      // here, so a copied token gains nothing from the allowance.
+      const sinceReplaced = Date.now() - storedToken.revokedAt.getTime();
+      if (sinceReplaced < config.refreshReuseGraceMs && (await sessionContinues(storedToken))) {
+        throw new AppError('The session was just renewed by another request', 409, true, 'REFRESH_SUPERSEDED');
+      }
+      // Token reuse: someone presented a rotated-out token. Revoke the whole family.
       await revokeRefreshToken(storedToken, 'family');
       throw new AppError('Token reuse detected - all sessions revoked', 401);
     }

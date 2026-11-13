@@ -15,7 +15,7 @@ import { hiddenProductTypes, refreshProductCatalog } from '../lib/product-catalo
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { assertWebhookUrl, newSigningSecret, retryDelivery, sendTestEvent, webhookEvents } from '../lib/webhooks.js';
 
 const MAX_ENDPOINTS = 20;
@@ -83,10 +83,13 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError(`An organization can have at most ${MAX_ENDPOINTS} webhooks`, 409);
     }
     const secret = newSigningSecret();
-    const e = await request.db.webhookEndpoint.create({
-      data: { tenantId: request.tenant.id, url, description: body.description || null, events: [...new Set(body.events)], signingSecret: secret, createdById: request.user.userId },
+    const e = await withAudit(request, async (tx, record) => {
+      const e = await tx.webhookEndpoint.create({
+        data: { tenantId: request.tenant.id, url, description: body.description || null, events: [...new Set(body.events)], signingSecret: secret, createdById: request.user.userId },
+      });
+      await record('webhook.created', { resource: { type: 'webhook', id: e.id, label: url }, details: { events: e.events } });
+      return e;
     });
-    await audit(request, 'webhook.created', { resource: { type: 'webhook', id: e.id, label: url }, details: { events: e.events } });
     return reply.status(201).send({ ...view(e), secret });
   });
 
@@ -125,8 +128,10 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
     assertPerson(request);
     const e = await endpointOf(request);
     const secret = newSigningSecret();
-    await request.db.webhookEndpoint.update({ where: { id: e.id }, data: { signingSecret: secret } });
-    await audit(request, 'webhook.secret_rotated', { resource: { type: 'webhook', id: e.id, label: e.url } });
+    await withAudit(request, async (tx, record) => {
+      await tx.webhookEndpoint.update({ where: { id: e.id }, data: { signingSecret: secret } });
+      await record('webhook.secret_rotated', { resource: { type: 'webhook', id: e.id, label: e.url } });
+    });
     return { secret };
   });
 
@@ -136,8 +141,10 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
     assertPerson(request);
     const e = await endpointOf(request);
-    await request.db.webhookEndpoint.deleteMany({ where: { id: e.id, tenantId: request.tenant.id } });
-    await audit(request, 'webhook.deleted', { resource: { type: 'webhook', id: e.id, label: e.url } });
+    await withAudit(request, async (tx, record) => {
+      await tx.webhookEndpoint.deleteMany({ where: { id: e.id, tenantId: request.tenant.id } });
+      await record('webhook.deleted', { resource: { type: 'webhook', id: e.id, label: e.url } });
+    });
     return reply.status(204).send();
   });
 

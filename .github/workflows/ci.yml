@@ -40,6 +40,27 @@ jobs:
             echo "The base branch has no API v1 document yet"
           fi
 
+      # Migrations are applied in name order. One that sorts before a
+      # migration already on the base branch would run out of order on
+      # databases that have the later one, and in order on new ones.
+      - name: New migrations sort after the existing ones
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git fetch --depth 1 origin "${{ github.base_ref }}"
+          for plane in control tenant; do
+            dir=prisma/$plane/migrations
+            base=$(git ls-tree --full-tree -d --name-only "FETCH_HEAD:backend/$dir" 2>/dev/null | sort || true)
+            [ -n "$base" ] || continue
+            last=$(tail -1 <<<"$base")
+            for m in $(comm -13 <(echo "$base") <(find "$dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)); do
+              if [[ "$m" < "$last" ]]; then
+                echo "::error::$dir/$m sorts before $last, which is already on ${{ github.base_ref }}. Rename its folder so it sorts last."
+                exit 1
+              fi
+            done
+          done
+
   # The generated TypeScript client matches the API v1 document and compiles
   client:
     runs-on: ubuntu-latest
@@ -159,6 +180,9 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
+      # Errors fail the build; the React Compiler's rules are warnings for now (eslint.config.js)
+      - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   # Known vulnerabilities in what ships (development tools excluded)
@@ -222,6 +246,13 @@ jobs:
             sleep 2
           done
           echo "::error::The stack did not come up"; exit 1
+      - name: The API's internal routes are not reachable from outside
+        run: |
+          # Straight from Caddy (an empty 404), not the API's own JSON answer
+          code=$(curl -s -o internal.txt -w '%{http_code}' 'http://localhost/api/internal/tls-allowed?domain=example.com')
+          if [ "$code" != 404 ] || [ -s internal.txt ]; then
+            echo "::error::/api/internal/ answered $code with a body: $(head -c 200 internal.txt)"; exit 1
+          fi
       - name: The release step ran
         run: |
           $COMPOSE logs migrate

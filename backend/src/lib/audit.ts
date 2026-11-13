@@ -20,8 +20,12 @@
  * removed from the live table; verification continues across them. A
  * tenant's whole log is archived before the tenant is deleted.
  *
- * Recording never fails the action it records: the action has already
- * happened, so a failure to record is logged loudly instead.
+ * Two ways to record. Changes that must never go unrecorded (who may do
+ * what, sign-in settings, keys, support access) are made inside withAudit()
+ * or withPlatformAudit(): the change and its entry are one transaction, so
+ * neither exists without the other. Everything else uses audit() after the
+ * change: there the action has already happened, so a failure to record is
+ * logged loudly instead of failing it.
  */
 import { productAuditEvents } from './product-catalog.js';
 import crypto from 'node:crypto';
@@ -33,8 +37,8 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import type { FastifyRequest } from 'fastify';
 import { config } from '../config/env.js';
-import { controlDb } from './prisma.js';
-import { dbForTenant, targetForTenant } from './tenant-db.js';
+import { controlDb, type ControlDb } from './prisma.js';
+import { dbForTenant, targetForTenant, type TenantDb } from './tenant-db.js';
 import { platformDb } from './tenant-targets.js';
 import { SECRET_FIELDS } from './secrets.js';
 import { KIT_AUDIT_EVENTS, type AuditCategory, type AuditEventDefinition } from '../kit/audit-events.js';
@@ -310,78 +314,194 @@ export async function audit(
   }
 }
 
-/** Record an entry outside a request (background jobs, scripts). Throws for an unknown event or missing tenant. */
-export async function recordAudit(ctx: AuditContext, event: string, input: AuditInput = {}): Promise<{ chain: string; seq: number; hash: string }> {
-  // Whatever reacts to entries (notifications) registers its hooks when loaded
+/** An entry worked out but not yet written: which chain it belongs to and everything but its place in it */
+interface Prepared {
+  chain: string;
+  event: string;
+  definition: AuditEventDefinition;
+  tenantField: string | null;
+  keyVersion: number;
+  base: {
+    occurredAt: Date; event: string; category: AuditCategory; outcome: AuditOutcome;
+    actorType: AuditActorType; actorId: string | null; actorEmail: string | null;
+    resourceType: string | null; resourceId: string | null; resourceLabel: string | null;
+    changes: object | undefined; details: object | undefined;
+    ip: string | null; userAgent: string | null; requestId: string | null;
+  };
+}
+
+/** An entry that has been written (in a transaction that may not have committed yet) */
+interface Appended {
+  chain: string;
+  event: string;
+  definition: AuditEventDefinition;
+  seq: number;
+  hash: string;
+  content: Content;
+}
+
+/** Whatever reacts to entries (notifications, webhooks) registers its hooks when loaded */
+function loadExtensions(): Promise<unknown> {
   extensionsLoaded ??= Promise.all([import('./notifications.js'), import('./webhooks.js'), import('./product-user-events.js'), import('./oidc/logout.js')]);
-  await extensionsLoaded;
+  return extensionsLoaded;
+}
+
+/** Check the event and build the entry's content. No database access. */
+function prepare(ctx: AuditContext, event: string, input: AuditInput): Prepared {
   const definition = auditCatalog()[event];
   if (!definition) throw new Error(`Unknown audit event "${event}": add it to src/kit/audit-events.ts or the product's auditEvents`);
   const chain = definition.scope === 'platform' ? PLATFORM_CHAIN : ctx.tenantId;
   if (!chain) throw new Error(`Audit event "${event}" belongs in a tenant's log, but there is no tenant`);
-
-  const base = {
-    occurredAt: new Date(),
+  return {
+    chain,
     event,
-    category: definition.category as AuditCategory,
-    outcome: input.outcome ?? 'SUCCESS',
-    actorType: ctx.actor.type,
-    actorId: ctx.actor.id ?? null,
-    actorEmail: ctx.actor.email ?? null,
-    resourceType: input.resource?.type ?? null,
-    resourceId: input.resource?.id ?? null,
-    resourceLabel: input.resource?.label?.slice(0, 500) ?? null,
-    changes: input.changes && Object.keys(input.changes).length ? (redact(input.changes) as object) : undefined,
-    details: input.details ? (redact(input.details) as object) : undefined,
-    ip: ctx.ip ?? null,
-    userAgent: ctx.userAgent ?? null,
-    requestId: ctx.requestId ?? null,
+    definition,
+    // Platform entries name the tenant they concern; tenant entries are their tenant's
+    tenantField: chain === PLATFORM_CHAIN ? (input.tenantId ?? null) : chain,
+    keyVersion: activeAuditKeyVersion(),
+    base: {
+      occurredAt: new Date(),
+      event,
+      category: definition.category as AuditCategory,
+      outcome: input.outcome ?? 'SUCCESS',
+      actorType: ctx.actor.type,
+      actorId: ctx.actor.id ?? null,
+      actorEmail: ctx.actor.email ?? null,
+      resourceType: input.resource?.type ?? null,
+      resourceId: input.resource?.id ?? null,
+      resourceLabel: input.resource?.label?.slice(0, 500) ?? null,
+      changes: input.changes && Object.keys(input.changes).length ? (redact(input.changes) as object) : undefined,
+      details: input.details ? (redact(input.details) as object) : undefined,
+      ip: ctx.ip ?? null,
+      userAgent: ctx.userAgent ?? null,
+      requestId: ctx.requestId ?? null,
+    },
   };
-  const keyVersion = activeAuditKeyVersion();
-  // Platform entries name the tenant they concern; tenant entries are their tenant's
-  const tenantField = chain === PLATFORM_CHAIN ? (input.tenantId ?? null) : chain;
+}
 
-  const write = async (last: { seq: number; hash: string } | null) => {
-    const seq = (last?.seq ?? 0) + 1;
-    const prevHash = last?.hash ?? GENESIS;
-    const content = contentOf(chain, { ...base, id: '', tenantId: tenantField, seq, prevHash, hash: '', keyVersion } as StoredEntry);
-    return { seq, prevHash, hash: hashEntry(prevHash, content, keyVersion), content };
-  };
+/** The parts of a transaction client the chain needs (the control plane's for the platform chain, a tenant's otherwise) */
+interface ChainTx {
+  $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+  auditEvent: { findFirst: (args: object) => Promise<{ seq: number; hash: string } | null>; create: (args: object) => Promise<unknown> };
+  platformAuditEvent: { findFirst: (args: object) => Promise<{ seq: number; hash: string } | null>; create: (args: object) => Promise<unknown> };
+}
 
-  let result: { seq: number; hash: string; content: Content };
+/**
+ * Write an entry at the end of its chain, inside `tx`: the chain's lock (held
+ * until the transaction ends), the entry, and whatever is saved with it (the
+ * notification and webhook outboxes). It exists if and only if the
+ * transaction commits.
+ */
+async function appendWithin(tx: unknown, p: Prepared): Promise<Appended> {
+  const t = tx as ChainTx;
+  const { chain, base, keyVersion, tenantField } = p;
+  await t.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`audit:${chain}`}))::text`;
+  const last =
+    (chain === PLATFORM_CHAIN
+      ? await t.platformAuditEvent.findFirst({ orderBy: { seq: 'desc' }, select: { seq: true, hash: true } })
+      : await t.auditEvent.findFirst({ where: { tenantId: chain }, orderBy: { seq: 'desc' }, select: { seq: true, hash: true } })) ?? (await archivedTail(chain));
+  const seq = (last?.seq ?? 0) + 1;
+  const prevHash = last?.hash ?? GENESIS;
+  const content = contentOf(chain, { ...base, id: '', tenantId: tenantField, seq, prevHash, hash: '', keyVersion } as StoredEntry);
+  const hash = hashEntry(prevHash, content, keyVersion);
   if (chain === PLATFORM_CHAIN) {
-    result = await controlDb.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`audit:${chain}`}))::text`;
-      const last = (await tx.platformAuditEvent.findFirst({ orderBy: { seq: 'desc' }, select: { seq: true, hash: true } })) ?? (await archivedTail(chain));
-      const next = await write(last);
-      await tx.platformAuditEvent.create({ data: { ...base, tenantId: tenantField, seq: next.seq, prevHash: next.prevHash, hash: next.hash, keyVersion } });
-      for (const hook of txHooks) await hook({ tx, chain, entry: next.content });
-      return next;
-    });
+    await t.platformAuditEvent.create({ data: { ...base, tenantId: tenantField, seq, prevHash, hash, keyVersion } });
   } else {
-    const db = await dbForTenant(chain);
-    result = await db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`audit:${chain}`}))::text`;
-      const last =
-        (await tx.auditEvent.findFirst({ where: { tenantId: chain }, orderBy: { seq: 'desc' }, select: { seq: true, hash: true } })) ??
-        (await archivedTail(chain));
-      const next = await write(last);
-      await tx.auditEvent.create({ data: { ...base, tenantId: chain, seq: next.seq, prevHash: next.prevHash, hash: next.hash, keyVersion } });
-      for (const hook of txHooks) await hook({ tx, chain, entry: next.content });
-      return next;
-    });
+    await t.auditEvent.create({ data: { ...base, tenantId: chain, seq, prevHash, hash, keyVersion } });
   }
+  for (const hook of txHooks) await hook({ tx, chain, entry: content });
+  return { chain, event: p.event, definition: p.definition, seq, hash, content };
+}
 
-  // The chain's head, kept apart from the chain itself
-  await moveHead(chain, result.seq, result.hash).catch((err) => warn(`Audit head for ${chain} not updated`, err));
+/** After the transaction committed: the chain's head, kept apart from the chain itself, and whoever listens */
+async function settle(a: Appended): Promise<void> {
+  await moveHead(a.chain, a.seq, a.hash).catch((err) => warn(`Audit head for ${a.chain} not updated`, err));
   for (const listener of listeners) {
     try {
-      await listener({ chain, event, definition, entry: result.content });
+      await listener({ chain: a.chain, event: a.event, definition: a.definition, entry: a.content });
     } catch (err) {
-      warn(`Audit listener failed for ${event}`, err);
+      warn(`Audit listener failed for ${a.event}`, err);
     }
   }
-  return { chain, seq: result.seq, hash: result.hash };
+}
+
+/** Record an entry outside a request (background jobs, scripts). Throws for an unknown event or missing tenant. */
+export async function recordAudit(ctx: AuditContext, event: string, input: AuditInput = {}): Promise<{ chain: string; seq: number; hash: string }> {
+  await loadExtensions();
+  const prepared = prepare(ctx, event, input);
+  const appended =
+    prepared.chain === PLATFORM_CHAIN
+      ? await controlDb.$transaction((tx) => appendWithin(tx, prepared))
+      : await (await dbForTenant(prepared.chain)).$transaction((tx) => appendWithin(tx, prepared));
+  await settle(appended);
+  return { chain: appended.chain, seq: appended.seq, hash: appended.hash };
+}
+
+// ---------------------------------------------------------------------------
+// Recording in the same transaction as the change
+// ---------------------------------------------------------------------------
+//
+// audit() and recordAudit() write the entry after the change has been saved:
+// a crash in between leaves a change with no entry. For changes that must
+// never go unrecorded, the handler makes the change inside withAudit() (a
+// tenant's data) or withPlatformAudit() (the control plane) and records the
+// entry with the `record` it is given: both are saved by one transaction, or
+// neither is. A failure to record therefore undoes the change.
+//
+// Inside the callback use only `tx` and `record`: anything that takes another
+// connection from the same small pool (request.db, dbForTenant) can leave
+// requests waiting on each other. Emails, the activity feed and other
+// follow-up work go after the call. Record last, so the chain's lock is held
+// as briefly as possible.
+//
+// One transaction covers one database. An entry for a tenant's log can't be
+// saved with a change in the control plane (or the reverse): those keep
+// using audit().
+
+/** A tenant's transaction client, as request.db.$transaction() hands it over */
+export type TenantTx = Omit<TenantDb, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+/** The control plane's transaction client */
+export type ControlTx = Omit<ControlDb, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+/** Records an entry in the surrounding transaction */
+export type RecordInTx = (event: string, input?: AuditInput) => Promise<void>;
+
+/**
+ * Change a tenant's data and record it, in one transaction of the request's
+ * tenant database. Only tenant-scoped events can be recorded here.
+ */
+export async function withAudit<T>(request: FastifyRequest, work: (tx: TenantTx, record: RecordInTx) => Promise<T>): Promise<T> {
+  // Who and where from, before the transaction opens (looking the actor up uses another connection)
+  const ctx = await contextOf(request);
+  await loadExtensions();
+  const appended: Appended[] = [];
+  const result = await request.db.$transaction(async (tx) =>
+    work(tx, async (event, input = {}) => {
+      const prepared = prepare(ctx, event, input);
+      if (prepared.chain === PLATFORM_CHAIN) throw new Error(`Audit event "${event}" belongs in the platform's log: it can't be recorded in a tenant's transaction`);
+      appended.push(await appendWithin(tx, prepared));
+    }),
+  );
+  for (const a of appended) await settle(a);
+  return result;
+}
+
+/**
+ * Change the control plane and record it in the platform's log, in one
+ * control-plane transaction. Only platform-scoped events can be recorded here.
+ */
+export async function withPlatformAudit<T>(request: FastifyRequest, work: (tx: ControlTx, record: RecordInTx) => Promise<T>): Promise<T> {
+  const ctx = await contextOf(request);
+  await loadExtensions();
+  const appended: Appended[] = [];
+  const result = await controlDb.$transaction(async (tx) =>
+    work(tx, async (event, input = {}) => {
+      const prepared = prepare(ctx, event, input);
+      if (prepared.chain !== PLATFORM_CHAIN) throw new Error(`Audit event "${event}" belongs in a tenant's log: it can't be recorded in a control-plane transaction`);
+      appended.push(await appendWithin(tx, prepared));
+    }),
+  );
+  for (const a of appended) await settle(a);
+  return result;
 }
 
 /** The last archived entry of a chain whose live table is empty (all archived). */
@@ -731,6 +851,60 @@ export function startAuditArchiving(log: (msg: string, err?: unknown) => void) {
 }
 export function stopAuditArchiving() {
   if (timer) clearInterval(timer);
+}
+
+// ---------------------------------------------------------------------------
+// Checking on a schedule
+// ---------------------------------------------------------------------------
+
+/**
+ * Check every chain (the platform's and each ready tenant's) and return the
+ * ones that don't verify. Live entries and the recorded head by default;
+ * `archives` reads the archive files too (the CLI does).
+ *
+ * An entry written, or a batch archived, while a chain is being read can
+ * look like a gap, so a chain that fails is read once more before it counts.
+ */
+export async function verifyAllChains({ archives = false, recheckAfterMs = 5000 } = {}): Promise<VerifyReport[]> {
+  const tenants = await controlDb.tenant.findMany({ where: { provisioningStatus: 'READY' }, select: { id: true } });
+  const broken: VerifyReport[] = [];
+  for (const chain of [PLATFORM_CHAIN, ...tenants.map((t) => t.id)]) {
+    try {
+      let report = await verifyChain(chain, { archives });
+      if (!report.ok) {
+        await new Promise((r) => setTimeout(r, recheckAfterMs));
+        report = await verifyChain(chain, { archives });
+      }
+      if (!report.ok) broken.push(report);
+    } catch (err) {
+      // Unreachable or deleted meanwhile: not evidence of tampering
+      warn(`The audit log of ${chain} could not be checked`, err);
+    }
+  }
+  return broken;
+}
+
+let verifyTimer: NodeJS.Timeout | undefined;
+/** Every AUDIT_VERIFY_INTERVAL_MS: a chain that doesn't verify is logged as an error and reported (error tracking). */
+export function startAuditVerification(log: (msg: string, err?: unknown) => void) {
+  if (!config.auditVerifyIntervalMs) return;
+  const run = async () => {
+    try {
+      for (const r of await verifyAllChains()) {
+        const what = r.problems.slice(0, 3).map((p) => (p.seq === undefined ? p.problem : `entry ${p.seq}: ${p.problem}`)).join('; ');
+        const message = `AUDIT LOG DOES NOT VERIFY: ${r.chain === PLATFORM_CHAIN ? 'the platform log' : `tenant ${r.chain}`} (${what})`;
+        log(message, new Error(message));
+      }
+    } catch (err) {
+      log('Checking the audit logs failed', err);
+    }
+  };
+  verifyTimer = setInterval(() => void run(), config.auditVerifyIntervalMs);
+  verifyTimer.unref();
+}
+export function stopAuditVerification() {
+  if (verifyTimer) clearInterval(verifyTimer);
+  verifyTimer = undefined;
 }
 
 /** Stream an archive file (for download). */

@@ -1,5 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { getEnhancedUserPermissions, type ScopedGrant } from '../utils/authorization.js';
+import { getEnhancedUserPermissions, isPlatformUser, type ScopedGrant, type UserType } from '../utils/authorization.js';
+import { config } from '../config/env.js';
+import { countPermissionLookup } from '../lib/metrics.js';
 import { PLATFORM_RESOURCES, permissionMatches } from '../utils/permissions.js';
 import { sessionPermissions } from '../lib/support.js';
 import { AppError } from './error-handler.js';
@@ -48,6 +50,68 @@ declare module 'fastify' {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Permissions kept between requests
+// ---------------------------------------------------------------------------
+//
+// Working out what someone may do reads their role assignments, their groups
+// and the groups' assignments, and their delegations: several queries, on
+// every request. For a tenant's users the answer is kept, per person, for as
+// long as nothing about who may do what has changed in their tenant.
+//
+// "Nothing has changed" is the tenant's access version (access_versions), a
+// number a database trigger moves on with every write to roles, their
+// permissions, assignments, groups, memberships and delegations, whoever
+// makes it and from whichever server. Each request reads it (one query) and
+// uses what is kept only if it was worked out at that version. So a grant or
+// a revocation applies on the very next request, as before.
+//
+// Two things the version doesn't see:
+// - Access that starts or ends at a set time (validFrom, validTo). What is
+//   kept is thrown away after PERMISSION_CACHE_TTL_MS, so it is seen within
+//   that long.
+// - An organization's administrators also hold the permissions of the
+//   applications it has turned on, which change in the control plane. Theirs
+//   are worked out every time, as are platform staff's.
+
+interface KeptAccess {
+  version: number;
+  expires: number;
+  permissions: string[];
+  scoped: ScopedGrant[];
+}
+const keptAccess = new Map<string, KeptAccess>();
+const KEPT_MAX = 5000;
+
+/** Forget what is kept (tests) */
+export function clearKeptAccess() {
+  keptAccess.clear();
+}
+
+async function tenantUserAccess(request: FastifyRequest, userId: string, userType: string): Promise<{ permissions: string[]; scoped: ScopedGrant[] }> {
+  const tenantId = request.tenant?.id;
+  const ttl = config.permissionCacheTtlMs;
+  if (!ttl || !tenantId || userType === 'TENANT_ADMIN' || isPlatformUser(userType as UserType)) {
+    return getEnhancedUserPermissions(userId, tenantId, userType);
+  }
+  // Read before working anything out: a change that lands in between is then
+  // kept under the older number, and worked out again next time
+  const version = (await request.db.accessVersion.findUnique({ where: { tenantId }, select: { version: true } }))?.version ?? 0;
+  const key = `${tenantId}:${userId}:${userType}`;
+  const kept = keptAccess.get(key);
+  if (kept && kept.version === version && kept.expires > Date.now()) {
+    countPermissionLookup('hit');
+    return kept;
+  }
+  countPermissionLookup('miss');
+  const { permissions, scoped } = await getEnhancedUserPermissions(userId, tenantId, userType);
+  keptAccess.delete(key);
+  keptAccess.set(key, { version, expires: Date.now() + ttl, permissions, scoped });
+  // The oldest entry goes when there are too many
+  if (keptAccess.size > KEPT_MAX) keptAccess.delete(keptAccess.keys().next().value!);
+  return { permissions, scoped };
+}
+
 export async function loadPermissions(request: FastifyRequest): Promise<Set<string>> {
   if (!request.effectivePermissions) {
     const { userId, userType } = request.user;
@@ -63,7 +127,7 @@ export async function loadPermissions(request: FastifyRequest): Promise<Set<stri
       request.effectivePermissions = new Set([...platformOnly, ...sessionPermissions(request.supportSession)]);
       request.scopedGrants = [];
     } else {
-      const { permissions, scoped } = await getEnhancedUserPermissions(userId, request.tenant?.id, userType);
+      const { permissions, scoped } = await tenantUserAccess(request, userId, userType);
       request.effectivePermissions = new Set(permissions);
       request.scopedGrants = scoped;
     }
