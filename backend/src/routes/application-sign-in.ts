@@ -95,16 +95,19 @@ export const applicationSignInRoutes: FastifyPluginAsync = async (fastify) => {
       ...(secret && { oidcClientSecret: secret, secretCreatedAt: new Date() }),
       ...(data.clientType === 'PUBLIC' && { oidcClientSecret: null, secretCreatedAt: null }),
     };
-    const saved = await controlDb.applicationSignIn.upsert({
-      where: { applicationId: id },
-      create: { applicationId: id, clientId: newClientId(), ...fields },
-      update: fields,
-    });
     const { oidcClientSecret: _a, secretCreatedAt: _b, ...changed } = fields;
-    await audit(request, 'application.sign_in_updated', {
-      resource: { type: 'application', id, label: app.name },
-      changes: diff(before ?? {}, changed),
-      details: { clientId: saved.clientId, ...(secret && { newClientSecret: true }) },
+    const saved = await withPlatformAudit(request, async (tx, record) => {
+      const settings = await tx.applicationSignIn.upsert({
+        where: { applicationId: id },
+        create: { applicationId: id, clientId: newClientId(), ...fields },
+        update: fields,
+      });
+      await record('application.sign_in_updated', {
+        resource: { type: 'application', id, label: app.name },
+        changes: diff(before ?? {}, changed),
+        details: { clientId: settings.clientId, ...(secret && { newClientSecret: true }) },
+      });
+      return settings;
     });
     return { ...provider(), settings: view(saved), ...(secret && { clientSecret: secret }) };
   });

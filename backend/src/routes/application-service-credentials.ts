@@ -73,10 +73,12 @@ export const applicationServiceCredentialRoutes: FastifyPluginAsync = async (fas
   }, async (request, reply) => {
     const { id, credentialId } = request.params as { id: string; credentialId: string };
     const app = await findApp(id);
-    const { count } = await controlDb.productServiceCredential.updateMany({ where: { id: credentialId, applicationId: app.id, revokedAt: null }, data: { revokedAt: new Date() } });
-    if (!count) throw new AppError('No such active credential', 404);
-    const c = await controlDb.productServiceCredential.findUniqueOrThrow({ where: { id: credentialId } });
-    await audit(request, 'application.service_credential_revoked', { resource: { type: 'application', id: app.id, label: app.name }, details: { credential: c.name, clientId: c.clientId } });
+    await withPlatformAudit(request, async (tx, record) => {
+      const { count } = await tx.productServiceCredential.updateMany({ where: { id: credentialId, applicationId: app.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      if (!count) throw new AppError('No such active credential', 404);
+      const c = await tx.productServiceCredential.findUniqueOrThrow({ where: { id: credentialId } });
+      await record('application.service_credential_revoked', { resource: { type: 'application', id: app.id, label: app.name }, details: { credential: c.name, clientId: c.clientId } });
+    });
     return reply.status(204).send();
   });
 };

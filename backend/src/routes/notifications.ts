@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { SessionOwner } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
-import { audit, diff } from '../lib/audit.js';
+import { audit, diff, withAudit } from '../lib/audit.js';
 import { describeMailError, sendMail } from '../lib/mailer.js';
 import { testEmail } from '../lib/email-templates.js';
 import {
@@ -124,11 +124,13 @@ export const notificationSettingRoutes: FastifyPluginAsync = async (fastify) => 
       if (def?.scope !== 'tenant') throw new AppError(`Unknown notification type "${type}"`, 400);
       if (def.mandatory && !s.enabled) throw new AppError(`"${def.label}" is a security notice and can't be turned off`, 400);
       const before = await request.db.notificationSetting.findUnique({ where: { tenantId_type: { tenantId, type } } });
-      await request.db.notificationSetting.upsert({ where: { tenantId_type: { tenantId, type } }, create: { tenantId, type, ...s }, update: s });
       const changes = diff(before ?? { enabled: true, inApp: true, email: true, mandatory: false }, s);
-      if (Object.keys(changes).length) {
-        await audit(request, 'notification_settings.updated', { resource: { type: 'notification_type', id: type, label: def.label }, changes });
-      }
+      await withAudit(request, async (tx, record) => {
+        await tx.notificationSetting.upsert({ where: { tenantId_type: { tenantId, type } }, create: { tenantId, type, ...s }, update: s });
+        if (Object.keys(changes).length) {
+          await record('notification_settings.updated', { resource: { type: 'notification_type', id: type, label: def.label }, changes });
+        }
+      });
     }
     return { saved: Object.keys(settings).length };
   });
