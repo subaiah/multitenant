@@ -6,6 +6,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import { measureRequests, metricsRoutes } from './lib/metrics.js';
 import { config } from './config/env.js';
 import { serializeRequest } from './lib/log-redaction.js';
 import { controlDb, disconnectDatabases } from './lib/prisma.js';
@@ -120,6 +121,7 @@ async function registerPlugins() {
     reply.header('X-Request-ID', request.id);
     if ((request.raw as { apiVersion?: string }).apiVersion) reply.header('API-Version', '1');
   });
+  measureRequests(fastify);
   // State-changing requests with cookies must come from this app's own pages
   fastify.addHook('onRequest', originGuard(config.corsOrigin.split(',')));
   // Bodies are JSON. Fastify also parses
@@ -258,6 +260,8 @@ async function registerRoutes() {
   await fastify.register(embedRoutes, { prefix: '/embed' });
   // For the web server only (Caddy's on-demand certificates for custom domains)
   await fastify.register(tlsAskRoutes, { prefix: '/internal' });
+  // Metrics for a collector on the same network (lib/metrics.ts)
+  await fastify.register(metricsRoutes, { prefix: '/internal' });
 
   // Protected routes (require authentication)
   await fastify.register(async (protectedRoutes) => {

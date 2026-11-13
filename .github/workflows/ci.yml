@@ -180,6 +180,9 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
+      # Errors fail the build; the React Compiler's rules are warnings for now (eslint.config.js)
+      - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   # Known vulnerabilities in what ships (development tools excluded)

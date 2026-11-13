@@ -123,12 +123,15 @@ export const supportSessionRoutes: FastifyPluginAsync = async (fastify) => {
     // One-person teams: someone who may approve can start their own, if allowed
     if (config.supportSelfApproval && (await hasPermission(request, 'support:manage'))) {
       const now = new Date();
-      await controlDb.supportSession.update({
-        where: { id: created.id },
-        data: { status: 'ACTIVE', approvedBy: me, approvedAt: now, validFrom: now, validTo: new Date(now.getTime() + data.durationMinutes * 60_000), decisionNote: 'Self-approved' },
+      const validTo = new Date(now.getTime() + data.durationMinutes * 60_000);
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.supportSession.update({
+          where: { id: created.id },
+          data: { status: 'ACTIVE', approvedBy: me, approvedAt: now, validFrom: now, validTo, decisionNote: 'Self-approved' },
+        });
+        await record('support_session.approved', { tenantId: created.tenantId, resource: { type: 'support_session', id: created.id, label: tenant.name }, details: { selfApproved: true, requesterId: me, validTo } });
       });
       const s = (await findSession(created.id))!;
-      await audit(request, 'support_session.approved', { tenantId: s.tenantId, resource: { type: 'support_session', id: s.id, label: tenant.name }, details: { selfApproved: true, requesterId: me, validTo: s.validTo } });
       await started(request, s);
       return reply.status(201).send(s);
     }
