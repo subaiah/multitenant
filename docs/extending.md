@@ -195,6 +195,8 @@ After a change, call the hook's `reload()`, or `invalidateApi('/invoices')` to r
 
 The frontend has no explicit `any`; `npm run typecheck` refuses one. The API helpers return `unknown` unless you name the type.
 
+`npm run lint` (ESLint) and `npm test` (Vitest) also run in CI. A test sits next to what it tests, as `name.test.ts` or `name.test.tsx`; `src/lib/api-client.test.ts` and `src/components/PermissionGuard.test.tsx` are the ones to copy from. The React Compiler's rules are warnings for the pages that predate them: new code shouldn't add to them.
+
 ## What the kit calls, and when
 
 | Hook | Called |

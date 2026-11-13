@@ -98,7 +98,11 @@ function Editor({ role, template, catalog, roles, holders, onSaved }: {
   });
   const toggleResource = (r: CatalogResource, on: boolean) => setSelected((prev) => {
     const next = new Set(prev);
-    for (const p of r.permissions) if (hasPermission(p.name)) (on ? next.add(p.name) : next.delete(p.name));
+    for (const p of r.permissions) {
+      if (!hasPermission(p.name)) continue;
+      if (on) next.add(p.name);
+      else next.delete(p.name);
+    }
     return next;
   });
   const startFrom = (roleId: string) => {

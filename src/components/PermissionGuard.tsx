@@ -80,7 +80,7 @@ export function PermissionGuard({
     );
   }
 
-  let hasAccess = false;
+  let hasAccess: boolean;
 
   if (permission) {
     hasAccess = hasPermission(permission);
@@ -146,7 +146,7 @@ export function PermissionButton({
     return null;
   }
 
-  let hasAccess = false;
+  let hasAccess: boolean;
 
   if (permission) {
     hasAccess = hasPermission(permission);
@@ -201,7 +201,7 @@ export function PermissionLink({
     return null;
   }
 
-  let hasAccess = false;
+  let hasAccess: boolean;
 
   if (permission) {
     hasAccess = hasPermission(permission);
