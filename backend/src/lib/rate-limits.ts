@@ -58,6 +58,14 @@ export const signedInCodeRateLimit = (route: string): SharedRateLimit => ({
   keyGenerator: (request: FastifyRequest) => `code:${route}:${request.user?.userId ?? request.ip}`,
 });
 
+/** Collecting an application's credentials with a one-time code (lib/application-connect.ts): per address of the sender */
+export const connectExchangeRateLimit: SharedRateLimit = {
+  shared: true,
+  max: 10,
+  timeWindow: '15 minutes',
+  keyGenerator: (request: FastifyRequest) => `connect-exchange:${request.ip}`,
+};
+
 /** Starting a sign-up (it sends an email): per address of the sender */
 export const signupRateLimit: SharedRateLimit = {
   shared: true,

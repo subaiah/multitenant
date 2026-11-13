@@ -36,6 +36,7 @@ const AccessReview = lazy(() => import('./pages/AccessReview'));
 const Organizations = lazy(() => import('./pages/Organizations'));
 const ApplicationsManagement = lazy(() => import('./pages/ApplicationsManagement'));
 const Integrations = lazy(() => import('./pages/Integrations'));
+const ConnectApplication = lazy(() => import('./pages/ConnectApplication'));
 const TenantEntitlements = lazy(() => import('./pages/TenantEntitlements'));
 const Unauthorized = lazy(() => import('./pages/Unauthorized'));
 const Users = lazy(() => import('./pages/Users'));
@@ -101,6 +102,9 @@ export default function App() {
             <Route path="/confirm-email" element={<ConfirmEmail />} />
             <Route path="/:tenantSlug/forgot-password" element={<ForgotPassword />} />
             
+            {/* An application asking to be connected (it signs the person in itself, keeping the request) */}
+            <Route path="/platform/applications/connect" element={<ConnectApplication />} />
+
             {/* Platform Portal - Protected by PLATFORM_* user types */}
             <Route element={<RequireAuth portal="PLATFORM"><PlatformLayout /></RequireAuth>}>
               <Route path="/platform/dashboard" element={
