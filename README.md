@@ -12,7 +12,7 @@ Applications are separate programs with their own repositories, and come in two 
 - **Specific applications** serve one domain, such as AppForge.
 - **Generic applications** provide something other applications use, and also run on their own, such as Hearth (chat).
 
-An application joins by publishing a manifest ([docs/PRODUCT_INTEGRATION.md](docs/PRODUCT_INTEGRATION.md), [docs/hub/MANIFEST_V2.md](docs/hub/MANIFEST_V2.md)). From then on the hub:
+An application joins by publishing a manifest ([docs/PRODUCT_INTEGRATION.md](docs/PRODUCT_INTEGRATION.md), [docs/hub/MANIFEST_V2.md](docs/hub/MANIFEST_V2.md)) and asking to connect: a platform administrator approves, and the application collects its own credentials, so nobody copies a secret ([docs/hub/CONNECT.md](docs/hub/CONNECT.md)). From then on the hub:
 
 - signs its users in with their organization account ([docs/SIGN_IN_WITH.md](docs/SIGN_IN_WITH.md));
 - lets organizations turn it on and grant its permissions through their roles;

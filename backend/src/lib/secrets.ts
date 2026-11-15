@@ -89,6 +89,7 @@ export const SECRET_FIELDS = {
   callbackSigningSecret: { model: 'ApplicationRegistry', table: 'application_registries', column: 'callback_signing_secret' },
   previousCallbackSigningSecret: { model: 'ApplicationRegistry', table: 'application_registries', column: 'previous_callback_signing_secret' },
   serviceClientSecret: { model: 'ProductServiceCredential', table: 'product_service_credentials', column: 'client_secret' },
+  connectCredentials: { model: 'ApplicationConnectGrant', table: 'application_connect_grants', column: 'credentials' },
 } as const;
 
 export type SecretField = keyof typeof SECRET_FIELDS;

@@ -3,8 +3,28 @@
  * by platform staff: import (create or update) and export.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { audit } from '../lib/audit.js';
-import { exportManifest, importManifest } from '../lib/product-manifest.js';
+import { audit, type AuditInput } from '../lib/audit.js';
+import { exportManifest, importManifest, type ImportResult } from '../lib/product-manifest.js';
+
+/** The audit entry for an import (also made when an application connects itself, routes/application-connect.ts) */
+export function importAuditEntry(result: ImportResult, extra: Record<string, unknown> = {}): AuditInput {
+  return {
+    resource: { type: 'application', id: result.application.id, label: result.application.name },
+    changes: result.changes,
+    details: {
+      created: result.created,
+      version: result.application.version,
+      permissionsAdded: result.permissions.added,
+      permissionsUpdated: result.permissions.updated,
+      permissionsNotInManifest: result.permissions.notInManifest,
+      menuItems: result.menuItems,
+      ...(result.clientSecret && { newClientSecret: true }),
+      ...(result.callbackSigningSecret && { newCallbackSigningSecret: true }),
+      ...(result.organizationsTold && { organizationsTold: result.organizationsTold }),
+      ...extra,
+    },
+  };
+}
 
 export const applicationManifestRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/manifest', {
@@ -19,21 +39,7 @@ export const applicationManifestRoutes: FastifyPluginAsync = async (fastify) => 
     const query = request.query as { dryRun?: boolean; confirmClientTypeChange?: boolean };
     const result = await importManifest(request.body, { dryRun: query.dryRun, confirmClientTypeChange: query.confirmClientTypeChange });
     if (result.dryRun) return reply.status(200).send(result);
-    await audit(request, 'application.manifest_imported', {
-      resource: { type: 'application', id: result.application.id, label: result.application.name },
-      changes: result.changes,
-      details: {
-        created: result.created,
-        version: result.application.version,
-        permissionsAdded: result.permissions.added,
-        permissionsUpdated: result.permissions.updated,
-        permissionsNotInManifest: result.permissions.notInManifest,
-        menuItems: result.menuItems,
-        ...(result.clientSecret && { newClientSecret: true }),
-        ...(result.callbackSigningSecret && { newCallbackSigningSecret: true }),
-        ...(result.organizationsTold && { organizationsTold: result.organizationsTold }),
-      },
-    });
+    await audit(request, 'application.manifest_imported', importAuditEntry(result));
     return reply.status(result.created ? 201 : 200).send(result);
   });
 

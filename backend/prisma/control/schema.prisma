@@ -326,6 +326,7 @@ model ApplicationRegistry {
   menuItems          ApplicationMenuItem[]
   productEvents      ProductEvent[]
   serviceCredentials ProductServiceCredential[]
+  connectGrants      ApplicationConnectGrant[]
   memberStates       ProductMemberState[]
   logoutDeliveries   OidcLogoutDelivery[]
   declaredTypes      ProductDeclaredType[]
@@ -418,6 +419,30 @@ model ProductServiceCredential {
 
   @@index([applicationId])
   @@map("product_service_credentials")
+}
+
+/// A one-time hand-over of an application's credentials (lib/application-connect.ts,
+/// docs/hub/CONNECT.md). Platform staff approve an application's request to
+/// connect; the application's server then exchanges the code for what is kept
+/// here, once, within a few minutes. Collected or expired rows are deleted.
+model ApplicationConnectGrant {
+  id            String   @id @default(uuid())
+  applicationId String   @map("application_id")
+  /// SHA-256 of the code the application was sent back with
+  codeHash      String   @unique @map("code_hash")
+  /// The application's PKCE challenge (S256): only whoever started the request can collect
+  codeChallenge String   @map("code_challenge")
+  redirectUri   String   @map("redirect_uri")
+  /// What the application collects, as JSON; encrypted (lib/secrets.ts)
+  connectCredentials String @map("credentials")
+  createdBy     String   @map("created_by")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("application_connect_grants")
 }
 
 enum OidcClientType {

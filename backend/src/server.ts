@@ -20,6 +20,8 @@ import { applicationBundleRoutes } from './routes/application-bundles.js';
 import { applicationLimitRoutes } from './routes/application-limits.js';
 import { applicationSignInRoutes } from './routes/application-sign-in.js';
 import { applicationManifestRoutes } from './routes/application-manifest.js';
+import { applicationConnectRoutes } from './routes/application-connect.js';
+import { applicationConnectExchangeRoutes } from './routes/application-connect-exchange.js';
 import { applicationLifecycleRoutes } from './routes/application-lifecycle.js';
 import { applicationServiceCredentialRoutes } from './routes/application-service-credentials.js';
 import { authRoutes } from './routes/auth.js';
@@ -254,6 +256,8 @@ async function registerRoutes() {
   await fastify.register(billingWebhookRoutes, { prefix: '/bff/billing/webhooks' });
   // "Sign in with": the OpenID Connect provider for the catalogue's applications (lib/oidc/)
   await fastify.register(oidcRoutes, { prefix: '/oidc' });
+  // An application's server collecting its credentials after it was connected (lib/application-connect.ts)
+  await fastify.register(applicationConnectExchangeRoutes, { prefix: '/application-connect' });
   // API v1 for external products calling as themselves, with a service access token (lib/product-service.ts)
   await fastify.register(productV1Routes);
   // Scripts applications load into their own pages (the application launcher)
@@ -285,6 +289,7 @@ async function registerRoutes() {
     await protectedRoutes.register(platformScoped(applicationRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationSignInRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationManifestRoutes), { prefix: '/applications' });
+    await protectedRoutes.register(platformScoped(applicationConnectRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationLifecycleRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationServiceCredentialRoutes), { prefix: '/applications' });
     await protectedRoutes.register(platformScoped(applicationIntegrationRoutes), { prefix: '/applications' });
