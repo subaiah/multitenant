@@ -88,7 +88,7 @@ Invitations, password resets, sign-in codes, sign-up confirmations, trial and cl
 
 Put an `@` in the username as `%40`, and URL-encode any special characters in the password. Microsoft 365 mailboxes with a password (`smtp.office365.com`) stop working by default at the end of 2026, as Microsoft retires Basic authentication for SMTP, so don't start with them.
 
-**Check it from the browser.** As a platform admin, go to Notifications → **Email**. It shows where email goes (never the password) and has **Send a test email**, which reports the problem in plain words if sending fails. Tenant admins have the same button under Notifications → Organization.
+**Check it from the browser.** As a platform admin, open **Settings** in the sidebar. It shows where email goes (never the password) and has **Send a test email**, which reports the problem in plain words if sending fails. Tenant admins have the same button under Notifications → Organization.
 
 **When email fails anyway:**
 - Tenants still finish setting up. The Tenants page marks one whose first administrator's invitation wasn't sent; **Resend invitation** there tries again and, if it still can't send, shows the link to pass on another way.

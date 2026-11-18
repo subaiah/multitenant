@@ -18,6 +18,7 @@ const Deployments = lazy(() => import('./pages/Deployments'));
 const ActivityLog = lazy(() => import('./pages/ActivityLog'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+const PlatformSettings = lazy(() => import('./pages/PlatformSettings'));
 const Support = lazy(() => import('./pages/Support'));
 const SupportWorkspace = lazy(() => import('./pages/SupportWorkspace'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
@@ -161,11 +162,9 @@ export default function App() {
                 </Preview>
               } />
               <Route path="/platform/settings" element={
-                <Preview home="/platform/dashboard">
-                  <PermissionGuard permission="platform-settings:manage" redirectTo="/unauthorized">
-                    <PlaceholderPage title="Platform Settings" description="Configure platform-wide settings" />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="platform-settings:manage" redirectTo="/unauthorized">
+                  <PlatformSettings />
+                </PermissionGuard>
               } />
             </Route>
             

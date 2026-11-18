@@ -70,8 +70,8 @@ function TestEmailButton({ path }: { path: string }) {
   );
 }
 
-/** Platform: where email goes, and a test message */
-function PlatformEmail() {
+/** Platform: where email goes, and a test message (shown on Settings) */
+export function PlatformEmail() {
   const email = useApi<{ transport: string; from: string; smtp: { host: string; port: number; secure: boolean; user: string | null } | null }>('/platform/email');
   const setup = email.data;
   const error = email.error;
@@ -96,12 +96,10 @@ export default function Notifications({ scope }: { scope: 'tenant' | 'platform' 
   const { hasPermission } = useAuth();
   const [params, setParams] = useSearchParams();
   const canManage = scope === 'tenant' && hasPermission('notifications:manage');
-  const canManageEmail = scope === 'platform' && hasPermission('platform-settings:manage');
   const tabs = [
     { id: 'inbox', label: 'Inbox' },
     { id: 'preferences', label: 'My preferences' },
     ...(canManage ? [{ id: 'organization', label: 'Organization' }] : []),
-    ...(canManageEmail ? [{ id: 'email', label: 'Email' }] : []),
   ];
   const tab = tabs.some((t) => t.id === params.get('tab')) ? params.get('tab')! : 'inbox';
 
@@ -119,7 +117,6 @@ export default function Notifications({ scope }: { scope: 'tenant' | 'platform' 
       {tab === 'inbox' && <Inbox />}
       {tab === 'preferences' && <Preferences />}
       {tab === 'organization' && canManage && <Organization />}
-      {tab === 'email' && canManageEmail && <PlatformEmail />}
     </div>
   );
 }
