@@ -86,18 +86,23 @@ test('tenant list includes status counts and usage from the periodic snapshot', 
   assert.ok(stats.applications.byStatus.ERROR >= 2, 'both tenants have an app in error');
 });
 
-test('deployed apps are scoped to the tenant, filterable and counted', async () => {
-  const { cookie } = await loginSession(A.slug, A.userEmail);
-  const all = await api('GET', '/deployments', { cookie });
-  assert.equal(all.status, 200);
-  assert.deepEqual(all.json.deployments.map((d: { name: string }) => d.name).sort(), ['Alpha Web', 'Alpha Worker']);
-  assert.deepEqual(all.json.counts.byStatus, { RUNNING: 1, ERROR: 1 });
+test("the organization's data: room taken, rows in its main tables, connections", async () => {
+  const { cookie } = await loginSession(A.slug, A.adminEmail);
+  const res = await api('GET', '/infrastructure', { cookie });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  const f = res.json;
+  assert.equal(f.mode, A.strategy);
+  // Shared tables can't be measured for one organization
+  if (A.strategy === 'SHARED_TABLES') assert.equal(f.sizeBytes, null);
+  else assert.ok(f.sizeBytes > 0);
+  assert.equal(f.rows.find((r: { table: string }) => r.table === 'users').count, 3, 'its own people only');
+  assert.ok(f.connections.open >= 0 && f.connections.active <= f.connections.open);
+  // A user without infrastructure:read can't
+  assert.equal((await api('GET', '/infrastructure', { cookie: (await loginSession(A.slug, A.userEmail)).cookie })).status, 403);
 
-  const errors = await api('GET', '/deployments?status=ERROR', { cookie });
-  assert.deepEqual(errors.json.deployments.map((d: { name: string }) => d.name), ['Alpha Worker']);
-  assert.equal(errors.json.counts.byStatus.RUNNING, 1, 'status counts ignore the status filter');
-
-  assert.equal((await api('GET', `/deployments/${appB}`, { cookie })).status, 404, "another tenant's app");
+  // Deployments: the applications it has on (none here), and nothing about others'
+  assert.deepEqual((await api('GET', '/deployments', { cookie })).json.applications, []);
+  assert.equal((await api('GET', `/deployments/${appB}`, { cookie })).status, 404);
 });
 
 test('tenant dashboard aggregates only this tenant', async () => {

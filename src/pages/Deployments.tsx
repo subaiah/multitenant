@@ -1,126 +1,133 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Package, Search, X, ExternalLink, Cpu, MemoryStick, Activity } from 'lucide-react';
+import { Activity, Gauge, HeartPulse, Rocket, X } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { Badge, Card, DataView, EmptyState, LoadingState, PageHeader, formatDate, formatRelative, humanize, inputClass, selectClass } from '../components/ui';
+import { Card, DataView, EmptyState, LoadingState, PageHeader, StatCard, formatRelative } from '../components/ui';
 
-interface Deployment {
-  id: string;
-  name: string;
-  description: string | null;
-  status: string;
-  version: string;
-  environment: string;
-  url: string;
-  cpu: number;
-  memory: number;
-  requests: number;
-  lastDeployedAt: string | null;
-  createdAt: string;
+/** How each application the organization has on is doing (backend lib/app-figures.ts) */
+type Status = 'UP' | 'DEGRADED' | 'DOWN' | null;
+interface Uptime { uptime: number | null; checks: number }
+interface Meter { key: string; label: string; unit: string; total: number; records: number }
+interface AppFigures {
+  application: { id: string; key: string; name: string; description: string | null; version: string | null };
+  state: string;
+  setUp: boolean;
+  /** Null: the application doesn't take part in health checks */
+  health: (Partial<{ day: Uptime & { averageMs: number | null }; week: Uptime; month: Uptime }> & { status: Status; since: string | null; checkedAt: string | null }) | null;
+  usage: { month: string; meters: Meter[] };
 }
-interface DeploymentList {
-  deployments: Deployment[];
-  counts: { byStatus: Record<string, number>; byEnvironment: Record<string, number> };
+interface AppDetail extends AppFigures {
+  days: { day: string; checks: number; uptime: number | null; averageMs: number | null }[];
+  lastMonthUsage: { month: string; meters: Meter[] };
 }
 
-const STATUSES = ['RUNNING', 'DEPLOYING', 'STOPPED', 'ERROR'];
-const ENVIRONMENTS = ['PRODUCTION', 'STAGING', 'DEVELOPMENT'];
+const STATUS: Record<string, { label: string; className: string }> = {
+  UP: { label: 'Up', className: 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400' },
+  DEGRADED: { label: 'Slow or degraded', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400' },
+  DOWN: { label: 'Down', className: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400' },
+  PENDING: { label: 'Not checked yet', className: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' },
+  NONE: { label: 'No health checks', className: 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400' },
+};
+const statusKey = (a: AppFigures) => (!a.health ? 'NONE' : a.health.status ?? 'PENDING');
+
+function StatusPill({ app }: { app: AppFigures }) {
+  const s = STATUS[statusKey(app)];
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${s.className}`}>{s.label}</span>;
+}
+
+const percent = (u: Uptime | undefined) => (u?.uptime == null ? '—' : `${(Math.floor(u.uptime * 1000) / 10).toFixed(u.uptime === 1 ? 0 : 1)}%`);
+const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 export default function Deployments() {
-  const [params, setParams] = useSearchParams();
-  const status = params.get('status') ?? '';
-  const environment = params.get('environment') ?? '';
-  const search = params.get('search') ?? '';
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const query = new URLSearchParams();
-  if (status) query.set('status', status);
-  if (environment) query.set('environment', environment);
-  if (search) query.set('search', search);
-  const list = useApi<DeploymentList>(`/deployments?${query}`);
-
-  const update = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setParams(next, { replace: true });
-  };
+  const list = useApi<{ applications: AppFigures[] }>('/deployments');
+  const [open, setOpen] = useState<string | null>(null);
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="Deployments" description="Applications deployed for your organization" />
-
-      <div className="flex flex-wrap items-center gap-3">
-        {STATUSES.map((s) => (
-          <button key={s} onClick={() => update('status', status === s ? '' : s)} aria-pressed={status === s}
-            className={`px-3 py-1.5 text-sm rounded-lg border ${status === s ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'}`}>
-            {humanize(s)} <span className="ml-1 text-xs text-slate-400 tabular-nums">{list.data?.counts.byStatus[s] ?? 0}</span>
-          </button>
-        ))}
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input aria-label="Search applications" placeholder="Search applications" defaultValue={search}
-            onKeyDown={(e) => e.key === 'Enter' && update('search', (e.target as HTMLInputElement).value.trim())}
-            onBlur={(e) => e.target.value.trim() !== search && update('search', e.target.value.trim())}
-            className={`${inputClass} pl-9`} />
-        </div>
-        <select aria-label="Filter by environment" value={environment} onChange={(e) => update('environment', e.target.value)} className={`${selectClass}`}>
-          <option value="">All environments</option>
-          {ENVIRONMENTS.map((e) => <option key={e} value={e}>{humanize(e)}</option>)}
-        </select>
-      </div>
-
+      <PageHeader title="Deployments" description="Whether your applications are up, how reliably over the last month, and what they report using" />
       <DataView {...list}>
-        {(l) =>
-          l.deployments.length === 0 ? (
-            <Card>
-              <EmptyState icon={Package} title={status || environment || search ? 'No applications match these filters' : 'No applications deployed yet'} />
-            </Card>
-          ) : (
-            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-[13px] border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th className="px-5 py-3 font-medium">Application</th>
-                    <th className="px-5 py-3 font-medium">Status</th>
-                    <th className="px-5 py-3 font-medium">Environment</th>
-                    <th className="px-5 py-3 font-medium">Version</th>
-                    <th className="px-5 py-3 font-medium text-right">CPU</th>
-                    <th className="px-5 py-3 font-medium text-right">Memory</th>
-                    <th className="px-5 py-3 font-medium text-right">Requests</th>
-                    <th className="px-5 py-3 font-medium">Last deployed</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {l.deployments.map((d) => (
-                    <tr key={d.id} onClick={() => setSelectedId(d.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                      <td className="px-5 py-3">
-                        <p className="font-medium text-slate-800 dark:text-white">{d.name}</p>
-                        {d.description && <p className="text-xs text-slate-500 truncate max-w-xs">{d.description}</p>}
-                      </td>
-                      <td className="px-5 py-3"><Badge value={d.status} /></td>
-                      <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{humanize(d.environment)}</td>
-                      <td className="px-5 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">{d.version}</td>
-                      <td className="px-5 py-3 text-right tabular-nums">{d.cpu}%</td>
-                      <td className="px-5 py-3 text-right tabular-nums">{d.memory}%</td>
-                      <td className="px-5 py-3 text-right tabular-nums">{d.requests.toLocaleString()}</td>
-                      <td className="px-5 py-3 text-slate-500">{formatRelative(d.lastDeployedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </DataView>
+        {({ applications }) => {
+          if (!applications.length) {
+            return <Card><EmptyState icon={Rocket} title="No applications on" message="When your organization turns applications on, how each is doing appears here." /></Card>;
+          }
+          const checked = applications.filter((a) => a.health?.status);
+          const down = checked.filter((a) => a.health!.status === 'DOWN').length;
+          const monthly = checked.map((a) => a.health!.month?.uptime).filter((u): u is number => u != null);
+          const timed = checked.map((a) => a.health!.day?.averageMs).filter((ms): ms is number => ms != null);
+          return (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <StatCard label="Up now" value={`${checked.length - down}/${checked.length}`} icon={HeartPulse} tone={down ? 'red' : 'green'}
+                  hint={applications.length > checked.length ? `${applications.length - checked.length} without health checks` : undefined} />
+                <StatCard label="Uptime, last 30 days" value={monthly.length ? `${(Math.floor((monthly.reduce((s, u) => s + u, 0) / monthly.length) * 1000) / 10).toFixed(1)}%` : '—'} icon={Activity} tone="blue" hint="Average across applications" />
+                <StatCard label="Response time, last day" value={timed.length ? `${Math.round(timed.reduce((s, ms) => s + ms, 0) / timed.length)} ms` : '—'} icon={Gauge} tone="purple" hint="Average of health checks" />
+              </div>
 
-      {selectedId && <DeploymentPanel id={selectedId} onClose={() => setSelectedId(null)} />}
+              <Card title="Applications" description="Checked every minute by the platform. Select one for its last 30 days.">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                        <th className="py-2 font-medium">Application</th>
+                        <th className="py-2 font-medium">Now</th>
+                        <th className="py-2 font-medium text-right">1 day</th>
+                        <th className="py-2 font-medium text-right">7 days</th>
+                        <th className="py-2 font-medium text-right">30 days</th>
+                        <th className="py-2 font-medium text-right">Response</th>
+                        <th className="py-2 font-medium pl-4">Usage this month</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {applications.map((a) => (
+                        <tr key={a.application.id} onClick={() => setOpen(a.application.id)}
+                          className="border-b border-slate-100 dark:border-slate-700/50 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                          <td className="py-2.5">
+                            <span className="font-medium text-slate-800 dark:text-white">{a.application.name}</span>
+                            {a.application.version && <span className="ml-2 text-xs font-mono text-slate-500">{a.application.version}</span>}
+                            {!a.setUp && <span className="block text-xs text-amber-600">Still being set up for you</span>}
+                          </td>
+                          <td className="py-2.5"><StatusPill app={a} />{a.health?.since && a.health.status !== 'UP' && <span className="block text-xs text-slate-500 mt-0.5">since {formatRelative(a.health.since)}</span>}</td>
+                          <td className="py-2.5 text-right tabular-nums">{percent(a.health?.day)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{percent(a.health?.week)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{percent(a.health?.month)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{a.health?.day?.averageMs != null ? `${a.health.day.averageMs} ms` : '—'}</td>
+                          <td className="py-2.5 pl-4 text-slate-600 dark:text-slate-300">
+                            {a.usage.meters.length ? a.usage.meters.map((m) => `${m.total.toLocaleString()} ${m.unit}`).join(' · ') : <span className="text-slate-400">Not reported</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </>
+          );
+        }}
+      </DataView>
+      {open && <ApplicationPanel id={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function DeploymentPanel({ id, onClose }: { id: string; onClose: () => void }) {
-  const detail = useApi<{ deployment: Deployment; activity: { id: string; action: string; type: string; createdAt: string }[] }>(`/deployments/${id}`);
+function UsageTable({ title, usage }: { title: string; usage: { month: string; meters: Meter[] } }) {
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">{title}: {monthName(usage.month)}</h4>
+      {usage.meters.length === 0 ? <p className="text-sm text-slate-500">This application doesn't report usage.</p> : (
+        <dl className="text-sm space-y-1.5">
+          {usage.meters.map((m) => (
+            <div key={m.key} className="flex justify-between gap-4">
+              <dt className="text-slate-500">{m.label}</dt>
+              <dd className="tabular-nums text-slate-800 dark:text-white">{m.total.toLocaleString()} {m.unit}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function ApplicationPanel({ id, onClose }: { id: string; onClose: () => void }) {
+  const detail = useApi<AppDetail>(`/deployments/${id}`);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={onClose}>
@@ -128,50 +135,49 @@ function DeploymentPanel({ id, onClose }: { id: string; onClose: () => void }) {
         className="w-full max-w-md h-full overflow-y-auto bg-white dark:bg-slate-800 p-6 shadow-xl">
         {detail.loading ? <LoadingState /> : (
           <DataView {...detail}>
-            {({ deployment: d, activity }) => (
+            {(d) => (
               <div className="space-y-6">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-800 dark:text-white">{d.name}</h3>
-                    <div className="flex gap-2 mt-2"><Badge value={d.status} /><Badge value={d.environment} /></div>
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-white">{d.application.name}</h3>
+                    <div className="mt-2"><StatusPill app={d} /></div>
                   </div>
                   <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><X size={18} /></button>
                 </div>
-                {d.description && <p className="text-sm text-slate-600 dark:text-slate-300">{d.description}</p>}
-                <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline break-all">
-                  {d.url} <ExternalLink size={14} />
-                </a>
-                <div className="grid grid-cols-3 gap-3">
-                  {[[Cpu, 'CPU', `${d.cpu}%`], [MemoryStick, 'Memory', `${d.memory}%`], [Activity, 'Requests', d.requests.toLocaleString()]].map(([Icon, label, value]) => {
-                    const I = Icon as typeof Cpu;
-                    return (
-                      <div key={label as string} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
-                        <p className="flex items-center gap-1.5 text-xs text-slate-500"><I size={13} />{label as string}</p>
-                        <p className="mt-1 font-semibold text-slate-800 dark:text-white tabular-nums">{value as string}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                <dl className="text-sm space-y-2">
-                  <div className="flex justify-between"><dt className="text-slate-500">Version</dt><dd className="font-mono">{d.version}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500">Last deployed</dt><dd>{formatRelative(d.lastDeployedAt)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500">Created</dt><dd>{formatDate(d.createdAt)}</dd></div>
-                </dl>
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Recent events</h4>
-                  {activity.length === 0 ? (
-                    <p className="text-sm text-slate-500">No events recorded for this application.</p>
-                  ) : (
-                    <ul className="space-y-2 text-sm">
-                      {activity.map((a) => (
-                        <li key={a.id} className="flex justify-between gap-3">
-                          <span className="text-slate-700 dark:text-slate-200">{a.action}</span>
-                          <span className="text-xs text-slate-400 shrink-0">{formatRelative(a.createdAt)}</span>
-                        </li>
+                {d.application.description && <p className="text-sm text-slate-600 dark:text-slate-300">{d.application.description}</p>}
+
+                {d.health ? (
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Uptime, last 30 days</h4>
+                    <div className="flex items-end gap-[3px] h-16" role="img" aria-label="Daily uptime for the last 30 days">
+                      {d.days.map((day) => {
+                        const u = day.uptime;
+                        const color = u == null ? 'bg-slate-200 dark:bg-slate-700' : u >= 0.999 ? 'bg-green-500' : u >= 0.95 ? 'bg-amber-500' : 'bg-red-500';
+                        return (
+                          <div key={day.day} className="flex-1 flex flex-col justify-end h-full"
+                            title={`${new Date(`${day.day}T00:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC' })}: ${u == null ? 'no checks' : `${(u * 100).toFixed(1)}% of ${day.checks} checks`}${day.averageMs != null ? `, ${day.averageMs} ms` : ''}`}>
+                            <div className={`rounded-sm ${color}`} style={{ height: u == null ? '15%' : `${Math.max(15, u * 100)}%` }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-500 mt-1"><span>30 days ago</span><span>Today</span></div>
+                    <dl className="grid grid-cols-3 gap-3 mt-4 text-sm">
+                      {([['Last day', d.health.day], ['7 days', d.health.week], ['30 days', d.health.month]] as const).map(([label, u]) => (
+                        <div key={label} className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
+                          <dt className="text-xs text-slate-500">{label}</dt>
+                          <dd className="mt-1 font-semibold tabular-nums text-slate-800 dark:text-white">{percent(u)}</dd>
+                        </div>
                       ))}
-                    </ul>
-                  )}
-                </div>
+                    </dl>
+                    {d.health.checkedAt && <p className="text-xs text-slate-500 mt-2">Last checked {formatRelative(d.health.checkedAt)}.</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">This application doesn't take part in the platform's health checks.</p>
+                )}
+
+                <UsageTable title="Usage" usage={d.usage} />
+                <UsageTable title="Last month" usage={d.lastMonthUsage} />
               </div>
             )}
           </DataView>
