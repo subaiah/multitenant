@@ -336,7 +336,7 @@ async function registerRoutes() {
     await protectedRoutes.register(webhookRoutes, { prefix: '/webhooks' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
-    if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
+    await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
 
     // Role management
     await protectedRoutes.register(roleRoutes, { prefix: '/roles' });
