@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { withAudit, withPlatformAudit } from '../lib/audit.js';
 import { endAllPlatformSessions, endAllSessions } from '../lib/sessions.js';
 import { config } from '../config/env.js';
 import { AppError } from '../middleware/error-handler.js';
@@ -75,15 +75,18 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const data = { passwordHash: await hashPassword(password), status: 'ACTIVE' as const, ...(name && { name }) };
+    const resource = { type: invite.tenant ? 'user' : 'platform_user', id: invite.userId, label: invite.user.email };
     if (invite.tenant) {
-      await (await dbForTenant(invite.tenant.id)).user.update({ where: { id: invite.userId }, data });
+      await withAudit(request, async (tx, record) => {
+        await tx.user.update({ where: { id: invite.userId }, data });
+        await record('auth.invitation_accepted', { resource });
+      }, { actor: { type: 'USER', id: invite.userId, email: invite.user.email }, tenantId: invite.tenant.id });
       await logActivity({ tenantId: invite.tenant.id, userId: invite.userId, action: 'accepted invitation', target: invite.user.email, type: 'USER' });
-      await audit(request, 'auth.invitation_accepted', { resource: { type: 'user', id: invite.userId, label: invite.user.email } }, {
-        actor: { type: 'USER', id: invite.userId, email: invite.user.email },
-        tenantId: invite.tenant.id,
-      });
     } else {
-      await controlDb.platformUser.update({ where: { id: invite.userId }, data });
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.platformUser.update({ where: { id: invite.userId }, data });
+        await record('platform.account.invitation_accepted', { resource });
+      }, { actor: { type: 'PLATFORM', id: invite.userId, email: invite.user.email } });
     }
     return { message: 'Your account is ready. Sign in with your new password.', tenantSlug: slugFor(invite), email: invite.user.email };
   });
@@ -144,21 +147,18 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     const passwordHash = await hashPassword(password);
     if (reset.tenant) {
-      const db = await dbForTenant(reset.tenant.id);
-      await db.$transaction([
-        db.user.update({ where: { id: reset.userId }, data: { passwordHash } }),
-        ...endAllSessions(db, reset.userId),
-      ]);
+      await withAudit(request, async (tx, record) => {
+        await tx.user.update({ where: { id: reset.userId }, data: { passwordHash } });
+        for (const step of endAllSessions(tx, reset.userId)) await step;
+        await record('auth.password_reset', { resource: { type: 'user', id: reset.userId, label: reset.user.email } });
+      }, { actor: { type: 'USER', id: reset.userId, email: reset.user.email }, tenantId: reset.tenant.id });
       await logActivity({ tenantId: reset.tenant.id, userId: reset.userId, action: 'reset password', target: reset.user.email, type: 'AUTH' });
-      await audit(request, 'auth.password_reset', { resource: { type: 'user', id: reset.userId, label: reset.user.email } }, {
-        actor: { type: 'USER', id: reset.userId, email: reset.user.email },
-        tenantId: reset.tenant.id,
-      });
     } else {
-      await controlDb.$transaction([
-        controlDb.platformUser.update({ where: { id: reset.userId }, data: { passwordHash } }),
-        ...endAllPlatformSessions(reset.userId),
-      ]);
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.platformUser.update({ where: { id: reset.userId }, data: { passwordHash } });
+        for (const step of endAllPlatformSessions(reset.userId, new Date(), tx)) await step;
+        await record('platform.account.password_reset', { resource: { type: 'platform_user', id: reset.userId, label: reset.user.email } });
+      }, { actor: { type: 'PLATFORM', id: reset.userId, email: reset.user.email } });
     }
     return { message: 'Your password has been changed. Sign in with your new password.', tenantSlug: slugFor(reset), email: reset.user.email };
   });
@@ -195,25 +195,18 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
 
     // The new address signs in from now on; every session ends
     if (change.tenant) {
-      const db = await dbForTenant(change.tenant.id);
-      await db.$transaction([
-        db.user.update({ where: { id: change.userId }, data: { email: newEmail } }),
-        ...endAllSessions(db, change.userId),
-      ]);
+      await withAudit(request, async (tx, record) => {
+        await tx.user.update({ where: { id: change.userId }, data: { email: newEmail } });
+        for (const step of endAllSessions(tx, change.userId)) await step;
+        await record('account.email_changed', { resource: { type: 'user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } });
+      }, { actor: { type: 'USER', id: change.userId, email: newEmail }, tenantId: change.tenant.id });
       await logActivity({ tenantId: change.tenant.id, userId: change.userId, action: 'changed email', target: `${oldEmail} to ${newEmail}`, type: 'AUTH' });
-      await audit(request, 'account.email_changed', { resource: { type: 'user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } }, {
-        actor: { type: 'USER', id: change.userId, email: newEmail },
-        tenantId: change.tenant.id,
-      });
     } else {
-      await controlDb.$transaction([
-        controlDb.platformUser.update({ where: { id: change.userId }, data: { email: newEmail } }),
-        ...endAllPlatformSessions(change.userId),
-      ]);
-      await audit(request, 'platform.account.email_changed', { resource: { type: 'platform_user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } }, {
-        actor: { type: 'PLATFORM', id: change.userId, email: newEmail },
-        tenantId: null,
-      });
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.platformUser.update({ where: { id: change.userId }, data: { email: newEmail } });
+        for (const step of endAllPlatformSessions(change.userId, new Date(), tx)) await step;
+        await record('platform.account.email_changed', { resource: { type: 'platform_user', id: change.userId, label: newEmail }, changes: { email: [oldEmail, newEmail] } });
+      }, { actor: { type: 'PLATFORM', id: change.userId, email: newEmail } });
     }
     await sendMail(emailChangedEmail(oldEmail, newEmail, change.tenant?.name ?? 'Platform Administration')).catch(() => {});
     return { message: 'Your email address is changed. Sign in with the new one.', tenantSlug: slugFor(change), email: newEmail };

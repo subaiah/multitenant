@@ -6,7 +6,7 @@
  * (The application's server collects its credentials in application-connect-exchange.ts.)
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { audit } from '../lib/audit.js';
+import { platformAuditFor } from '../lib/audit.js';
 import { approveConnect, checkConnect, connectRequestSchema } from '../lib/application-connect.js';
 import { importAuditEntry } from './application-manifest.js';
 
@@ -29,8 +29,11 @@ export const applicationConnectRoutes: FastifyPluginAsync = async (fastify) => {
       body: { type: 'object' },
     },
   }, async (request) => {
-    const { redirectTo, result } = await approveConnect(request, connectRequestSchema.parse(request.body));
-    await audit(request, 'application.manifest_imported', importAuditEntry(result, { connected: true }));
+    const audited = await platformAuditFor(request);
+    const { redirectTo, result } = await approveConnect(request, connectRequestSchema.parse(request.body), (tx, r) =>
+      audited.record(tx, 'application.manifest_imported', importAuditEntry(r, { connected: true })),
+    );
+    await audited.settle();
     return { redirectTo, application: result.application, created: result.created };
   });
 };

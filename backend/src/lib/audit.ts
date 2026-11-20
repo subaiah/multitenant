@@ -20,12 +20,23 @@
  * removed from the live table; verification continues across them. A
  * tenant's whole log is archived before the tenant is deleted.
  *
- * Two ways to record. Changes that must never go unrecorded (who may do
- * what, sign-in settings, keys, support access) are made inside withAudit()
- * or withPlatformAudit(): the change and its entry are one transaction, so
- * neither exists without the other. Everything else uses audit() after the
- * change: there the action has already happened, so a failure to record is
- * logged loudly instead of failing it.
+ * Two ways to record. A change and its entry are saved in one transaction
+ * wherever both live in the same database: withAudit() for a tenant's data
+ * and log, withPlatformAudit() for the control plane and the platform's log,
+ * withAccountAudit() for an account's own change in whichever of the two it
+ * lives, platformAuditFor() for work with its own control-plane transaction.
+ * Neither then exists without the other.
+ *
+ * audit() records after the action, and logs loudly if it can't (the action
+ * has already happened). It is for:
+ * - events, not changes: signing in, a test email, a download, a check;
+ * - a change in the control plane that belongs in a tenant's log, or the
+ *   reverse (entitlements, custom domains, database settings, data exports,
+ *   support sessions): one transaction can't span two databases;
+ * - work that spans systems or runs on afterwards: provisioning a tenant,
+ *   sign-up, creating an account from single sign-on, default roles;
+ * - requests whose outcome is a later change, itself recorded in one
+ *   transaction (an email change asked for, an invitation resent).
  */
 import { productAuditEvents } from './product-catalog.js';
 import crypto from 'node:crypto';
@@ -456,7 +467,7 @@ export async function recordAudit(ctx: AuditContext, event: string, input: Audit
 //
 // One transaction covers one database. An entry for a tenant's log can't be
 // saved with a change in the control plane (or the reverse): those keep
-// using audit().
+// using audit() (the list at the top of this file).
 
 /** A tenant's transaction client, as request.db.$transaction() hands it over */
 export type TenantTx = Omit<TenantDb, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
@@ -465,16 +476,27 @@ export type ControlTx = Omit<ControlDb, '$connect' | '$disconnect' | '$on' | '$t
 /** Records an entry in the surrounding transaction */
 export type RecordInTx = (event: string, input?: AuditInput) => Promise<void>;
 
+/** Before there's a session (sign-in steps, emailed links): who did it, and for a tenant's log, which tenant */
+export interface AuditAs {
+  actor?: AuditActor;
+  tenantId?: string;
+}
+
 /**
- * Change a tenant's data and record it, in one transaction of the request's
- * tenant database. Only tenant-scoped events can be recorded here.
+ * Change a tenant's data and record it, in one transaction of the tenant's
+ * database: the request's tenant, or `as.tenantId` when there's no session
+ * yet. Only tenant-scoped events can be recorded here.
  */
-export async function withAudit<T>(request: FastifyRequest, work: (tx: TenantTx, record: RecordInTx) => Promise<T>): Promise<T> {
+export async function withAudit<T>(request: FastifyRequest, work: (tx: TenantTx, record: RecordInTx) => Promise<T>, as?: AuditAs): Promise<T> {
   // Who and where from, before the transaction opens (looking the actor up uses another connection)
-  const ctx = await contextOf(request);
+  const ctx = await contextOf(request, as?.actor);
+  if (as?.tenantId) ctx.tenantId = as.tenantId;
+  if (!ctx.tenantId) throw new Error('withAudit needs a tenant: the request has none and none was given');
+  const own = (request as { db?: TenantDb }).db && (request as { tenant?: { id?: string } }).tenant?.id === ctx.tenantId;
+  const db = own ? request.db : await dbForTenant(ctx.tenantId);
   await loadExtensions();
   const appended: Appended[] = [];
-  const result = await request.db.$transaction(async (tx) =>
+  const result = await db.$transaction(async (tx) =>
     work(tx, async (event, input = {}) => {
       const prepared = prepare(ctx, event, input);
       if (prepared.chain === PLATFORM_CHAIN) throw new Error(`Audit event "${event}" belongs in the platform's log: it can't be recorded in a tenant's transaction`);
@@ -489,8 +511,8 @@ export async function withAudit<T>(request: FastifyRequest, work: (tx: TenantTx,
  * Change the control plane and record it in the platform's log, in one
  * control-plane transaction. Only platform-scoped events can be recorded here.
  */
-export async function withPlatformAudit<T>(request: FastifyRequest, work: (tx: ControlTx, record: RecordInTx) => Promise<T>): Promise<T> {
-  const ctx = await contextOf(request);
+export async function withPlatformAudit<T>(request: FastifyRequest, work: (tx: ControlTx, record: RecordInTx) => Promise<T>, as?: Pick<AuditAs, 'actor'>): Promise<T> {
+  const ctx = await contextOf(request, as?.actor);
   await loadExtensions();
   const appended: Appended[] = [];
   const result = await controlDb.$transaction(async (tx) =>
@@ -502,6 +524,44 @@ export async function withPlatformAudit<T>(request: FastifyRequest, work: (tx: C
   );
   for (const a of appended) await settle(a);
   return result;
+}
+
+/**
+ * For work that opens its own control-plane transaction (the manifest import):
+ * `record` writes an entry into that transaction, and `settle` runs what
+ * follows an entry (notifications, webhooks) once it has committed.
+ */
+export async function platformAuditFor(request: FastifyRequest) {
+  const ctx = await contextOf(request);
+  await loadExtensions();
+  const appended: Appended[] = [];
+  return {
+    record: async (tx: unknown, event: string, input: AuditInput = {}) => {
+      const prepared = prepare(ctx, event, input);
+      if (prepared.chain !== PLATFORM_CHAIN) throw new Error(`Audit event "${event}" belongs in a tenant's log: it can't be recorded in a control-plane transaction`);
+      appended.push(await appendWithin(tx as ControlTx, prepared));
+    },
+    settle: async () => {
+      for (const a of appended.splice(0)) await settle(a);
+    },
+  };
+}
+
+/**
+ * An account's own change (two-factor, password, email), recorded where that
+ * account lives: a tenant user's in its tenant's log with its tenant's
+ * database, a platform user's in the platform's with the control plane. The
+ * caller picks the event for the owner; `tx` is the matching database's.
+ */
+export async function withAccountAudit<T>(
+  request: FastifyRequest,
+  owner: { tenantId: string } | 'platform',
+  work: (tx: TenantTx | ControlTx, record: RecordInTx) => Promise<T>,
+  as?: Pick<AuditAs, 'actor'>,
+): Promise<T> {
+  return owner === 'platform'
+    ? withPlatformAudit(request, work, as)
+    : withAudit(request, work, { ...as, tenantId: owner.tenantId });
 }
 
 /** The last archived entry of a chain whose live table is empty (all archived). */

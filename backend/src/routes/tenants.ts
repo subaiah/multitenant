@@ -159,9 +159,11 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     if (tenant.provisioningStatus === 'READY') throw new AppError('This tenant is already set up', 409);
     if (tenant.provisioningStatus === 'DEPROVISIONING') throw new AppError('This tenant is being deleted', 409);
     // Pending until the job picks it up, so nobody reads the old failure as the outcome
-    await controlDb.tenant.update({ where: { id }, data: { provisioningStatus: 'PENDING', provisioningError: null } });
+    await withPlatformAudit(request, async (tx, record) => {
+      await tx.tenant.update({ where: { id }, data: { provisioningStatus: 'PENDING', provisioningError: null } });
+      await record('tenant.provisioning_retried', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug } });
+    });
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'retried provisioning', target: tenant.slug, type: 'CONFIG' });
-    await audit(request, 'tenant.provisioning_retried', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug } });
     void startProvisioning(id);
     return reply.status(202).send({ id, provisioningStatus: 'PROVISIONING' });
   });
@@ -211,17 +213,17 @@ await audit(request, 'tenant.created', { tenantId: tenant.id, resource: { type: 
     const tenant = await controlDb.tenant.findUnique({ where: { id } });
     if (!tenant) throw new AppError('Tenant not found', 404);
     if (!tenant.closedAt) throw new AppError('This organization was not closed', 409);
-    const restored = await controlDb.$transaction(async (tx) => {
+    const restored = await withPlatformAudit(request, async (tx, record) => {
       const r = await tx.tenant.update({
         where: { id },
         data: { status: tenant.statusBeforeClose ?? 'ACTIVE', closedAt: null, closedBy: null, deleteAfter: null, statusBeforeClose: null },
       });
       await organizationStatusChanged(tx, id, tenant.status, r.status);
+      await record('tenant.restored', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { name: tenant.name, status: r.status } });
       return r;
     });
     kickLifecycleEvents();
     await logPlatformActivity({ tenantId: id, userId: request.user.userId, action: 'restored closed tenant', target: tenant.slug, type: 'CONFIG' });
-    await audit(request, 'tenant.restored', { tenantId: id, resource: { type: 'tenant', id, label: tenant.slug }, details: { name: tenant.name, status: restored.status } });
     return restored;
   });
 

@@ -22,7 +22,7 @@ import {
   signedInUser, startSession, type MfaClaims,
 } from '../lib/sign-in.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAccountAudit } from '../lib/audit.js';
 
 export const codeSchema = z.string().trim().min(6).max(20);
 
@@ -66,11 +66,11 @@ export async function enrollment(claims: Omit<MfaClaims, 'step' | 'pendingSecret
 }
 
 /** Save a confirmed authenticator: the secret, a fresh set of recovery codes (returned once). */
-export async function finishEnrollment(owner: SessionOwner, userId: string, secret: string, code: string) {
+export async function finishEnrollment(owner: SessionOwner, userId: string, secret: string, code: string, within?: Parameters<typeof saveMfaState>[3]) {
   const step = verifyTotp(secret, code, null);
   if (step === null) throw new AppError('That code is not right. Check the time on your device and try again.', 400, true, 'MFA_INVALID');
   const { codes, hashes } = newRecoveryCodes();
-  await saveMfaState(owner, userId, { secret, enabledAt: new Date(), lastStep: step, recoveryHashes: hashes });
+  await saveMfaState(owner, userId, { secret, enabledAt: new Date(), lastStep: step, recoveryHashes: hashes }, within);
   return codes;
 }
 
@@ -123,12 +123,12 @@ export const mfaRoutes: FastifyPluginAsync = async (fastify) => {
     // Already set up (e.g. in another tab): sign in with a code instead
     if (!state || state.enabled) throw new AppError('This sign-in has expired. Please start again.', 401, true, 'MFA_EXPIRED');
 
-    const recoveryCodes = await finishEnrollment(owner, claims.userId, claims.pendingSecret, body.code);
+    const recoveryCodes = await withAccountAudit(request, owner, async (tx, record) => {
+      const codes = await finishEnrollment(owner, claims.userId, claims.pendingSecret!, body.code, tx);
+      await record(owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled', { details: { during: 'sign-in' } });
+      return codes;
+    }, { actor: { type: owner === 'platform' ? 'PLATFORM' : 'USER', id: claims.userId, email: state.email } });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: claims.userId, action: 'set up two-factor', target: 'system', type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled', { details: { during: 'sign-in' } }, {
-      actor: { type: owner === 'platform' ? 'PLATFORM' : 'USER', id: claims.userId, email: state.email },
-      tenantId: owner === 'platform' ? null : owner.tenantId,
-    });
     await startSession(fastify, request, reply, owner, { id: claims.userId, userType: claims.userType });
     await recordSignIn(request, owner, claims.userId, 'logged in with two-factor', 'two-factor');
     return { message: 'Login successful', ...(await signedInUser(owner, claims.userId)), recoveryCodes };

@@ -16,7 +16,7 @@ import { checkSignInPassword, hashPassword, passwordNeedsRehash } from '../utils
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
 import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit, withPlatformAudit } from '../lib/audit.js';
 import { mfaRoutes } from './mfa.js';
 import { finishSso, SsoError, ssoRedirectUriFor, startSso, userForIdentity } from '../lib/sso.js';
 import { appOriginFor, assertSignInHost } from '../lib/domains.js';
@@ -514,20 +514,21 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Ends every session, including access tokens already handed out
     if (user.tenantId) {
-      const db = await dbForTenant(user.tenantId);
-      await db.$transaction(endAllSessions(db, user.id));
+      await withAudit(request, async (tx, record) => {
+        for (const step of endAllSessions(tx, user.id)) await step;
+        await record('auth.signed_out_everywhere');
+      }, { actor: { type: 'USER', id: user.id }, tenantId: user.tenantId });
     } else {
-      await controlDb.$transaction(endAllPlatformSessions(user.id));
+      await withPlatformAudit(request, async (tx, record) => {
+        for (const step of endAllPlatformSessions(user.id, new Date(), tx)) await step;
+        await record('platform.auth.signed_out_everywhere');
+      }, { actor: { type: 'PLATFORM', id: user.id } });
     }
 
     reply.clearCookie('access_token', { path: '/' });
     reply.clearCookie('refresh_token', { path: '/' });
 
     await logActivity({ tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' });
-    await audit(request, user.tenantId ? 'auth.signed_out_everywhere' : 'platform.auth.signed_out_everywhere', {}, {
-      actor: { type: user.tenantId ? 'USER' : 'PLATFORM', id: user.id },
-      tenantId: user.tenantId ?? null,
-    });
 
     return { message: 'All sessions revoked successfully' };
   });
