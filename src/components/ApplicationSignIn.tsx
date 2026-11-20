@@ -3,13 +3,14 @@
  * staff): turn it on, where it may return people to, and its client
  * credentials. backend/src/routes/application-sign-in.ts; docs/SIGN_IN_WITH.md.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { LogIn } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPost, apiPut } from '../lib/api-client';
 import { CopyBox } from './CopyBox';
 import { Field } from './Dialog';
 import { Card, DataView, formatDateTime, inputClass, primaryButtonClass, secondaryButtonClass } from './ui';
+import { useChanged } from '../lib/hooks';
 
 interface Settings {
   enabled: boolean;
@@ -36,7 +37,7 @@ export default function ApplicationSignIn({ applicationId, applicationName }: { 
   const info = useApi<SignInInfo>(`/applications/${applicationId}/sign-in`);
   const [secret, setSecret] = useState<string | null>(null);
   // A secret belongs to the application it was made for
-  useEffect(() => setSecret(null), [applicationId]);
+  if (useChanged(applicationId)) setSecret(null);
 
   return (
     <Card

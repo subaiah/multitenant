@@ -3,7 +3,7 @@
  * API v1 as itself, with OAuth client credentials. The secret is shown once.
  * backend/src/routes/application-service-credentials.ts; docs/PRODUCT_INTEGRATION.md.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiDelete, apiPost } from '../lib/api-client';
@@ -11,6 +11,7 @@ import { invalidateApi } from '../lib/query';
 import { CopyBox } from './CopyBox';
 import { Field } from './Dialog';
 import { Badge, Card, DataView, formatDateTime, formatRelative, inputClass, primaryButtonClass } from './ui';
+import { useChanged } from '../lib/hooks';
 
 interface Credential { id: string; name: string; clientId: string; scopes: string[]; createdAt: string; lastUsedAt: string | null; revokedAt: string | null }
 interface Info {
@@ -25,7 +26,7 @@ export default function ApplicationServiceCredentials({ applicationId, applicati
   const path = `/applications/${applicationId}/service-credentials`;
   const info = useApi<Info>(path);
   const [made, setMade] = useState<(Credential & { clientSecret: string }) | null>(null);
-  useEffect(() => setMade(null), [applicationId]);
+  if (useChanged(applicationId)) setMade(null);
 
   return (
     <Card title="Service credentials" description={`For ${applicationName}'s server to call the platform's API as itself (OAuth client credentials), for the organizations that have it on. Separate from its sign-in client.`}>

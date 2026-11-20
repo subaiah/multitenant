@@ -3,7 +3,7 @@
  * per-user prices (made at Razorpay for INR, Stripe for other currencies),
  * and organizations' subscriptions. backend/src/routes/platform-billing.ts.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CreditCard } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiDelete, apiPost, apiPut } from '../lib/api-client';
 import { formatMoney, intervalLabel, toMinorUnits } from '../lib/money';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, inputClass, primaryButtonClass, secondaryButtonClass, selectClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 interface Price { id: string; provider: string; currency: string; interval: 'MONTH' | 'YEAR'; unitAmount: number; active: boolean; providerPriceId: string; createdAt: string }
 interface Plan {
@@ -78,7 +79,7 @@ function PlanCard({ plan, providers, canManage, onSaved }: { plan: Plan; provide
     allowSso: p.allowSso, allowCustomDomain: p.allowCustomDomain,
   });
   const [form, setForm] = useState(toForm(plan));
-  useEffect(() => setForm(toForm(plan)), [plan]);
+  if (useChanged(plan)) setForm(toForm(plan));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [price, setPrice] = useState({ currency: providers.includes('RAZORPAY') ? 'INR' : 'USD', interval: 'MONTH', amount: '' });

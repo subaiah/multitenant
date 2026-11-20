@@ -8,6 +8,7 @@ import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { API_URL, apiGet, apiPost } from '../lib/api-client';
 import { Badge, Card, formatDate, formatDateTime, primaryButtonClass } from './ui';
+import { useNow } from '../lib/hooks';
 
 interface DataExport {
   id: string;
@@ -28,6 +29,7 @@ export function DataExportCard() {
   const list = useApi<{ canExport: boolean; exports: DataExport[] }>(hasPermission('settings:manage') ? '/data-exports' : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const now = useNow();
   const working = list.data?.exports.some((e) => e.status === 'PENDING' || e.status === 'RUNNING');
 
   // Follow one that's being prepared
@@ -58,7 +60,6 @@ export function DataExportCard() {
     window.location.assign(`${API_URL}/data-exports/${id}/download`);
   };
 
-  const now = Date.now();
   const shown = list.data.exports.filter((e) => e.status !== 'READY' || !e.expiresAt || new Date(e.expiresAt).getTime() > now);
 
   return (
