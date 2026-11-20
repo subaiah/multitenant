@@ -4,6 +4,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { hasMinimumUserType } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff, withAudit } from '../lib/audit.js';
+import { forgetApiSettings } from '../lib/api-gateway.js';
 
 const updateApiConfigSchema = z.object({
   bffEnabled: z.boolean().optional(),
@@ -59,6 +60,8 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
 
     const data = updateApiConfigSchema.parse(request.body);
+    // An origin is scheme, host and port: anything after it would never match a browser's Origin
+    if (data.allowedOrigins) data.allowedOrigins = [...new Set(data.allowedOrigins.map((o) => new URL(o).origin))];
 
     // Validate BFF URL if BFF is enabled
     if (data.bffEnabled && !data.bffUrl) {
@@ -74,6 +77,8 @@ export const apiConfigRoutes: FastifyPluginAsync = async (fastify) => {
       await record('api_config.updated', { resource: { type: 'api_config', label: 'API settings' }, changes: diff(before, data) });
       return config;
     });
+    // Enforced from the next request on this server; others pick it up within half a minute (lib/api-gateway.ts)
+    forgetApiSettings(request.tenant.id);
 
     await logActivity({
         tenantId: request.tenant.id,
