@@ -23,6 +23,7 @@ import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
 import { emailInput, findUserByEmail } from '../lib/emails.js';
+import { derivedKeys } from '../lib/signing-keys.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -46,10 +47,14 @@ const otpVerifySchema = z.object({
  * Emailed sign-in codes are kept as a keyed hash, bound to the organization
  * and address they were sent to. Six digits are too few for a plain hash (a
  * copy of the table could be tried against every code in a moment), so the
- * key is derived from JWT_SECRET, which isn't in the database.
+ * key is derived from JWT_SECRET, which isn't in the database. New codes use
+ * the current secret; while it's rotated, codes sent under the previous one
+ * still work (lib/signing-keys.ts).
  */
-const otpKey = crypto.createHmac('sha256', config.jwtSecret).update('emailed sign-in codes').digest();
-const hashOtp = (tenantId: string, email: string, code: string) => crypto.createHmac('sha256', otpKey).update(`${tenantId}:${email}:${code}`).digest('hex');
+const otpKeys = () => derivedKeys((secret) => crypto.createHmac('sha256', secret).update('emailed sign-in codes').digest());
+const otpHashes = (tenantId: string, email: string, code: string) =>
+  otpKeys().map((key) => crypto.createHmac('sha256', key).update(`${tenantId}:${email}:${code}`).digest('hex'));
+const hashOtp = (tenantId: string, email: string, code: string) => otpHashes(tenantId, email, code)[0];
 
 /** What a sign-in step returns when two-factor comes next (no session yet). */
 const mfaNext = (r: NonNullable<SignInResult>) => ({
@@ -283,7 +288,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const otpRecord = await db.otpCode.findFirst({
-      where: { tenantId: tenant.id, email, code: hashOtp(tenant.id, email, code), verified: false },
+      where: { tenantId: tenant.id, email, code: { in: otpHashes(tenant.id, email, code) }, verified: false },
     });
     if (!otpRecord) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });

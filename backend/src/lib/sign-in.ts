@@ -29,6 +29,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from './activity.js';
 import { audit } from './audit.js';
 import { useRecoveryCode, verifyTotp } from './mfa.js';
+import { derivedKeys } from './signing-keys.js';
 
 export function parseExpiryToMs(expiry: string): number {
   const match = expiry.match(/^(\d+)([smhd])$/);
@@ -191,8 +192,9 @@ export async function saveMfaState(
   }
 }
 
-// A separate key from session tokens, so an MFA token can never pass as one
-const mfaKey = () => crypto.createHash('sha256').update(`${config.jwtSecret}:mfa-challenge`).digest();
+// A separate key from session tokens, so an MFA token can never pass as one.
+// The first signs; while JWT_SECRET is rotated the previous one's still reads.
+const mfaKeys = () => derivedKeys((secret) => crypto.createHash('sha256').update(`${secret}:mfa-challenge`).digest());
 
 export interface MfaClaims {
   userId: string;
@@ -211,17 +213,19 @@ export async function signMfaToken(claims: MfaClaims, minutes = 10): Promise<str
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${minutes}m`)
-    .sign(mfaKey());
+    .sign(mfaKeys()[0]);
 }
 
 export async function readMfaToken(token: string): Promise<MfaClaims> {
-  try {
-    const { payload } = await jwtVerify(token, mfaKey(), { algorithms: ['HS256'] });
-    if (payload.purpose !== 'mfa') throw new Error('wrong purpose');
-    return payload as unknown as MfaClaims;
-  } catch {
-    throw new AppError('This sign-in has expired. Please start again.', 401, true, 'MFA_EXPIRED');
+  for (const key of mfaKeys()) {
+    try {
+      const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] });
+      if (payload.purpose === 'mfa') return payload as unknown as MfaClaims;
+    } catch {
+      // Not under this key (or expired): try the next
+    }
   }
+  throw new AppError('This sign-in has expired. Please start again.', 401, true, 'MFA_EXPIRED');
 }
 
 export const ownerOf = (claims: { tenantId?: string; tenantSlug?: string }): SessionOwner =>
