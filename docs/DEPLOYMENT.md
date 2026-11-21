@@ -258,10 +258,18 @@ The `.env` must be the one the backup was made with. The keys especially: stored
 | --- | --- | --- |
 | `SECRETS_KEY_V<n>` | Stored secrets: tenant connection strings, SSO client secrets, authenticator secrets | Add `SECRETS_KEY_V2` and deploy (the newest version encrypts). Run `node dist/cli/encrypt-secrets.js`, then remove V1 once `--check` reports nothing left on it. |
 | `AUDIT_KEY_V<n>` | Audit log signatures | Add `AUDIT_KEY_V2` and deploy. Never remove an old version while entries signed with it remain, live or archived. |
-| `JWT_SECRET` | Session tokens | Changing it signs everyone out. |
+| `JWT_SECRET` | Session tokens, the two-factor step, emailed codes | Rotate with `JWT_SECRET_PREVIOUS` (below): nobody is signed out. |
 | `COOKIE_SECRET` | Signed cookies | Changing it signs everyone out. |
 
 To add a key version, add the variable to `.env` and to the `x-api-env` block in `docker-compose.yml`.
+
+### Rotating `JWT_SECRET`
+
+1. In `deploy/.env`, set `JWT_SECRET_PREVIOUS` to the current `JWT_SECRET`, and `JWT_SECRET` to a new value (`openssl rand -hex 24`).
+2. Restart the API (`docker compose up -d api`, or run Deploy). New sessions, two-factor steps and emailed codes use the new secret; those made with the old one keep working.
+3. A day later, remove `JWT_SECRET_PREVIOUS` and restart. By then every access token (`JWT_EXPIRES_IN`) and short-lived code made with the old secret has expired.
+
+Leaving `JWT_SECRET_PREVIOUS` empty is the normal state. The API refuses to start if it equals `JWT_SECRET`.
 
 ## Billing
 

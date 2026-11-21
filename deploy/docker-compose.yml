@@ -27,6 +27,8 @@ x-api-env: &api-env
   TRUST_PROXY: ${TRUST_PROXY:-1}
   # Keys and secrets (32 random bytes, base64; see .env.example)
   JWT_SECRET: ${JWT_SECRET:?REQUIRED}
+  # While rotating JWT_SECRET: the old value (docs/DEPLOYMENT.md, Keys)
+  JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
   COOKIE_SECRET: ${COOKIE_SECRET:?REQUIRED}
   SECRETS_KEY_V1: ${SECRETS_KEY_V1:?REQUIRED}
   AUDIT_KEY_V1: ${AUDIT_KEY_V1:?REQUIRED}
