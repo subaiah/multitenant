@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Network, Gauge, Globe, Layers } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPatch } from '../lib/api-client';
 import { Card, DataView, PageHeader, StatCard, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 interface ApiConfig {
   apiGateway: string;
@@ -64,7 +65,7 @@ function ApiConfigForm({ config, gateways, onSaved }: { config: ApiConfig; gatew
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => setForm(initial), [config.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (useChanged(config.updatedAt)) setForm(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const gateway = gateways.find((g) => g.id === form.apiGateway);
 

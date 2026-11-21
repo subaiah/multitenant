@@ -10,16 +10,14 @@ export default function ResetPassword() {
   const token = params.get('token') ?? '';
   const navigate = useNavigate();
   const [info, setInfo] = useState<{ email: string; tenantSlug: string; passwordPolicy: PasswordPolicy } | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fetchError, setLoadError] = useState<string | null>(null);
+  const loadError = token ? fetchError : 'This reset link is incomplete.';
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setLoadError('This reset link is incomplete.');
-      return;
-    }
+    if (!token) return;
     apiGet<{ email: string; tenantSlug: string; passwordPolicy: PasswordPolicy }>(`/bff/account/password/reset/${encodeURIComponent(token)}`, { skipAuth: true })
       .then(setInfo)
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'This reset link is invalid.'));

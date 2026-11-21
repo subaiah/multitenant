@@ -12,12 +12,13 @@ export default function ConfirmEmail() {
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
   const [info, setInfo] = useState<{ email: string; newEmail: string; organization: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setError] = useState<string | null>(null);
+  const error = token ? failure : 'This link is incomplete. Copy the whole link from the email.';
   const [done, setDone] = useState<{ tenantSlug: string; email: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!token) return setError('This link is incomplete. Copy the whole link from the email.');
+    if (!token) return;
     apiGet<NonNullable<typeof info>>(`/bff/account/email/confirm/${encodeURIComponent(token)}`, { skipAuth: true })
       .then(setInfo)
       .catch((err) => setError(err instanceof Error ? err.message : 'This link is invalid or has expired.'));

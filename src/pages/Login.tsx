@@ -134,7 +134,7 @@ export default function Login() {
     setSubmitting(true);
     setError(null);
     const params = new URLSearchParams({ tenantSlug: tenant.slug, providerId });
-    window.location.href = `${API_URL}/bff/auth/sso/start?${params}`;
+    window.location.assign(`${API_URL}/bff/auth/sso/start?${params}`);
   };
 
   const finishSignIn = async () => {
