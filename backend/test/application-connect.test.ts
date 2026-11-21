@@ -48,7 +48,7 @@ const request = (challenge: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 const check = (body: unknown, cookie = platform) => api('POST', '/applications/connect/check', { cookie, body });
-const approve = (body: unknown) => api('POST', '/applications/connect/approve', { cookie: platform, body });
+const approve = (body: unknown, cookie = platform) => api('POST', '/applications/connect/approve', { cookie, body });
 const exchange = (code: string, codeVerifier: string) => api('POST', '/application-connect/exchange', { body: { code, codeVerifier } });
 
 /** Check, approve what was shown, and return the code the browser came back with */
@@ -123,6 +123,19 @@ test('requests that cannot be trusted are refused', async () => {
   // Only platform staff who manage the catalogue
   assert.equal((await check(request(challenge), tenantAdmin)).status, 403);
   assert.equal((await api('POST', '/applications/connect/check', { body: request(challenge) })).status, 401);
+});
+
+test('only a Hub platform principal with app-registry:manage may approve connection', async () => {
+  const { challenge } = pkce();
+  const input = request(challenge);
+  const checked = await check(input);
+  assert.equal(checked.status, 200);
+  const approval = { ...input, manifestHash: checked.json.manifestHash };
+  assert.equal((await approve(approval, tenantAdmin)).status, 403);
+  assert.equal((await api('POST', '/applications/connect/approve', { body: approval })).status, 401);
+  const { controlDb } = await db();
+  assert.equal(await controlDb.applicationRegistry.count({ where: { key } }), 0,
+    'denied approval must not register an application or create credentials');
 });
 
 test('approving needs what was shown: no hash, or a manifest changed since, is refused', async () => {
