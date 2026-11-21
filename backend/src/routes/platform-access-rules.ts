@@ -5,6 +5,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
+import { isPlatformUser, type UserType } from '../utils/authorization.js';
 import { diff, withPlatformAudit } from '../lib/audit.js';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
@@ -21,6 +22,10 @@ const ruleSchema = z.object({
 const idParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } } as const;
 
 export const platformAccessRuleRoutes: FastifyPluginAsync = async (fastify) => {
+  // Platform staff only: organizations' admins hold policies:* for their own organization's rules
+  fastify.addHook('preHandler', async (request, reply) => {
+    if (!isPlatformUser(request.user.userType as UserType)) return reply.status(403).send({ error: 'Forbidden', message: "Only platform staff can see or change the platform's access rules" });
+  });
   fastify.addHook('onResponse', async (request, reply) => {
     if (request.method !== 'GET' && request.method !== 'HEAD' && reply.statusCode < 400) forgetPlatformRules();
   });
