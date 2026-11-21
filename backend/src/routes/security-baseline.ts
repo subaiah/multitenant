@@ -5,6 +5,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
+import { isPlatformUser, type UserType } from '../utils/authorization.js';
 import { diff, withPlatformAudit } from '../lib/audit.js';
 import { forgetSecurityBaseline, ipAllowed, ipList, securityBaseline } from '../lib/security-baseline.js';
 
@@ -18,6 +19,10 @@ const baselineSchema = z.object({
 });
 
 export const securityBaselineRoutes: FastifyPluginAsync = async (fastify) => {
+  // Platform staff only: organizations' admins hold policies:* for their own organization's rules
+  fastify.addHook('preHandler', async (request, reply) => {
+    if (!isPlatformUser(request.user.userType as UserType)) return reply.status(403).send({ error: 'Forbidden', message: 'Only platform staff can see or change the security baseline' });
+  });
   fastify.get('/', {
     config: { permission: 'policies:read' },
     schema: { tags: ['security-baseline'], summary: "The platform's security baseline: minimums every organization meets" },
