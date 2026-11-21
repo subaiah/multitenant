@@ -5,6 +5,8 @@ import { countPermissionLookup } from '../lib/metrics.js';
 import { PLATFORM_RESOURCES, permissionMatches } from '../utils/permissions.js';
 import { sessionPermissions } from '../lib/support.js';
 import { AppError } from './error-handler.js';
+import { accessRulesDecide } from '../lib/access-rules.js';
+import { audit } from '../lib/audit.js';
 
 /**
  * Route-level authorization.
@@ -162,13 +164,31 @@ export async function authorize(request: FastifyRequest, reply: FastifyReply) {
   }
 
   const anyOf = Array.isArray(required) ? required : [required];
-  if (await hasPermission(request, ...anyOf)) return;
+  let allowed = await hasPermission(request, ...anyOf);
   // Scoped routes decide per item; let through someone with the permission somewhere
-  if (request.routeOptions.config.scoped) {
+  if (!allowed && request.routeOptions.config.scoped) {
     await loadPermissions(request);
-    if ((request.scopedGrants ?? []).some((g) => anyOf.some((p) => permissionMatches([g.permission], p)))) return;
+    allowed = (request.scopedGrants ?? []).some((g) => anyOf.some((p) => permissionMatches([g.permission], p)));
   }
-  return reply.status(403).send({ error: 'Forbidden', message: `Missing permission: ${anyOf.join(' or ')}` });
+  if (!allowed) return reply.status(403).send({ error: 'Forbidden', message: `Missing permission: ${anyOf.join(' or ')}` });
+
+  // Their roles allow it: the access rules may still refuse it here (lib/access-rules.ts)
+  const decision = await accessRulesDecide(request, anyOf);
+  if (decision && !decision.allowed) {
+    const rule = decision.deniedBy!;
+    request.log.info({ rule: rule.id, level: rule.level, permissions: anyOf }, 'Refused by an access rule');
+    await audit(request, 'access.denied_by_rule', {
+      outcome: 'FAILURE',
+      resource: { type: rule.level === 'platform' ? 'platform_access_rule' : 'access_policy', id: rule.id, label: rule.name },
+      details: { permissions: anyOf, method: request.method, path: request.url.split('?')[0], level: rule.level },
+    });
+    return reply.status(403).send({
+      error: 'Forbidden',
+      code: 'ACCESS_RULE_DENIED',
+      message: `Refused by ${rule.level === 'platform' ? "the platform's" : "your organization's"} access rule "${rule.name}"`,
+      rule: { id: rule.id, name: rule.name, level: rule.level },
+    });
+  }
 }
 
 /**

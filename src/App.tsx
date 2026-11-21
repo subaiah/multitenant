@@ -20,6 +20,7 @@ const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const PlatformSettings = lazy(() => import('./pages/PlatformSettings'));
 const GlobalPolicies = lazy(() => import('./pages/GlobalPolicies'));
+const AccessRulesPage = lazy(() => import('./pages/AccessRulesPage'));
 const Support = lazy(() => import('./pages/Support'));
 const SupportWorkspace = lazy(() => import('./pages/SupportWorkspace'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
@@ -129,6 +130,11 @@ export default function App() {
               <Route path="/platform/audit" element={
                 <PermissionGuard permission="platform-audit:read" redirectTo="/unauthorized">
                   <AuditLog scope="platform" />
+                </PermissionGuard>
+              } />
+              <Route path="/access-rules" element={
+                <PermissionGuard permission="policies:read" redirectTo="/unauthorized">
+                  <AccessRulesPage />
                 </PermissionGuard>
               } />
               <Route path="/platform/policies" element={

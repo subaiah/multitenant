@@ -854,6 +854,24 @@ model SecurityBaseline {
   @@map("security_baseline")
 }
 
+/// Access rules for every organization (Global policies, lib/access-rules.ts); checked before each organization's own
+model PlatformAccessRule {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  /// ALLOW or DENY
+  effect      String
+  /// actions, subjects, when, timezone (lib/access-rules.ts ruleBodySchema)
+  conditions  Json
+  priority    Int      @default(0)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([enabled, priority])
+  @@map("platform_access_rules")
+}
+
 model RateLimitHit {
   key       String   @id
   count     Int

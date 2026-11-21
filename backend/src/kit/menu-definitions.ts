@@ -63,6 +63,7 @@ export const MENUS: Record<Portal, MenuSeed[]> = {
       label: 'Security', path: '#security', icon: 'ShieldCheck',
       children: [
         { label: 'Sign-in methods', path: '/authentication', icon: 'KeyRound', permission: 'auth:manage' },
+        { label: 'Access rules', path: '/access-rules', icon: 'Shield', permission: 'policies:read' },
         { label: 'Audit log', path: '/audit-log', icon: 'ScrollText', permission: 'audit:read' },
         { label: 'Activity', path: '/activity', icon: 'Activity', permission: 'activity:read' },
       ],
