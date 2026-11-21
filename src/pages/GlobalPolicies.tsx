@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { apiPut } from '../lib/api-client';
+import { apiDelete, apiPatch, apiPost, apiPut } from '../lib/api-client';
+import { AccessRules, type AccessRule, type RuleInput, type TryResult } from '../components/AccessRules';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, DataView, PageHeader, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
 
@@ -23,7 +24,35 @@ export default function GlobalPolicies() {
     <div className="p-6 space-y-6">
       <PageHeader title="Global policies" description="Rules every organization on the platform follows" />
       <DataView {...baseline}>{(b) => <SecurityBaseline baseline={b} onSaved={baseline.reload} />}</DataView>
+      <PlatformAccessRules />
     </div>
+  );
+}
+
+/** Access rules for every organization, checked before each organization's own */
+function PlatformAccessRules() {
+  const { hasPermission } = useAuth();
+  const rules = useApi<{ data: AccessRule[] }>('/platform/access-rules');
+  const tenants = useApi<{ data: { id: string; name: string }[] }>('/tenants?limit=100');
+  return (
+    <DataView {...rules}>
+      {({ data }) => (
+        <AccessRules
+          title="Access rules"
+          description="Conditions on top of roles, in every organization, checked before each organization's own rules. Organizations can't make exceptions to these."
+          rules={data}
+          canManage={hasPermission('policies:manage')}
+          onSave={async (input: RuleInput, id?: string) => {
+            if (id) await apiPatch(`/platform/access-rules/${id}`, input);
+            else await apiPost('/platform/access-rules', input);
+            await rules.reload();
+          }}
+          onDelete={async (id) => { await apiDelete(`/platform/access-rules/${id}`); await rules.reload(); }}
+          onTry={({ tenantId, email, action, ip, at }) => apiPost<TryResult>('/platform/access-rules/evaluate', { tenantId, email, action, context: { ...(ip && { ip }), ...(at && { at }) } })}
+          tryNeedsOrganization={tenants.data?.data ?? []}
+        />
+      )}
+    </DataView>
   );
 }
 

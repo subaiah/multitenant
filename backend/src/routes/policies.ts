@@ -5,12 +5,14 @@ import { requireUserType, isPlatformAdmin } from '../utils/authorization.js';
 import { logActivity } from '../lib/activity.js';
 import { audit, diff, withAudit } from '../lib/audit.js';
 import { pageOf } from '../lib/pagination.js';
+import { decide, forgetOrganizationRules, organizationRules, platformRules, ruleBodySchema, subjectFor } from '../lib/access-rules.js';
 
 const createPolicySchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().optional(),
   effect: z.enum(['ALLOW', 'DENY']),
-  conditions: z.any(), // JSON conditions
+  // Which permissions, for whom, under what conditions (lib/access-rules.ts)
+  conditions: ruleBodySchema,
   priority: z.number().int().min(0).default(0),
   enabled: z.boolean().default(true),
 });
@@ -19,7 +21,7 @@ const updatePolicySchema = z.object({
   name: z.string().min(2).max(100).optional(),
   description: z.string().optional(),
   effect: z.enum(['ALLOW', 'DENY']).optional(),
-  conditions: z.any().optional(),
+  conditions: ruleBodySchema.optional(),
   priority: z.number().int().min(0).optional(),
   enabled: z.boolean().optional(),
 });
@@ -30,6 +32,10 @@ const createBindingSchema = z.object({
 });
 
 export const policyRoutes: FastifyPluginAsync = async (fastify) => {
+  // Any change applies from the next request on this server (others within half a minute)
+  fastify.addHook('onResponse', async (request, reply) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD' && reply.statusCode < 400 && request.tenant) forgetOrganizationRules(request.tenant.id);
+  });
   // List policies
   fastify.get('/', {
     config: { permission: 'policies:read' },
@@ -369,79 +375,51 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
     config: { permission: 'policies:read' },
     schema: {
       tags: ['policies'],
-      summary: 'Test policy evaluation',
+      summary: "Try the access rules: would this person's request with this permission be refused, and by which rule",
       body: {
         type: 'object',
-        required: ['userId', 'action', 'resource'],
+        required: ['action'],
         properties: {
           userId: { type: 'string', format: 'uuid' },
-          action: { type: 'string' },
-          resource: { type: 'string' },
-          context: { type: 'object' },
+          email: { type: 'string', description: 'Or the person by email' },
+          action: { type: 'string', description: 'The permission the request needs, e.g. users:delete' },
+          context: {
+            type: 'object',
+            properties: {
+              ip: { type: 'string' },
+              at: { type: 'string', format: 'date-time', description: 'When (default: now)' },
+              method: { type: 'string' },
+              path: { type: 'string' },
+              resourceId: { type: 'string' },
+              apiKey: { type: 'boolean' },
+            },
+          },
         },
       },
     },
-  }, async (request, reply) => {
+  }, async (request) => {
     const tenantId = request.tenant.id;
-    const { userId, action, resource, context } = request.body as any;
-    
-    // Get all enabled policies for this tenant
-    const policies = await request.db.accessPolicy.findMany({
-      where: {
-        tenantId,
-        enabled: true,
-      },
-      orderBy: { priority: 'desc' },
-      include: {
-        bindings: true,
-      },
+    const { userId, email, action, context = {} } = request.body as { userId?: string; email?: string; action: string; context?: { ip?: string; at?: string; method?: string; path?: string; resourceId?: string; apiKey?: boolean } };
+    if (!userId && !email) throw new AppError('Say who: userId or email', 400);
+    const user = await request.db.user.findFirst({
+      where: { tenantId, ...(userId ? { id: userId } : { email: { equals: email!, mode: 'insensitive' as const } }) },
+      select: { id: true, userType: true, email: true },
     });
-    
-    // Evaluate policies (simplified - in production, implement full ABAC evaluation)
-    const results = policies.map(policy => {
-      // Check if policy applies to this context
-      const applies = policy.bindings.some(binding => {
-        // Simplified binding check
-        return binding.scopeType === 'TENANT' && binding.scopeId === tenantId;
-      });
-      
-      if (!applies) {
-        return { policyId: policy.id, applies: false, decision: null };
-      }
-      
-      // Evaluate conditions (simplified)
-      const conditions = policy.conditions as any;
-      let matches = true;
-      
-      if (conditions.action && conditions.action !== action) {
-        matches = false;
-      }
-      
-      if (conditions.resource && conditions.resource !== resource) {
-        matches = false;
-      }
-      
-      return {
-        policyId: policy.id,
-        policyName: policy.name,
-        applies: true,
-        matches,
-        effect: policy.effect,
-        decision: matches ? policy.effect : null,
-      };
-    });
-    
-    // Determine final decision (DENY takes precedence)
-    const applicableResults = results.filter(r => r.decision);
-    const hasDeny = applicableResults.some(r => r.decision === 'DENY');
-    const hasAllow = applicableResults.some(r => r.decision === 'ALLOW');
-    
-    const finalDecision = hasDeny ? 'DENY' : hasAllow ? 'ALLOW' : 'DENY';
-    
+    if (!user) throw new AppError('User not found', 404);
+    const subject = subjectFor(request.db, tenantId, { userId: user.id, userType: context.apiKey ? 'API_KEY' : user.userType, email: user.email }, {
+      ip: context.ip ?? request.ip,
+      method: context.method ?? 'GET',
+      path: context.path ?? '/',
+      apiKey: Boolean(context.apiKey),
+      resourceId: context.resourceId ?? null,
+    }, [action], context.at ? new Date(context.at) : new Date());
+    const { allowed, deniedBy, steps } = await decide(await platformRules(), await organizationRules(tenantId, request.db), subject);
     return {
-      decision: finalDecision,
-      evaluations: results,
-      context: { userId, action, resource, ...context },
+      // What the rules say; the person's roles must also allow the permission
+      decision: allowed ? 'ALLOW' : 'DENY',
+      deniedBy,
+      evaluations: steps,
+      context: { userId: user.id, action, ...context },
     };
   });
 };
