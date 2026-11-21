@@ -185,11 +185,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/deployments" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
-                    <Deployments />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                  <Deployments />
+                </PermissionGuard>
               } />
               <Route path="/activity" element={
                 <PermissionGuard permission="activity:read" redirectTo="/unauthorized">
@@ -202,11 +200,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/infrastructure" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
-                    <Infrastructure />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
+                  <Infrastructure />
+                </PermissionGuard>
               } />
               <Route path="/data-isolation" element={
                 <PermissionGuard permission="database:manage" redirectTo="/unauthorized">

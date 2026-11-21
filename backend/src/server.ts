@@ -56,7 +56,7 @@ import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { platformRoutes } from './routes/platform.js';
-import { deploymentRoutes } from './routes/deployments.js';
+import { deploymentRoutes, infrastructureRoutes } from './routes/deployments.js';
 import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
 import { startJobs, stopJobs } from './lib/jobs.js';
 import { flushErrorReports } from './lib/error-reporting.js';
@@ -375,7 +375,8 @@ async function registerRoutes() {
 
     // Current tenant's deployed applications: sample data until deployments
     // are reported by something real (PREVIEW_FEATURES)
-    if (config.previewFeatures) await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
+    await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
+    await protectedRoutes.register(infrastructureRoutes, { prefix: '/infrastructure' });
 
     // Managing your own two-factor sign-in
     await protectedRoutes.register(platformScoped(twoFactorRoutes), { prefix: '/bff/two-factor' });

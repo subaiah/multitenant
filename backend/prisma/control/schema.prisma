@@ -346,6 +346,7 @@ model ApplicationRegistry {
   calledConnections  AppConnectionState[] @relation("ConnectionTarget")
 
   @@index([status])
+  healthSamples    ApplicationHealthSample[]
   @@map("application_registries")
 }
 
@@ -835,6 +836,22 @@ model NotificationWork {
 // Request counters for the rate limits that must hold across every server
 // (sign-in, one-time and two-factor codes): lib/rate-limit-store.ts. The key
 // is a hash, so no email addresses are stored here.
+/// Each health check's outcome (lib/product-health.ts), kept 31 days for uptime figures (lib/app-figures.ts)
+model ApplicationHealthSample {
+  id            BigInt              @id @default(autoincrement())
+  applicationId String              @map("application_id")
+  checkedAt     DateTime            @default(now()) @map("checked_at") @db.Timestamptz(3)
+  /// UP, DEGRADED or FAILED
+  outcome       String
+  responseMs    Int?                @map("response_ms")
+
+  application   ApplicationRegistry @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, checkedAt])
+  @@index([checkedAt])
+  @@map("application_health_samples")
+}
+
 model RateLimitHit {
   key       String   @id
   count     Int
