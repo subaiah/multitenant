@@ -34,13 +34,17 @@ import { kickLifecycleEvents, queueProductEvent } from './product-lifecycle.js';
 import { getEnhancedUserPermissions, type EnhancedPermissionData } from '../utils/authorization.js';
 import { applicationAccess, scopedKey, type ScopedPermission } from './application-access.js';
 import { memberOf } from './product-data.js';
-import { config } from '../config/env.js';
+import { keyedHashes, matchesAny } from './signing-keys.js';
 
 export const USER_EVENTS = ['user.added', 'user.updated', 'user.deactivated', 'user.reactivated', 'user.removed', 'user.permissions_changed', 'user.units_changed', 'units.changed'] as const;
 export type UserEvent = (typeof USER_EVENTS)[number];
 
 const ACTIVE_STATES = ['ENABLED', 'TRIAL'];
-const keyedHash = (value: string) => createHmac('sha256', `product-member-state:${config.jwtSecret}`).update(value).digest('base64url');
+// Kept between runs, so rotating JWT_SECRET must not look like everyone changed:
+// a stored hash under the previous secret still matches (lib/signing-keys.ts)
+const memberHashes = (value: string) => keyedHashes('product-member-state', value, 'base64url');
+const keyedHash = (value: string) => memberHashes(value)[0];
+const sameAs = (stored: string | null | undefined, value: string) => matchesAny(stored, memberHashes(value));
 
 let log: (msg: string, err?: unknown) => void = (msg, err) => console.error(msg, err);
 
@@ -79,7 +83,8 @@ async function unitsHash(db: Awaited<ReturnType<typeof dbForTenant>>, tenantId: 
     db.organization.findMany({ where: { tenantId }, select: { id: true, name: true, status: true }, orderBy: { id: 'asc' } }),
     db.orgUnit.findMany({ where: { tenantId }, select: { id: true, organizationId: true, parentUnitId: true, unitType: true, name: true }, orderBy: { id: 'asc' } }),
   ]);
-  return { hash: keyedHash(JSON.stringify([orgs, units])), organizations: orgs.length, units: units.length };
+  const json = JSON.stringify([orgs, units]);
+  return { hash: keyedHash(json), json, organizations: orgs.length, units: units.length };
 }
 
 /**
@@ -136,7 +141,10 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
       // The organization's own organizations and units changed: re-read them (GET .../org-units)
       const entitlement = await tx.tenantApplication.findUnique({ where: { tenantId_applicationId: { tenantId, applicationId: product.id } }, select: { unitsStateHash: true } });
       if (entitlement && entitlement.unitsStateHash !== structure.hash) {
-        if (entitlement.unitsStateHash !== null) await send('units.changed', { organizations: structure.organizations, units: structure.units });
+        // Under the previous secret but the same structure: just re-keyed, nothing to tell
+        if (entitlement.unitsStateHash !== null && !sameAs(entitlement.unitsStateHash, structure.json)) {
+          await send('units.changed', { organizations: structure.organizations, units: structure.units });
+        }
         await tx.tenantApplication.update({ where: { tenantId_applicationId: { tenantId, applicationId: product.id } }, data: { unitsStateHash: structure.hash } });
       }
 
@@ -155,8 +163,8 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
           await send('user.added', { user, permissions, scopedPermissions, memberOf: member });
         } else {
           const changes = [
-            old.emailHash !== state.emailHash && 'email',
-            old.nameHash !== state.nameHash && 'name',
+            !sameAs(old.emailHash, p.email.toLowerCase()) && 'email',
+            !sameAs(old.nameHash, p.name ?? '') && 'name',
             old.userType !== state.userType && 'userType',
           ].filter((c): c is string => !!c);
           const statusChanged = old.status !== state.status;
@@ -187,7 +195,9 @@ export async function reconcileMembers(tenantId: string, userIds: string[] | nul
             }
           }
           const same = (a: string[], b: string[]) => a.join(' ') === b.join(' ');
-          if (!changes.length && !statusChanged && old.unitsRecorded && same(old.permissions, permissions) && same(old.scopedPermissions, state.scopedPermissions) && same(old.units, state.units)) continue;
+          // (Hashes under the previous secret are re-saved under the current one)
+          const rekeyed = old.emailHash !== state.emailHash || old.nameHash !== state.nameHash;
+          if (!changes.length && !statusChanged && !rekeyed && old.unitsRecorded && same(old.permissions, permissions) && same(old.scopedPermissions, state.scopedPermissions) && same(old.units, state.units)) continue;
         }
         await tx.productMemberState.upsert({
           where: { applicationId_tenantId_userId: { applicationId: product.id, tenantId, userId: p.id } },

@@ -14,6 +14,7 @@ import Users from './Users';
 import Groups from './Groups';
 import AuditLog from './AuditLog';
 import ActivityLog from './ActivityLog';
+import { useNow } from '../lib/hooks';
 
 const TABS = [
   { id: 'users', label: 'Users', render: () => <Users /> },
@@ -26,6 +27,7 @@ export default function SupportWorkspace() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [session, setSession] = useState<SupportSessionRow | null>(null);
+  const now = useNow();
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState('users');
   const [, tick] = useState(0);
@@ -57,7 +59,7 @@ export default function SupportWorkspace() {
 
   if (error) return <div className="p-6 space-y-4"><ErrorState error={error} /><Link className="text-blue-600" to="/platform/support">Back to Support</Link></div>;
   if (!session) return <LoadingState />;
-  const minutesLeft = Math.max(0, Math.round((new Date(session.validTo!).getTime() - Date.now()) / 60_000));
+  const minutesLeft = Math.max(0, Math.round((new Date(session.validTo!).getTime() - now) / 60_000));
   const readOnly = session.access === 'READ_ONLY';
   const current = TABS.find((t) => t.id === tab)!;
 

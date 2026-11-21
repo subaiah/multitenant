@@ -8,6 +8,8 @@
  *   DOWN: three checks in a row failed (no answer, an error, not 200), so one
  *   blip doesn't alarm anyone. Until then the last status stands, with the
  *   error shown to staff.
+ * - Every check's outcome is kept for 31 days: organizations see uptime and
+ *   response times over time on their Deployments page (lib/app-figures.ts).
  * - Changes are recorded in the platform audit log. Staff see version,
  *   status, response time and the last error on the Integrations page.
  *   Organizations that have the application on see "having problems" next to
@@ -53,6 +55,10 @@ export async function checkHealth(app: { id: string; key: string; name: string; 
       ...(changed && { healthChangedAt: new Date() }),
     },
   });
+  // Each check's outcome, for uptime over time (lib/app-figures.ts)
+  await controlDb.applicationHealthSample
+    .create({ data: { applicationId: app.id, outcome: status ?? 'FAILED', responseMs: status ? ms : null } })
+    .catch((err) => log(`Recording ${app.key}'s health check failed`, err));
   if (changed && next) {
     await recordAudit({ actor: { type: 'SYSTEM' } }, 'application.health_changed', {
       resource: { type: 'application', id: app.id, label: app.name },
@@ -63,8 +69,19 @@ export async function checkHealth(app: { id: string; key: string; name: string; 
   return { status: next, version, ms, error };
 }
 
+/** How long check outcomes are kept */
+export const SAMPLE_DAYS = 31;
+let prunedAt = 0;
+
 /** Every active application with a health address, a few at a time */
 export async function checkAllHealth(): Promise<number> {
+  // Outcomes past the window, once an hour
+  if (Date.now() - prunedAt > 3_600_000) {
+    prunedAt = Date.now();
+    await controlDb.applicationHealthSample
+      .deleteMany({ where: { checkedAt: { lt: new Date(Date.now() - SAMPLE_DAYS * 86_400_000) } } })
+      .catch((err) => log('Removing old health checks failed', err));
+  }
   const apps = await controlDb.applicationRegistry.findMany({
     where: { status: 'ACTIVE', healthUrl: { not: null } },
     select: { id: true, key: true, name: true, healthUrl: true, healthStatus: true, healthFailures: true },

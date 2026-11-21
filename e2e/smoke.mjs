@@ -155,7 +155,8 @@ try {
   await owner.getByText(/Welcome back/).waitFor();
   await owner.screenshot({ path: `${SHOTS}/tenant-dashboard.png`, fullPage: true });
   const tenantMenu = await owner.locator('nav').innerText();
-  check('sample-data pages are hidden', !/Infrastructure/i.test(tenantMenu) && (await owner.getByText('Apps running').count()) === 0);
+  // Infrastructure and Deployments show real figures now; the dashboard's sample counts stay hidden
+  check('sample-data pages are hidden', /Infrastructure/i.test(tenantMenu) && (await owner.getByText('Apps running').count()) === 0);
   await owner.goto(`${APP}/users`);
   await owner.locator('tr', { hasText: TENANT.admin }).waitFor();
   check('their Users page lists them', true);

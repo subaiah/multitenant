@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { config } from '../config/env.js';
 import { controlDb } from '../lib/prisma.js';
 import { AppError } from '../middleware/error-handler.js';
-import { audit } from '../lib/audit.js';
+import { withPlatformAudit } from '../lib/audit.js';
 import { sendMail } from '../lib/mailer.js';
 import { organizationClosedEmail } from '../lib/email-templates.js';
 import { tenantAdmins } from '../lib/tenant-lifecycle.js';
@@ -61,21 +61,21 @@ export const closureRoutes: FastifyPluginAsync = async (fastify) => {
     const closedBy = user.name ? `${user.name} (${user.email})` : user.email;
     // Admins to tell, read while the organization can still be read
     const admins = await tenantAdmins(tenant.id);
-    await controlDb.$transaction(async (tx) => {
+    await withPlatformAudit(request, async (tx, record) => {
       await tx.tenant.update({
         where: { id: tenant.id },
         data: { status: 'SUSPENDED', statusBeforeClose: tenant.status, closedAt: now, closedBy, deleteAfter },
       });
       await organizationStatusChanged(tx, tenant.id, tenant.status, 'SUSPENDED');
+      await record('tenant.closed', {
+        tenantId: tenant.id,
+        resource: { type: 'tenant', id: tenant.id, label: tenant.slug },
+        details: { name: tenant.name, deleteAfter: deleteAfter.toISOString() },
+      });
     });
     kickLifecycleEvents();
     // No more renewals; what's paid for runs to the end of its period
     await endBillingFor(tenant.id, 'period_end');
-    await audit(request, 'tenant.closed', {
-      tenantId: tenant.id,
-      resource: { type: 'tenant', id: tenant.id, label: tenant.slug },
-      details: { name: tenant.name, deleteAfter: deleteAfter.toISOString() },
-    });
     for (const admin of admins) await sendMail(organizationClosedEmail(admin.email, tenant.name, closedBy, deleteAfter)).catch(() => {});
     return { closedAt: now, deleteAfter };
   });

@@ -3,7 +3,7 @@
  * by platform staff: import (create or update) and export.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { audit, type AuditInput } from '../lib/audit.js';
+import { type AuditInput, platformAuditFor } from '../lib/audit.js';
 import { exportManifest, importManifest, type ImportResult } from '../lib/product-manifest.js';
 
 /** The audit entry for an import (also made when an application connects itself, routes/application-connect.ts) */
@@ -37,9 +37,14 @@ export const applicationManifestRoutes: FastifyPluginAsync = async (fastify) => 
     },
   }, async (request, reply) => {
     const query = request.query as { dryRun?: boolean; confirmClientTypeChange?: boolean };
-    const result = await importManifest(request.body, { dryRun: query.dryRun, confirmClientTypeChange: query.confirmClientTypeChange });
-    if (result.dryRun) return reply.status(200).send(result);
-    await audit(request, 'application.manifest_imported', importAuditEntry(result));
+    if (query.dryRun) return reply.status(200).send(await importManifest(request.body, { dryRun: true, confirmClientTypeChange: query.confirmClientTypeChange }));
+    // The entry is saved with the import, in its transaction
+    const audited = await platformAuditFor(request);
+    const result = await importManifest(request.body, {
+      confirmClientTypeChange: query.confirmClientTypeChange,
+      inTransaction: (tx, r) => audited.record(tx, 'application.manifest_imported', importAuditEntry(r)),
+    });
+    await audited.settle();
     return reply.status(result.created ? 201 : 200).send(result);
   });
 

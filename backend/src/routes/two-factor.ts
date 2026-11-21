@@ -10,7 +10,7 @@ import { AUTHENTICATED } from '../middleware/authorize.js';
 import { newRecoveryCodes } from '../lib/mfa.js';
 import { consumeMfaCode, getMfaState, mfaRequired, readMfaToken, saveMfaState } from '../lib/sign-in.js';
 import { logActivity } from '../lib/activity.js';
-import { audit } from '../lib/audit.js';
+import { withAccountAudit } from '../lib/audit.js';
 import { signedInCodeRateLimit } from '../lib/rate-limits.js';
 import { codeSchema, enrollment, finishEnrollment, mfaRateLimit } from './mfa.js';
 
@@ -60,9 +60,12 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const state = await getMfaState(owner, request.user.userId);
     if (!state || state.enabled) throw new AppError('Two-factor is already set up', 409);
-    const recoveryCodes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret, body.code);
+    const recoveryCodes = await withAccountAudit(request, owner, async (tx, record) => {
+      const codes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret!, body.code, tx);
+      await record(owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled');
+      return codes;
+    });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'set up two-factor', target: 'system', type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.mfa_enabled' : 'account.mfa_enabled');
     return { enabled: true, recoveryCodes };
   });
 
@@ -86,9 +89,11 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('Two-factor is required for your organization and cannot be turned off', 403);
     }
     await checkCode(request);
-    await saveMfaState(owner, request.user.userId, { secret: null, enabledAt: null, lastStep: null, recoveryHashes: [] });
+    await withAccountAudit(request, owner, async (tx, record) => {
+      await saveMfaState(owner, request.user.userId, { secret: null, enabledAt: null, lastStep: null, recoveryHashes: [] }, tx);
+      await record(owner === 'platform' ? 'platform.account.mfa_disabled' : 'account.mfa_disabled');
+    });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'turned off two-factor', target: 'system', type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.mfa_disabled' : 'account.mfa_disabled');
     return { enabled: false };
   });
 
@@ -118,9 +123,12 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     const state = await getMfaState(owner, request.user.userId);
     if (!state?.enabled) throw new AppError('Two-factor is not set up', 409);
     // The new secret, and new recovery codes (the old ones stop working)
-    const recoveryCodes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret, body.code);
+    const recoveryCodes = await withAccountAudit(request, owner, async (tx, record) => {
+      const codes = await finishEnrollment(owner, request.user.userId, claims.pendingSecret!, body.code, tx);
+      await record(owner === 'platform' ? 'platform.account.mfa_replaced' : 'account.mfa_replaced');
+      return codes;
+    });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'moved two-factor to a new authenticator', target: 'system', type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.mfa_replaced' : 'account.mfa_replaced');
     return { enabled: true, recoveryCodes };
   });
 
@@ -129,9 +137,11 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request) => {
     const owner = await checkCode(request);
     const { codes, hashes } = newRecoveryCodes();
-    await saveMfaState(owner, request.user.userId, { recoveryHashes: hashes });
+    await withAccountAudit(request, owner, async (tx, record) => {
+      await saveMfaState(owner, request.user.userId, { recoveryHashes: hashes }, tx);
+      await record(owner === 'platform' ? 'platform.account.recovery_codes_regenerated' : 'account.recovery_codes_regenerated');
+    });
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: request.user.userId, action: 'made new recovery codes', target: 'system', type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.recovery_codes_regenerated' : 'account.recovery_codes_regenerated');
     return { recoveryCodes: codes };
   });
 };

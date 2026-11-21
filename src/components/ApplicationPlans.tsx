@@ -4,13 +4,14 @@
  * and meters in its manifest; staff set each plan's value here, and the
  * organizations on that plan are told. backend/src/routes/application-limits.ts.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Gauge, Plus, Trash2 } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPut } from '../lib/api-client';
 import { invalidateApi } from '../lib/query';
 import { Card, inputClass, primaryButtonClass, secondaryButtonClass, selectClass } from './ui';
 import { formatMoney, fromMinorUnits, toMinorUnits } from '../lib/money';
+import { useChanged } from '../lib/hooks';
 
 type Value = number | boolean | null;
 interface Limit { key: string; label: string; type: 'integer' | 'boolean'; unlimited: boolean; unit: string | null; default: Value; values: Record<string, Value> }
@@ -29,7 +30,7 @@ function LimitRow({ l, plans, applicationId }: { l: Limit; plans: LimitsInfo['pl
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  useEffect(() => setDraft(toDraft(l)), [l]);
+  if (useChanged(l)) setDraft(toDraft(l));
   const changed = JSON.stringify(draft) !== JSON.stringify(toDraft(l));
 
   const save = async () => {
@@ -114,11 +115,10 @@ function Prices({ applicationId }: { applicationId: string }) {
   const [meterRows, setMeterRows] = useState<MeterRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    if (!info.data) return;
+  if (useChanged(info.data, true) && info.data) {
     setRows(info.data.prices.map((p) => ({ currency: p.currency, interval: p.interval, model: p.model, amount: String(fromMinorUnits(p.unitAmount, p.currency)) })));
     setMeterRows(info.data.meters.flatMap((m) => m.prices.map((p) => ({ key: m.key, currency: p.currency, amount: String(fromMinorUnits(p.unitAmount, p.currency)), perQuantity: String(p.perQuantity), included: String(p.includedQuantity) }))));
-  }, [info.data]);
+  }
   if (!info.data || !rows || !meterRows) return null;
   const currencies = info.data.currencies.length ? info.data.currencies : ['INR', 'USD'];
   const meters = info.data.meters;

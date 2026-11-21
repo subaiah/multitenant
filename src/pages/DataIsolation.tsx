@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Database, ShieldCheck, HardDrive, Plug, Lock } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { apiPatch } from '../lib/api-client';
 import { Card, DataView, PageHeader, StatCard, formatRelative, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 interface DatabaseConfig {
   strategy: string;
@@ -109,7 +110,7 @@ function DatabaseForm({ config, strategies, onSaved, protectionSwitches }: {
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => setForm(initial), [config.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (useChanged(config.updatedAt)) setForm(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
   const save = async () => {

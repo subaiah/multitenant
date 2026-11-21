@@ -17,6 +17,9 @@ import { publishProductEvent } from '../lib/product-events.js';
 import { reportUsage, usageForApplication } from '../lib/product-usage.js';
 import { resolveResource, resourceTypes } from '../lib/product-resources.js';
 import { getProductOrganization, listProductEvents, listProductGroups, listProductMembers, listProductOrgUnits, listProductOrganizations } from '../lib/product-data.js';
+import { withinRateLimit } from '../lib/api-gateway.js';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const paging = (defaultLimit: number) => ({ page: pageSchema.default(1), limit: limitSchema(defaultLimit) });
 const pagination = (page: number, limit: number, total: number) => ({ page, limit, total, pages: Math.ceil(total / limit) });
@@ -53,6 +56,19 @@ const resultSchema = z.object({
 
 export async function productV1Routes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', authenticateService);
+  // Calls about an organization count against its API rate limit: one allowance per application (lib/api-gateway.ts)
+  fastify.addHook('preHandler', async (request, reply) => {
+    const organizationId = (request.params as { organizationId?: string } | undefined)?.organizationId;
+    if (!organizationId || !request.service || !UUID.test(organizationId)) return;
+    let allowed = true;
+    try {
+      allowed = await withinRateLimit(request, reply, organizationId, `app:${request.service.applicationId}`);
+    } catch (err) {
+      // No such organization (the route answers 404), or the count couldn't be kept: don't block the call
+      request.log.debug({ err, organizationId }, 'Organization rate limit not applied');
+    }
+    if (!allowed) return reply;
+  });
 
   // Who the token belongs to, and what it may do
   fastify.get('/products/me', { config: { serviceScope: null } }, async (request) => {

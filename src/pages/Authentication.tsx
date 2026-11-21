@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Plus, Trash2, X, ShieldCheck, KeyRound } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiDelete, apiPatch, apiPost } from '../lib/api-client';
 import { Badge, Card, DataView, EmptyState, PageHeader, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 interface Provider {
   id: string;
@@ -152,7 +153,7 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
   };
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
-  useEffect(() => setForm(initial), [JSON.stringify(initial)]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (useChanged(JSON.stringify(initial))) setForm(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
   const b = config.baseline;
