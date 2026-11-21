@@ -3,7 +3,7 @@
  * secret they're signed with, each organization's setup, and what was sent.
  * backend/src/routes/application-lifecycle.ts; docs/PRODUCT_INTEGRATION.md.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { apiPost, apiPut } from '../lib/api-client';
@@ -11,6 +11,7 @@ import { invalidateApi } from '../lib/query';
 import { CopyBox } from './CopyBox';
 import { Field } from './Dialog';
 import { Badge, Card, DataView, formatDateTime, formatRelative, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from './ui';
+import { useChanged } from '../lib/hooks';
 
 interface Lifecycle {
   callbackUrl: string | null;
@@ -30,7 +31,7 @@ export default function ApplicationLifecycle({ applicationId, applicationName }:
   const path = `/applications/${applicationId}/lifecycle`;
   const info = useApi<Lifecycle>(path);
   const [secret, setSecret] = useState<string | null>(null);
-  useEffect(() => setSecret(null), [applicationId]);
+  if (useChanged(applicationId)) setSecret(null);
   const refresh = () => invalidateApi(path, '/tenant-applications');
 
   return (

@@ -57,8 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const lastUserId = useRef<string | null>(null);
-  const reload = useCallback(async (): Promise<Portal | null> => {
-    setLoading(true);
+  // `loading` starts true, so the startup check doesn't set it
+  const load = useCallback(async (): Promise<Portal | null> => {
     try {
       const me = await getCurrentUser();
       // Someone else now (signed in as another account): nothing of the last one's
@@ -81,17 +81,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [clear]);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    return load();
+  }, [load]);
 
   // Check the session once on startup
+  // (From a promise, so no state is set while the effect itself runs)
   useEffect(() => {
-    reload();
-  }, [reload]);
+    void Promise.resolve().then(load);
+  }, [load]);
 
   // A request found the session ended (deactivated, removed, signed out
   // everywhere): drop the user but keep the tenant, so RequireAuth sends them
   // to this tenant's sign-in page with an explanation.
   const signedIn = useRef(false);
-  signedIn.current = !!user;
+  useEffect(() => {
+    signedIn.current = !!user;
+  }, [user]);
   useEffect(() => {
     const onEnded = (event: Event) => {
       const reason = (event as CustomEvent<SessionEndReason>).detail ?? 'signed-out';

@@ -124,14 +124,15 @@ test('pages with sample data are hidden when preview features are off', async (t
 
   // Production-like
   assert.equal((await prod.api('GET', '/bff/auth/me', { cookie: s.cookie })).json.features.preview, false);
-  // Real figures now: shown in production too
+  // Real figures and enforced settings now: shown in production too
   assert.equal((await prod.api('GET', '/deployments', { cookie: s.cookie })).status, 200);
-  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 404);
+  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 200);
   const dash = await prod.api('GET', '/bff/dashboard', { cookie: s.cookie });
   assert.equal(dash.status, 200);
   assert.equal(dash.json.applications, null);
   const prodMenu = paths((await prod.api('GET', '/menu-items/portal/TENANT', { cookie: s.cookie })).json);
-  assert.ok(!prodMenu.includes('/api'));
+  // No tenant page is a preview any more: the menu shows them all
+  assert.ok(prodMenu.includes('/api'));
   assert.ok(prodMenu.includes('/users'));
   // Backup and encryption are switches only; the storage note still saves
   assert.equal((await prod.api('PATCH', '/database', { cookie: s.cookie, body: { backupEnabled: false } })).status, 400);

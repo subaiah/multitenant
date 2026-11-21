@@ -1,8 +1,9 @@
 import type { FastifyRequest } from 'fastify';
-import { controlDb } from './prisma.js';
+import { controlDb, type ControlDb } from './prisma.js';
 import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
 import { touchSession } from './sign-in.js';
+import { accessTokenOf, verifyWithPreviousSecret } from './signing-keys.js';
 
 /** Sent by the frontend on requests the user didn't make (polling) */
 export const BACKGROUND_HEADER = 'x-background-request';
@@ -24,10 +25,10 @@ export function endAllSessions(db: Pick<TenantDb, 'user' | 'refreshToken'>, user
 }
 
 /** endAllSessions for a platform user (control plane). */
-export function endAllPlatformSessions(userId: string, at = new Date()) {
+export function endAllPlatformSessions(userId: string, at = new Date(), db: Pick<ControlDb, 'platformUser' | 'platformRefreshToken'> = controlDb) {
   return [
-    controlDb.platformUser.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
-    controlDb.platformRefreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
+    db.platformUser.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
+    db.platformRefreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
   ];
 }
 
@@ -79,7 +80,10 @@ export async function verifySession(request: FastifyRequest): Promise<SessionUse
   try {
     await request.jwtVerify();
   } catch {
-    throw new AppError('Not authenticated', 401);
+    // While JWT_SECRET is being rotated, tokens signed with the old one still count
+    const previous = await verifyWithPreviousSecret<typeof request.user>(accessTokenOf(request));
+    if (!previous) throw new AppError('Not authenticated', 401);
+    request.user = previous;
   }
   const token = request.user as { userId?: string; userType?: string; tenantId?: string; iat?: number; iatMs?: number; type?: string; sid?: string };
   // Only session access tokens, not other tokens signed with the same key (e.g. BFF service tokens)

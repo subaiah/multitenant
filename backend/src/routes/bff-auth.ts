@@ -16,13 +16,14 @@ import { checkSignInPassword, hashPassword, passwordNeedsRehash } from '../utils
 import { isPlatformSlug } from '../lib/platform.js';
 import { endAllPlatformSessions, endAllSessions, verifySession } from '../lib/sessions.js';
 import { assertRefreshAllowed, completeSignIn, recordSignIn, recordSignInFailure, startSession, type SignInResult } from '../lib/sign-in.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit, withPlatformAudit } from '../lib/audit.js';
 import { mfaRoutes } from './mfa.js';
 import { finishSso, SsoError, ssoRedirectUriFor, startSso, userForIdentity } from '../lib/sso.js';
 import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
 import { emailInput, findUserByEmail } from '../lib/emails.js';
+import { derivedKeys } from '../lib/signing-keys.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -46,10 +47,14 @@ const otpVerifySchema = z.object({
  * Emailed sign-in codes are kept as a keyed hash, bound to the organization
  * and address they were sent to. Six digits are too few for a plain hash (a
  * copy of the table could be tried against every code in a moment), so the
- * key is derived from JWT_SECRET, which isn't in the database.
+ * key is derived from JWT_SECRET, which isn't in the database. New codes use
+ * the current secret; while it's rotated, codes sent under the previous one
+ * still work (lib/signing-keys.ts).
  */
-const otpKey = crypto.createHmac('sha256', config.jwtSecret).update('emailed sign-in codes').digest();
-const hashOtp = (tenantId: string, email: string, code: string) => crypto.createHmac('sha256', otpKey).update(`${tenantId}:${email}:${code}`).digest('hex');
+const otpKeys = () => derivedKeys((secret) => crypto.createHmac('sha256', secret).update('emailed sign-in codes').digest());
+const otpHashes = (tenantId: string, email: string, code: string) =>
+  otpKeys().map((key) => crypto.createHmac('sha256', key).update(`${tenantId}:${email}:${code}`).digest('hex'));
+const hashOtp = (tenantId: string, email: string, code: string) => otpHashes(tenantId, email, code)[0];
 
 /** What a sign-in step returns when two-factor comes next (no session yet). */
 const mfaNext = (r: NonNullable<SignInResult>) => ({
@@ -283,7 +288,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const otpRecord = await db.otpCode.findFirst({
-      where: { tenantId: tenant.id, email, code: hashOtp(tenant.id, email, code), verified: false },
+      where: { tenantId: tenant.id, email, code: { in: otpHashes(tenant.id, email, code) }, verified: false },
     });
     if (!otpRecord) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'wrong code' });
@@ -514,20 +519,21 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Ends every session, including access tokens already handed out
     if (user.tenantId) {
-      const db = await dbForTenant(user.tenantId);
-      await db.$transaction(endAllSessions(db, user.id));
+      await withAudit(request, async (tx, record) => {
+        for (const step of endAllSessions(tx, user.id)) await step;
+        await record('auth.signed_out_everywhere');
+      }, { actor: { type: 'USER', id: user.id }, tenantId: user.tenantId });
     } else {
-      await controlDb.$transaction(endAllPlatformSessions(user.id));
+      await withPlatformAudit(request, async (tx, record) => {
+        for (const step of endAllPlatformSessions(user.id, new Date(), tx)) await step;
+        await record('platform.auth.signed_out_everywhere');
+      }, { actor: { type: 'PLATFORM', id: user.id } });
     }
 
     reply.clearCookie('access_token', { path: '/' });
     reply.clearCookie('refresh_token', { path: '/' });
 
     await logActivity({ tenantId: user.tenantId, userId: user.id, action: 'revoked all sessions', target: 'system', type: 'AUTH' });
-    await audit(request, user.tenantId ? 'auth.signed_out_everywhere' : 'platform.auth.signed_out_everywhere', {}, {
-      actor: { type: user.tenantId ? 'USER' : 'PLATFORM', id: user.id },
-      tenantId: user.tenantId ?? null,
-    });
 
     return { message: 'All sessions revoked successfully' };
   });

@@ -220,11 +220,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/api" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
-                    <ApiManagement />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
+                  <ApiManagement />
+                </PermissionGuard>
               } />
               <Route path="/users" element={
                 <PermissionGuard permission="users:read" redirectTo="/unauthorized">

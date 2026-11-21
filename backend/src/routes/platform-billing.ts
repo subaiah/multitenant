@@ -11,7 +11,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config/env.js';
 import { controlDb } from '../lib/prisma.js';
-import { audit, diff, withPlatformAudit } from '../lib/audit.js';
+import { diff, withPlatformAudit } from '../lib/audit.js';
 import { AppError } from '../middleware/error-handler.js';
 import { forgetPlans, PLAN_CODES, type PlanCode } from '../lib/billing/plans.js';
 import { enabledProviders, providerForCurrency } from '../lib/billing/providers.js';
@@ -65,10 +65,13 @@ export const platformBillingRoutes: FastifyPluginAsync = async (fastify) => {
     }).parse(request.body);
     if (code === 'FREE' && body.maxUsers === 0) throw new AppError('The Free plan must allow at least one user', 400);
     const before = await controlDb.billingPlan.findUniqueOrThrow({ where: { code } });
-    const plan = await controlDb.billingPlan.update({ where: { code }, data: body });
-    forgetPlans();
     const changes = diff(before as unknown as Record<string, unknown>, body as Record<string, unknown>);
-    if (Object.keys(changes).length) await audit(request, 'billing.plan_updated', { resource: { type: 'billing_plan', id: code, label: plan.name }, changes });
+    const plan = await withPlatformAudit(request, async (tx, record) => {
+      const updated = await tx.billingPlan.update({ where: { code }, data: body });
+      if (Object.keys(changes).length) await record('billing.plan_updated', { resource: { type: 'billing_plan', id: code, label: updated.name }, changes });
+      return updated;
+    });
+    forgetPlans();
     return plan;
   });
 

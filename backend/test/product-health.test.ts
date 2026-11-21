@@ -91,7 +91,10 @@ test('up, degraded, down after three failures in a row, and back up; staff see i
   assert.ok(i.attention.includes('Not answering its health checks'));
   const e = await entitlement();
   assert.equal(e.health.problem, 'down');
-  assert.equal(JSON.stringify(e).includes('503'), false, 'no details for organizations');
+  // No details for organizations: only whether there's a problem and since when. (Not a search
+  // for "503" in the JSON: ids and timestamps sometimes contain those digits.)
+  assert.deepEqual(Object.keys(e.health).sort(), ['problem', 'since']);
+  assert.equal(/Answered|maintenance/.test(JSON.stringify(e)), false, 'no details for organizations');
 
   answer = { status: 200, body: { status: 'nope' } };
   assert.equal((await check()).status, 'DOWN', 'an answer without a known status is a failure');

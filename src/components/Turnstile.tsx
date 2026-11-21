@@ -32,7 +32,9 @@ export function Turnstile({ siteKey, onToken, resetKey }: { siteKey: string; onT
   const box = useRef<HTMLDivElement>(null);
   const widget = useRef<{ api: TurnstileApi; id: string } | null>(null);
   const callback = useRef(onToken);
-  callback.current = onToken;
+  useEffect(() => {
+    callback.current = onToken;
+  });
 
   useEffect(() => {
     let cancelled = false;

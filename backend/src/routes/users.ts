@@ -316,9 +316,11 @@ export const userRoutes: FastifyPluginAsync = async (fastify) => {
 
     if (user.status === 'PENDING') {
       // Nobody has used the account yet: invite the right address instead
-      await request.db.user.update({ where: { id: user.id }, data: { email: newEmail } });
+      await withAudit(request, async (tx, record) => {
+        await tx.user.update({ where: { id: user.id }, data: { email: newEmail } });
+        await record('user.updated', { resource: { type: 'user', id: user.id, label: newEmail }, changes: { email: [user.email, newEmail] } });
+      });
       const invite = await sendInvitation(request.tenant, { id: user.id, email: newEmail }, request.user.userId);
-      await audit(request, 'user.updated', { resource: { type: 'user', id: user.id, label: newEmail }, changes: { email: [user.email, newEmail] } });
       return { email: newEmail, pendingEmail: null, ...inviteOutcome(invite) };
     }
     await requestEmailChange(owner, user, newEmail, request.user.userId);

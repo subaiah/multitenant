@@ -2,7 +2,7 @@
  * Support sessions (platform portal): ask for access to a tenant, approve or
  * reject requests, end sessions, and open the workspace of an active one.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LifeBuoy, Check, X, LogIn, Square } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
@@ -142,16 +142,15 @@ export default function Support() {
 
 function RequestForm({ list, onDone }: { list: SessionList; onDone: () => void }) {
   const tenants = useApi<{ data: { id: string; name: string; provisioningStatus?: string }[] }>('/tenants?limit=100');
-  const [tenantId, setTenantId] = useState('');
+  const [chosenTenant, setTenantId] = useState('');
+  // The first organization until one is chosen
+  const tenantId = chosenTenant || tenants.data?.data[0]?.id || '';
   const [reason, setReason] = useState('');
   const [access, setAccess] = useState<'READ_ONLY' | 'READ_WRITE'>('READ_ONLY');
   const [permissions, setPermissions] = useState<string[]>([]);
   const [minutes, setMinutes] = useState(60);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    if (!tenantId && tenants.data?.data.length) setTenantId(tenants.data.data[0].id);
-  }, [tenants.data, tenantId]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

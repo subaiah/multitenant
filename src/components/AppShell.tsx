@@ -3,7 +3,7 @@
  * sidebar (who you are and where, the menu, your account) and the page.
  * Below the lg breakpoint the sidebar slides in from a menu button.
  */
-import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useState, type ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { LogOut, Menu, Moon, Sun, X } from 'lucide-react';
 import DynamicMenu from './DynamicMenu';
@@ -11,6 +11,7 @@ import NotificationBell from './NotificationBell';
 import { LoadingState, humanize } from './ui';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useChanged } from '../lib/hooks';
 
 export function initials(name: string) {
   const words = name.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
@@ -31,7 +32,7 @@ export default function AppShell({ portal, mark, title, subtitle, notificationsP
   const { dark, toggle } = useTheme();
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
-  useEffect(() => setOpen(false), [pathname]);
+  if (useChanged(pathname)) setOpen(false);
 
   const name = user?.name || user?.email || '';
   const sidebar = (
