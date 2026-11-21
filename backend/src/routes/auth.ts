@@ -6,6 +6,7 @@ import { tenantForSignIn } from '../lib/auth-planes.js';
 import { AppError } from '../middleware/error-handler.js';
 import { isPlatformSlug } from '../lib/platform.js';
 import { verifyPassword, hashPassword } from '../utils/auth.js';
+import { securityBaseline } from '../lib/security-baseline.js';
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   // Get tenant by slug (for tenant-specific login pages)
@@ -47,6 +48,8 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
+    // Emailed codes only where the platform allows them (lib/security-baseline.ts)
+    const codesAllowed = (await securityBaseline()).emailedCodesAllowed;
     return {
       id: tenant.id,
       name: tenant.name,
@@ -56,7 +59,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
       loginTitle: tenant.loginTitle,
       loginSubtitle: tenant.loginSubtitle,
       status: tenant.status,
-      authConfig,
+      authConfig: authConfig && { ...authConfig, otpEnabled: authConfig.otpEnabled && codesAllowed },
     };
   });
 

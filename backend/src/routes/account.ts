@@ -15,6 +15,7 @@ import { otpRequestRateLimit } from '../lib/rate-limits.js';
 import { PLATFORM_SLUG, isPlatformSlug } from '../lib/platform.js';
 import { emailInput, findUserByEmail } from '../lib/emails.js';
 import { checkPasswordPolicy, hashPassword, type PasswordPolicy } from '../utils/auth.js';
+import { securityBaseline, stricterPolicy } from '../lib/security-baseline.js';
 
 /**
  * Public account flows (no session): accepting invitations and resetting
@@ -31,7 +32,9 @@ const resetSchema = z.object({ token: z.string().min(10), password: z.string().m
 const PLATFORM_POLICY: PasswordPolicy = 'STRONG';
 const GENERIC_FORGOT = 'If an account exists for this email, we have sent a link to reset the password.';
 
-const policyFor = (t: ValidUserToken): PasswordPolicy => (t.tenant ? (t.tenant.passwordPolicy as PasswordPolicy) : PLATFORM_POLICY);
+/** The organization's (or the platform's) password policy, or the platform's baseline where that's stricter */
+const policyFor = async (t: ValidUserToken): Promise<PasswordPolicy> =>
+  stricterPolicy(t.tenant ? (t.tenant.passwordPolicy as PasswordPolicy) : PLATFORM_POLICY, (await securityBaseline()).minPasswordPolicy);
 const slugFor = (t: ValidUserToken) => t.tenant?.slug ?? PLATFORM_SLUG;
 
 export const accountRoutes: FastifyPluginAsync = async (fastify) => {
@@ -48,7 +51,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
       email: invite.user.email,
       name: invite.user.name,
       tenant: invite.tenant ? { name: invite.tenant.name, slug: invite.tenant.slug } : null,
-      passwordPolicy: policyFor(invite),
+      passwordPolicy: await policyFor(invite),
     };
   });
 
@@ -68,7 +71,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     if (!invite || invite.user.status !== 'PENDING') {
       throw new AppError('This invitation is invalid or has expired. Ask your administrator to send a new one.', 404);
     }
-    const problem = checkPasswordPolicy(password, policyFor(invite));
+    const problem = checkPasswordPolicy(password, await policyFor(invite));
     if (problem) throw new AppError(problem, 400);
     if (!(await consumeUserToken(invite))) {
       throw new AppError('This invitation has already been used.', 409);
@@ -121,7 +124,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     const { token } = request.params as { token: string };
     const reset = await findValidUserToken(token, 'PASSWORD_RESET');
     if (!reset) throw new AppError('This reset link is invalid or has expired. Request a new one.', 404);
-    return { email: reset.user.email, tenantSlug: slugFor(reset), passwordPolicy: policyFor(reset) };
+    return { email: reset.user.email, tenantSlug: slugFor(reset), passwordPolicy: await policyFor(reset) };
   });
 
   fastify.post('/password/reset', {
@@ -136,7 +139,7 @@ export const accountRoutes: FastifyPluginAsync = async (fastify) => {
     if (!reset || reset.user.status !== 'ACTIVE') {
       throw new AppError('This reset link is invalid or has expired. Request a new one.', 404);
     }
-    const problem = checkPasswordPolicy(password, policyFor(reset));
+    const problem = checkPasswordPolicy(password, await policyFor(reset));
     if (problem) throw new AppError(problem, 400);
     if (!(await consumeUserToken(reset))) {
       throw new AppError('This reset link has already been used.', 409);

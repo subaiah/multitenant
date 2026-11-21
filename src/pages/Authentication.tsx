@@ -14,7 +14,17 @@ interface Provider {
   scopes: string[];
   autoProvision: boolean;
 }
+interface Baseline {
+  minPasswordPolicy: string;
+  mfaRequiredFor: 'NONE' | 'ADMINS' | 'EVERYONE';
+  maxIdleMinutes: number | null;
+  maxSessionHours: number | null;
+  emailedCodesAllowed: boolean;
+}
+
 interface AuthConfig {
+  /** The platform's minimums: settings can be stricter, never looser */
+  baseline?: Baseline;
   mfaEnabled: boolean;
   sessionTimeout: number;
   maxSessionHours: number;
@@ -145,18 +155,38 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
   useEffect(() => setForm(initial), [JSON.stringify(initial)]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
+  const b = config.baseline;
+  const minPolicy = b ? POLICIES.indexOf(b.minPasswordPolicy) : 0;
+  // Locked by the platform's baseline: shown as it applies, not changeable
+  const locked = { mfaEnabled: b?.mfaRequiredFor === 'EVERYONE', otpEnabled: b ? !b.emailedCodesAllowed : false, ssoOnly: false };
   const toggle = (key: 'mfaEnabled' | 'ssoOnly' | 'otpEnabled', label: string, hint: string) => (
     <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
       <span>
         <span className="block text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
         <span className="block text-xs text-slate-500 mt-0.5">{hint}</span>
+        {locked[key] && <span className="block text-xs text-amber-600 mt-0.5">Set by the platform</span>}
       </span>
-      <input type="checkbox" className="mt-1 h-4 w-4" checked={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.checked })} />
+      <input type="checkbox" className="mt-1 h-4 w-4" disabled={locked[key]}
+        checked={key === 'mfaEnabled' && locked.mfaEnabled ? true : key === 'otpEnabled' && locked.otpEnabled ? false : form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.checked })} />
     </label>
   );
+  const minimums = b && [
+    b.minPasswordPolicy !== 'STANDARD' && `a ${humanize(b.minPasswordPolicy).toLowerCase()} password policy`,
+    b.mfaRequiredFor === 'EVERYONE' && 'two-factor for everyone',
+    b.mfaRequiredFor === 'ADMINS' && 'two-factor for administrators',
+    b.maxIdleMinutes !== null && `sign-out after at most ${b.maxIdleMinutes} idle minutes`,
+    b.maxSessionHours !== null && `sessions of at most ${b.maxSessionHours} hours`,
+    !b.emailedCodesAllowed && 'no emailed sign-in codes',
+  ].filter(Boolean);
 
   return (
     <Card title="Sign-in security" actions={<ShieldCheck size={18} className="text-slate-400" />}>
+      {minimums && minimums.length > 0 && (
+        <p className="mb-3 text-sm text-slate-600 dark:text-slate-300 bg-blue-50 dark:bg-blue-500/10 rounded-lg p-3">
+          The platform requires {minimums.join(', ')}. You can be stricter, not looser.
+        </p>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {toggle('mfaEnabled', 'Require two-factor sign-in', 'Everyone signing in with a password or emailed code also enters a code from an authenticator app (single sign-on relies on your identity provider)')}
         {toggle('ssoOnly', 'SSO only', 'Disable password and one-time-code sign-in')}
@@ -169,18 +199,18 @@ function SecuritySettings({ config, onSave }: { config: AuthConfig; onSave: (pat
         <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
           <span className="font-medium text-slate-700 dark:text-slate-200">Password policy</span>
           <select value={form.passwordPolicy} onChange={(e) => setForm({ ...form, passwordPolicy: e.target.value })} className={`${inputClass} mt-1`}>
-            {POLICIES.map((p) => <option key={p} value={p}>{humanize(p)}</option>)}
+            {POLICIES.map((p, i) => <option key={p} value={p} disabled={i < minPolicy}>{humanize(p)}{i < minPolicy ? ' (below the platform minimum)' : ''}</option>)}
           </select>
         </label>
         <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
           <span className="font-medium text-slate-700 dark:text-slate-200">Sign out after inactivity (minutes)</span>
-          <input type="number" min={5} max={1440} value={form.sessionTimeout}
+          <input type="number" min={5} max={b?.maxIdleMinutes ?? 1440} value={form.sessionTimeout}
             onChange={(e) => setForm({ ...form, sessionTimeout: Number(e.target.value) })} className={`${inputClass} mt-1`} />
           <span className="block text-xs text-slate-500 mt-1">A session with no activity for this long ends.</span>
         </label>
         <label className="block p-3 rounded-lg bg-slate-50 dark:bg-slate-900 text-sm">
           <span className="font-medium text-slate-700 dark:text-slate-200">Maximum session length (hours)</span>
-          <input type="number" min={1} max={720} value={form.maxSessionHours}
+          <input type="number" min={1} max={b?.maxSessionHours ?? 720} value={form.maxSessionHours}
             onChange={(e) => setForm({ ...form, maxSessionHours: Number(e.target.value) })} className={`${inputClass} mt-1`} />
           <span className="block text-xs text-slate-500 mt-1">People sign in again after this long, however active.</span>
         </label>

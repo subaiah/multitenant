@@ -10,6 +10,7 @@ import { activeSupportSession, type ActiveSupportSession } from '../lib/support.
 import { trialEnded } from '../lib/tenant-lifecycle.js';
 import { enabledProviders } from '../lib/billing/providers.js';
 import { apiKeyUserId, keyFromRequest, verifyApiKey } from '../lib/api-keys.js';
+import { ipAllowed, securityBaseline } from '../lib/security-baseline.js';
 
 const billingAvailable = () => enabledProviders().length > 0;
 
@@ -78,6 +79,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   const { userId, userType, tenantId: tokenTenantId } = request.user;
   if (!userId || !userType || !(userType in USER_TYPE_HIERARCHY)) {
     return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
+  // Platform staff only from the platform's allowed addresses, if it has a list (lib/security-baseline.ts)
+  if (isPlatformUser(userType) && !ipAllowed((await securityBaseline()).staffIpAllowlist, request.ip)) {
+    return reply.status(403).send({ error: 'Forbidden', code: 'STAFF_IP_NOT_ALLOWED', message: "Platform staff can't work from this network" });
   }
 
   const headerTenantId = request.headers[config.tenantHeader];

@@ -6,6 +6,7 @@ import { logActivity } from '../lib/activity.js';
 import { audit, diff, withAudit } from '../lib/audit.js';
 import { ssoRedirectUrisForTenant } from '../lib/sso.js';
 import { assertFeature } from '../lib/billing/plans.js';
+import { effectiveSignIn, looserThanBaseline, securityBaseline } from '../lib/security-baseline.js';
 
 const updateAuthConfigSchema = z.object({
   mfaEnabled: z.boolean().optional(),
@@ -64,7 +65,10 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
     // The addresses to register with identity providers: the platform's, and
     // the organization's own domain once it's verified
     const ssoRedirectUris = await ssoRedirectUrisForTenant(request.tenant.id);
-    return { ...config, ssoRedirectUri: ssoRedirectUris[0], ssoRedirectUris };
+    // The platform's minimums, and the settings as they apply with them (lib/security-baseline.ts)
+    const baseline = await securityBaseline();
+    const { staffIpAllowlist: _staff, updatedAt: _u, ...minimums } = baseline;
+    return { ...config, ssoRedirectUri: ssoRedirectUris[0], ssoRedirectUris, baseline: minimums, effective: { ...effectiveSignIn(baseline, config), mfaRequiredFor: baseline.mfaRequiredFor } };
   });
 
   // Update auth config
@@ -89,6 +93,9 @@ export const authConfigRoutes: FastifyPluginAsync = async (fastify) => {
   }, async (request, reply) => {
 
     const data = updateAuthConfigSchema.parse(request.body);
+    // Stricter than the platform's baseline, never looser
+    const looser = looserThanBaseline(await securityBaseline(), data);
+    if (looser.length) throw new AppError(`${looser.join('. ')}.`, 400, true, 'BELOW_SECURITY_BASELINE');
 
     const before = await request.db.authConfig.findUnique({ where: { tenantId: request.tenant.id } });
     const config = await withAudit(request, async (tx, record) => {

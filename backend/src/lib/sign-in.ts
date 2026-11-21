@@ -29,6 +29,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { logActivity } from './activity.js';
 import { audit } from './audit.js';
 import { useRecoveryCode, verifyTotp } from './mfa.js';
+import { baselineRequiresMfa, effectiveSignIn, ipAllowed, securityBaseline } from './security-baseline.js';
 
 export function parseExpiryToMs(expiry: string): number {
   const match = expiry.match(/^(\d+)([smhd])$/);
@@ -54,7 +55,9 @@ export async function sessionPolicy(owner: SessionOwner): Promise<SessionPolicy>
     where: { tenantId: owner.tenantId },
     select: { sessionTimeout: true, maxSessionHours: true },
   });
-  return { idleMs: (auth?.sessionTimeout ?? 60) * 60_000, maxMs: (auth?.maxSessionHours ?? 12) * 3_600_000 };
+  // The platform's baseline caps both (lib/security-baseline.ts)
+  const { sessionTimeout, maxSessionHours } = effectiveSignIn(await securityBaseline(), auth ?? {});
+  return { idleMs: sessionTimeout * 60_000, maxMs: maxSessionHours * 3_600_000 };
 }
 
 const cookieOptions = () => ({ httpOnly: true, secure: config.nodeEnv === 'production', sameSite: 'lax' as const, path: '/' });
@@ -72,6 +75,10 @@ export async function startSession(
   user: { id: string; userType: string },
   carry?: { familyId: string; sessionStartedAt: Date },
 ) {
+  // Platform staff only from the platform's allowed addresses, if it has a list (lib/security-baseline.ts)
+  if (owner === 'platform' && !ipAllowed((await securityBaseline()).staffIpAllowlist, request.ip)) {
+    throw new AppError("Platform staff can't sign in from this network", 403, true, 'STAFF_IP_NOT_ALLOWED');
+  }
   const policy = await sessionPolicy(owner);
   const startedAt = carry?.sessionStartedAt ?? new Date();
   const sessionEndsInMs = startedAt.getTime() + policy.maxMs - Date.now();
@@ -137,8 +144,11 @@ export interface MfaState {
   recoveryHashes: string[];
 }
 
-export async function mfaRequired(owner: SessionOwner): Promise<boolean> {
-  if (owner === 'platform') return config.platformMfaRequired;
+/** Whether this person must use two-factor: their organization's setting (or the platform's), or the platform's baseline for their type */
+export async function mfaRequired(owner: SessionOwner, userType?: string): Promise<boolean> {
+  const baseline = await securityBaseline();
+  if (owner === 'platform') return config.platformMfaRequired || baselineRequiresMfa(baseline, userType ?? 'PLATFORM_USER');
+  if (baselineRequiresMfa(baseline, userType)) return true;
   const auth = await (await dbForTenant(owner.tenantId)).authConfig.findUnique({ where: { tenantId: owner.tenantId }, select: { mfaEnabled: true } });
   return Boolean(auth?.mfaEnabled);
 }
@@ -247,7 +257,7 @@ export async function completeSignIn(
     ...(owner !== 'platform' && { tenantId: owner.tenantId, tenantSlug: owner.tenantSlug }),
   };
   if (state?.enabled) return { mfa: 'verify', mfaToken: await signMfaToken({ ...base, step: 'verify' }) };
-  if (await mfaRequired(owner)) return { mfa: 'enroll', mfaToken: await signMfaToken({ ...base, step: 'enroll' }) };
+  if (await mfaRequired(owner, user.userType)) return { mfa: 'enroll', mfaToken: await signMfaToken({ ...base, step: 'enroll' }) };
   await startSession(fastify, request, reply, owner, user);
   return null;
 }
