@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,6 +8,7 @@ import { CloseOrganizationCard } from '../components/CloseOrganizationCard';
 import { DataExportCard } from '../components/DataExportCard';
 import { apiPatch } from '../lib/api-client';
 import { Badge, Card, DataView, PageHeader, formatDate, humanize, inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 interface Tenant {
   id: string;
@@ -50,7 +51,7 @@ function TenantSettings({ tenant, onSaved }: { tenant: Tenant; onSaved: () => Pr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  useEffect(() => setForm(initial), [tenant.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (useChanged(tenant.updatedAt)) setForm(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
   const save = async () => {

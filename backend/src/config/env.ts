@@ -68,6 +68,8 @@ const envSchema = z.object({
 
   // JWT
   JWT_SECRET: z.string().min(32),
+  // While rotating JWT_SECRET: the old value, still accepted (lib/signing-keys.ts)
+  JWT_SECRET_PREVIOUS: unsetIfEmpty(z.string().min(32).optional()),
   JWT_EXPIRES_IN: z.string().default('24h'),
 
   // CORS
@@ -228,6 +230,9 @@ const envSchema = z.object({
   MAIL_FROM: z.string().default('Multitenant Platform <no-reply@localhost>'),
   MAIL_OUTBOX_FILE: z.string().optional(),
 }).superRefine((env, ctx) => {
+  if (env.JWT_SECRET_PREVIOUS && env.JWT_SECRET_PREVIOUS === env.JWT_SECRET) {
+    ctx.addIssue({ code: 'custom', path: ['JWT_SECRET_PREVIOUS'], message: 'JWT_SECRET_PREVIOUS is the old value: set a new JWT_SECRET' });
+  }
   for (const [provider, keys] of [['Razorpay', ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET']], ['Stripe', ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']]] as const) {
     const set = keys.filter((k) => env[k]);
     if (set.length && set.length < keys.length) {
@@ -335,6 +340,7 @@ export const config = {
 
   // JWT
   jwtSecret: env.JWT_SECRET,
+  jwtSecretPrevious: env.JWT_SECRET_PREVIOUS,
   jwtExpiresIn: env.JWT_EXPIRES_IN,
 
   // CORS

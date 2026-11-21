@@ -91,7 +91,10 @@ test('up, degraded, down after three failures in a row, and back up; staff see i
   assert.ok(i.attention.includes('Not answering its health checks'));
   const e = await entitlement();
   assert.equal(e.health.problem, 'down');
-  assert.equal(JSON.stringify(e).includes('503'), false, 'no details for organizations');
+  // No details for organizations: only whether there's a problem and since when. (Not a search
+  // for "503" in the JSON: ids and timestamps sometimes contain those digits.)
+  assert.deepEqual(Object.keys(e.health).sort(), ['problem', 'since']);
+  assert.equal(/Answered|maintenance/.test(JSON.stringify(e)), false, 'no details for organizations');
 
   answer = { status: 200, body: { status: 'nope' } };
   assert.equal((await check()).status, 'DOWN', 'an answer without a known status is a failure');
@@ -103,4 +106,31 @@ test('up, degraded, down after three failures in a row, and back up; staff see i
   // Each change in the platform audit log
   const audit = JSON.stringify((await api('GET', '/platform-audit?limit=50', { cookie: platform })).json);
   assert.ok(audit.includes('application.health_changed'));
+});
+
+test('organizations see uptime and response times from the checks kept, for their own applications', async () => {
+  const { controlDb } = await db();
+  const samples = await controlDb.applicationHealthSample.findMany({ where: { applicationId: appId } });
+  assert.ok(samples.length >= 7, 'every check above was kept');
+  const ok = samples.filter((x) => x.outcome !== 'FAILED').length;
+
+  const list = await api('GET', '/deployments', { cookie: admin });
+  assert.equal(list.status, 200);
+  const mine = list.json.applications.find((a: any) => a.application.id === appId);
+  assert.equal(mine.health.status, 'UP');
+  assert.equal(mine.application.version, '2.5.0');
+  assert.equal(mine.health.day.checks, samples.length);
+  assert.equal(mine.health.month.uptime, ok / samples.length);
+  assert.equal(typeof mine.health.day.averageMs, 'number');
+  assert.equal(JSON.stringify(mine).includes('maintenance'), false, 'no error details');
+
+  const detail = await api('GET', `/deployments/${appId}`, { cookie: admin });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.days.length, 30);
+  assert.equal(detail.json.days.reduce((n: number, d: { checks: number }) => n + d.checks, 0), samples.length, 'every check, by day');
+
+  // Another organization without it: nothing to see
+  const B = await seedTenant('health-b');
+  const other = (await loginSession(B.slug, B.adminEmail)).cookie;
+  assert.equal((await api('GET', `/deployments/${appId}`, { cookie: other })).status, 404);
 });

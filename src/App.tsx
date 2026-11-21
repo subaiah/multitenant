@@ -1,6 +1,6 @@
-import { Suspense, lazy, type ReactNode } from 'react';
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { LoadingState } from './components/ui';
 import { PermissionGuard } from './components/PermissionGuard';
@@ -49,16 +49,6 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const SignUp = lazy(() => import('./pages/SignUp'));
 const SignupVerify = lazy(() => import('./pages/SignupVerify'));
 const ConfirmEmail = lazy(() => import('./pages/ConfirmEmail'));
-
-/**
- * Pages that show sample data rather than real measurements: only when the
- * server has preview features on (backend/src/lib/preview.ts). Otherwise the
- * address leads to the dashboard.
- */
-function Preview({ children, home }: { children: ReactNode; home: string }) {
-  const { previewFeatures } = useAuth();
-  return previewFeatures ? <>{children}</> : <Navigate to={home} replace />;
-}
 
 export default function App() {
   return (
@@ -166,11 +156,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/deployments" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
-                    <Deployments />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="applications:read" redirectTo="/unauthorized">
+                  <Deployments />
+                </PermissionGuard>
               } />
               <Route path="/activity" element={
                 <PermissionGuard permission="activity:read" redirectTo="/unauthorized">
@@ -183,11 +171,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/infrastructure" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
-                    <Infrastructure />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="infrastructure:read" redirectTo="/unauthorized">
+                  <Infrastructure />
+                </PermissionGuard>
               } />
               <Route path="/data-isolation" element={
                 <PermissionGuard permission="database:manage" redirectTo="/unauthorized">
@@ -205,11 +191,9 @@ export default function App() {
                 </PermissionGuard>
               } />
               <Route path="/api" element={
-                <Preview home="/dashboard">
-                  <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
-                    <ApiManagement />
-                  </PermissionGuard>
-                </Preview>
+                <PermissionGuard permission="api:manage" redirectTo="/unauthorized">
+                  <ApiManagement />
+                </PermissionGuard>
               } />
               <Route path="/users" element={
                 <PermissionGuard permission="users:read" redirectTo="/unauthorized">

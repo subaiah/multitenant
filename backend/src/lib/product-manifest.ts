@@ -299,6 +299,8 @@ export interface ImportOptions {
   dryRun?: boolean;
   /** Switching between CONFIDENTIAL and PUBLIC clients must be asked for explicitly */
   confirmClientTypeChange?: boolean;
+  /** Runs last inside the import's transaction (not on a dry run): its audit entry, saved with it or not at all */
+  inTransaction?: (tx: Parameters<Parameters<typeof controlDb.$transaction>[0]>[0], result: ImportResult) => Promise<void>;
 }
 
 class DryRun extends Error {
@@ -610,6 +612,7 @@ export async function importManifest(input: unknown, options: ImportOptions = {}
       };
       // A dry run: everything checked and worked out, then rolled back
       if (options.dryRun) throw new DryRun(outcome);
+      await options.inTransaction?.(tx, outcome as unknown as ImportResult);
       return outcome;
     });
   } catch (err) {

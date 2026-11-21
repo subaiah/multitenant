@@ -17,16 +17,14 @@ type Phase =
 export default function SignupVerify() {
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
-  const [phase, setPhase] = useState<Phase>({ kind: 'confirming' });
+  const [phase, setPhase] = useState<Phase>(() =>
+    token ? { kind: 'confirming' } : { kind: 'failed', message: 'This link is incomplete. Copy the whole link from the email.' });
   const started = useRef(false);
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    if (!token) {
-      setPhase({ kind: 'failed', message: 'This link is incomplete. Copy the whole link from the email.' });
-      return;
-    }
+    if (!token) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     (async () => {

@@ -50,6 +50,8 @@ export const KIT_AUDIT_EVENTS = {
   'platform.access_rule_created': p('Platform access rule created', 'security'),
   'platform.access_rule_updated': p('Platform access rule changed', 'security'),
   'platform.access_rule_deleted': p('Platform access rule deleted', 'security'),
+  'platform.account.password_reset': p('Platform user reset their password', 'security'),
+  'platform.account.invitation_accepted': p('Platform user accepted their invitation', 'account'),
   'platform.account.mfa_disabled': p('Platform user turned off two-factor', 'account'),
   'platform.account.recovery_codes_regenerated': p('Platform user made new recovery codes', 'account'),
   'platform.account.mfa_replaced': p('Platform user moved two-factor to a new authenticator', 'account'),

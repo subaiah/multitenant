@@ -6,7 +6,7 @@ import { requireUserType, isPlatformAdmin, getEnhancedUserPermissions } from '..
 import { isScopeAware, permissionMatches } from '../utils/permissions.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { logActivity } from '../lib/activity.js';
-import { audit, withPlatformAudit } from '../lib/audit.js';
+import { withPlatformAudit } from '../lib/audit.js';
 import { PREVIEW_MENU_PATHS, previewEnabled } from '../lib/preview.js';
 import { productSections } from '../lib/product-menu.js';
 
@@ -384,14 +384,10 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
     
     
     // Update all items in a transaction
-    await controlDb.$transaction(
-      items.map(item =>
-        controlDb.menuItem.update({
-          where: { id: item.id },
-          data: { order: item.order },
-        })
-      )
-    );
+    await withPlatformAudit(request, async (tx, record) => {
+      for (const item of items) await tx.menuItem.update({ where: { id: item.id }, data: { order: item.order } });
+      await record('menu.changed', { resource: { type: 'menu_item', label: 'reordered menu items' }, details: { action: 'reordered menu items', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
+    });
     
     // Log activity
     await logActivity({
@@ -401,7 +397,6 @@ export const menuItemRoutes: FastifyPluginAsync = async (fastify) => {
         target: `${items.length} items`,
         type: 'CONFIG',
       });
-    await audit(request, 'menu.changed', { resource: { type: 'menu_item', label: 'reordered menu items' }, details: { action: 'reordered menu items', body: request.body as Record<string, unknown> | undefined, params: request.params as Record<string, unknown> } });
     
     return { message: 'Menu items reordered successfully' };
   });

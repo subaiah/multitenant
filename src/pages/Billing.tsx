@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { apiPost } from '../lib/api-client';
 import { formatMoney, intervalLabel } from '../lib/money';
 import { Badge, Card, DataView, EmptyState, PageHeader, formatDate, primaryButtonClass, secondaryButtonClass } from '../components/ui';
+import { useChanged } from '../lib/hooks';
 
 type Interval = 'MONTH' | 'YEAR';
 interface Price { currency: string; interval: Interval; unitAmount: number; provider: 'RAZORPAY' | 'STRIPE' }
@@ -132,14 +133,17 @@ export default function BillingPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Back from the payment page: say so at once, then look the subscription up (below)
+  const [notice, setNotice] = useState<string | null>(() => {
+    const checkout = params.get('checkout');
+    if (checkout === 'cancelled') return 'Checkout was cancelled. Nothing was charged.';
+    return checkout ? 'Thanks! Confirming your payment…' : null;
+  });
   const [interval, setInterval] = useState<Interval>('MONTH');
   const [currency, setCurrency] = useState<string | null>(null);
   const handledReturn = useRef(false);
 
-  useEffect(() => {
-    if (overview.data) setData(overview.data);
-  }, [overview.data]);
+  if (useChanged(overview.data, true) && overview.data) setData(overview.data);
   // Start the plans on the subscription's billing interval
   const sawInterval = useRef(false);
   useEffect(() => {
@@ -156,11 +160,7 @@ export default function BillingPage() {
     handledReturn.current = true;
     const session = params.get('session');
     setParams({}, { replace: true });
-    if (checkout === 'cancelled') {
-      setNotice('Checkout was cancelled. Nothing was charged.');
-      return;
-    }
-    setNotice('Thanks! Confirming your payment…');
+    if (checkout === 'cancelled') return;
     apiPost<Overview>('/billing/refresh', session && session.startsWith('cs_') ? { session } : {})
       .then((o) => {
         setData(o);

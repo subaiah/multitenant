@@ -157,7 +157,7 @@ Every setting is described in `backend/.env.example`. The ones a deployment must
 | `SELF_SIGNUP`, `CUSTOM_DOMAINS` | On by default. Whether anyone can create an organization, and whether tenants can use their own domains. See *Self-service sign-up* and *Custom domains* below. |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | A bot check on the sign-up form. Set them before opening sign-up to the public. |
 | `TRIAL_DAYS`, `CLOSE_GRACE_DAYS` | How long trials last before the organization becomes read-only, and how long a closed organization is kept before it's deleted. See *Trials and closing an organization*. |
-| `PREVIEW_FEATURES` | Off in production. It hides pages that show sample data: deployed applications and their resource use, the API gateway settings, and the backup and encryption switches. |
+| `PREVIEW_FEATURES` | Off in production. It hides what shows sample data: the dashboard's sample application counts, and the backup and encryption switches. |
 | `PRODUCT_CALLBACK_ALLOWED_HOSTS` | Hosts an external product's lifecycle callback may use without https or on an inside address, comma-separated (e.g. `appforge` for a container on the same Docker network). Empty by default. ([PRODUCT_INTEGRATION.md](PRODUCT_INTEGRATION.md#lifecycle-events)) |
 | `API_DOCS` | Off in production. The interactive API reference at `/api/docs`. |
 | `TENANT_POOL_MAX`, `TENANT_CLIENT_CACHE_MAX`, `POSTGRES_MAX_CONNECTIONS` | See *Database connections*. |
@@ -258,10 +258,18 @@ The `.env` must be the one the backup was made with. The keys especially: stored
 | --- | --- | --- |
 | `SECRETS_KEY_V<n>` | Stored secrets: tenant connection strings, SSO client secrets, authenticator secrets | Add `SECRETS_KEY_V2` and deploy (the newest version encrypts). Run `node dist/cli/encrypt-secrets.js`, then remove V1 once `--check` reports nothing left on it. |
 | `AUDIT_KEY_V<n>` | Audit log signatures | Add `AUDIT_KEY_V2` and deploy. Never remove an old version while entries signed with it remain, live or archived. |
-| `JWT_SECRET` | Session tokens | Changing it signs everyone out. |
+| `JWT_SECRET` | Session tokens, the two-factor step, emailed codes | Rotate with `JWT_SECRET_PREVIOUS` (below): nobody is signed out. |
 | `COOKIE_SECRET` | Signed cookies | Changing it signs everyone out. |
 
 To add a key version, add the variable to `.env` and to the `x-api-env` block in `docker-compose.yml`.
+
+### Rotating `JWT_SECRET`
+
+1. In `deploy/.env`, set `JWT_SECRET_PREVIOUS` to the current `JWT_SECRET`, and `JWT_SECRET` to a new value (`openssl rand -hex 24`).
+2. Restart the API (`docker compose up -d api`, or run Deploy). New sessions, two-factor steps and emailed codes use the new secret; those made with the old one keep working.
+3. A day later, remove `JWT_SECRET_PREVIOUS` and restart. By then every access token (`JWT_EXPIRES_IN`) and short-lived code made with the old secret has expired.
+
+Leaving `JWT_SECRET_PREVIOUS` empty is the normal state. The API refuses to start if it equals `JWT_SECRET`.
 
 ## Billing
 

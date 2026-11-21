@@ -2,13 +2,14 @@ import { Clock, CreditCard, Lock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import AppShell, { Mark } from '../components/AppShell';
 import { useAuth } from '../contexts/AuthContext';
+import { useNow } from '../lib/hooks';
 
 const DAY = 86_400_000;
 const link = 'font-medium underline underline-offset-2';
 
 /** A trial's end: a quiet note while there's time, a warning near it, read-only after it */
 function TrialBanner({ endsAt, name, canBill }: { endsAt: string; name: string; canBill: boolean }) {
-  const left = new Date(endsAt).getTime() - Date.now();
+  const left = new Date(endsAt).getTime() - useNow();
   const date = new Date(endsAt).toLocaleDateString(undefined, { dateStyle: 'medium' });
   if (left <= 0) {
     return (

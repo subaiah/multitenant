@@ -12,6 +12,7 @@ import { accountIdFor, checkAccount, type AccessProblem } from '../lib/oidc/acco
 import { findSessionAccount, sessionProblem } from '../lib/sessions.js';
 import { revokeRefreshTokenValue } from '../lib/auth-planes.js';
 import { audit } from '../lib/audit.js';
+import { verifyWithPreviousSecret } from '../lib/signing-keys.js';
 
 const DENIED: Record<AccessProblem, string> = {
   NOT_ENTITLED: "Your organization doesn't have this application turned on. Ask an administrator to turn it on.",
@@ -27,7 +28,16 @@ export async function oidcRoutes(fastify: FastifyInstance) {
   const readSession = async (token: string | undefined): Promise<SiteSession | null> => {
     if (!token) return null;
     try {
-      const claims = fastify.jwt.verify<{ userId?: string; tenantId?: string; type?: string; iat?: number; iatMs?: number }>(token);
+      type Claims = { userId?: string; tenantId?: string; type?: string; iat?: number; iatMs?: number };
+      let claims: Claims;
+      try {
+        claims = fastify.jwt.verify<Claims>(token);
+      } catch {
+        // While JWT_SECRET is being rotated (lib/signing-keys.ts)
+        const previous = await verifyWithPreviousSecret<Claims>(token);
+        if (!previous) return null;
+        claims = previous;
+      }
       if (!claims.userId || claims.type !== 'access') return null;
       const user = await findSessionAccount({ userId: claims.userId, tenantId: claims.tenantId });
       if (sessionProblem(claims, user)) return null;

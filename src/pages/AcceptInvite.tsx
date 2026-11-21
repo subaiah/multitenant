@@ -17,17 +17,15 @@ export default function AcceptInvite() {
   const token = params.get('token') ?? '';
   const navigate = useNavigate();
   const [invite, setInvite] = useState<Invitation | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fetchError, setLoadError] = useState<string | null>(null);
+  const loadError = token ? fetchError : 'This invitation link is incomplete.';
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setLoadError('This invitation link is incomplete.');
-      return;
-    }
+    if (!token) return;
     apiGet<Invitation>(`/bff/account/invitations/${encodeURIComponent(token)}`, { skipAuth: true })
       .then((i) => {
         setInvite(i);

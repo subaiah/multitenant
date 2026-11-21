@@ -56,7 +56,7 @@ import { certificationRoutes } from './routes/certifications.js';
 import { menuItemRoutes } from './routes/menu-items.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { platformRoutes } from './routes/platform.js';
-import { deploymentRoutes } from './routes/deployments.js';
+import { deploymentRoutes, infrastructureRoutes } from './routes/deployments.js';
 import { auditRoutes, platformAuditRoutes } from './routes/audit.js';
 import { startJobs, stopJobs } from './lib/jobs.js';
 import { flushErrorReports } from './lib/error-reporting.js';
@@ -79,6 +79,7 @@ import { authorize } from './middleware/authorize.js';
 import { emailDeliveryWarning } from './lib/mailer.js';
 import { RateLimitStore } from './lib/rate-limit-store.js';
 import { pendingControlMigrations } from './lib/control-migrations.js';
+import { appOriginsOf } from './lib/api-gateway.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -110,13 +111,24 @@ const fastify = Fastify({
 // Register plugins
 async function registerPlugins() {
   // CORS
+  // @fastify/cors only allows GET, HEAD and POST by default, which blocked
+  // every PATCH/PUT/DELETE the frontend makes.
+  const methods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];
+  const appOrigins = appOriginsOf(config.corsOrigin);
   await fastify.register(cors, {
-    origin: config.corsOrigin.split(','),
-    credentials: true,
-    // @fastify/cors only allows GET, HEAD and POST by default, which blocked
-    // every PATCH/PUT/DELETE the frontend makes.
-    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    exposedHeaders: ['X-Request-ID'],
+    delegator: (req, cb) => {
+      const origin = typeof req.headers.origin === 'string' ? req.headers.origin.replace(/\/+$/, '').toLowerCase() : '';
+      // The hub's own pages, with their cookies
+      if (!origin || appOrigins.has(origin)) return cb(null, { origin: config.corsOrigin.split(','), credentials: true, methods, exposedHeaders: ['X-Request-ID'] });
+      // Another site may call with an organization's API key, if the
+      // organization allows it: a preflight only says what may be sent (no
+      // cookies), and the real request is checked once the key is known
+      // (lib/api-gateway.ts), before it runs
+      if (req.method === 'OPTIONS') {
+        return cb(null, { origin: true, credentials: false, methods, allowedHeaders: ['authorization', 'content-type', 'x-api-key', 'x-tenant-id'], maxAge: 600 });
+      }
+      return cb(null, { origin: false });
+    },
   });
 
   // Every response says which request it answers (quoted in support requests),
@@ -326,7 +338,7 @@ async function registerRoutes() {
     await protectedRoutes.register(webhookRoutes, { prefix: '/webhooks' });
 
     // API gateway settings: stored but not enforced yet (PREVIEW_FEATURES)
-    if (config.previewFeatures) await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
+    await protectedRoutes.register(apiConfigRoutes, { prefix: '/api-config' });
 
     // Role management
     await protectedRoutes.register(roleRoutes, { prefix: '/roles' });
@@ -367,7 +379,8 @@ async function registerRoutes() {
 
     // Current tenant's deployed applications: sample data until deployments
     // are reported by something real (PREVIEW_FEATURES)
-    if (config.previewFeatures) await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
+    await protectedRoutes.register(deploymentRoutes, { prefix: '/deployments' });
+    await protectedRoutes.register(infrastructureRoutes, { prefix: '/infrastructure' });
 
     // Managing your own two-factor sign-in
     await protectedRoutes.register(platformScoped(twoFactorRoutes), { prefix: '/bff/two-factor' });

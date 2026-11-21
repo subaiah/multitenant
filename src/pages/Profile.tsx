@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { User, Mail, Building2, Shield, Calendar, Save, Loader2, Users, Briefcase, KeyRound, Bell } from 'lucide-react';
 import { apiPatch, type CurrentUser } from '../lib/api-client';
@@ -6,6 +6,7 @@ import { useApi } from '../hooks/useApi';
 import { invalidateApi } from '../lib/query';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
 import { SignInDetails } from '../components/SignInDetails';
+import { useChanged } from '../lib/hooks';
 
 interface UserInfo {
   id: string;
@@ -54,7 +55,7 @@ export default function Profile() {
 
   // The name field starts from the saved name once it has loaded
   const savedName = user?.name ?? '';
-  useEffect(() => setName(savedName), [savedName]);
+  if (useChanged(savedName)) setName(savedName);
 
   const handleSave = async () => {
     if (!user) return;

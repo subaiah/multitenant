@@ -116,7 +116,7 @@ test('pages with sample data are hidden when preview features are off', async (t
   // Menu entries (the test databases have no seeded menu)
   const label = `release-${randomUUID().slice(0, 8)}`;
   const items = await Promise.all(
-    ['/infrastructure', '/users'].map((path) => controlDb.menuItem.create({ data: { portal: 'TENANT', label, path, order: 999 } })),
+    ['/api', '/users'].map((path) => controlDb.menuItem.create({ data: { portal: 'TENANT', label, path, order: 999 } })),
   );
   t.after(() => controlDb.menuItem.deleteMany({ where: { id: { in: items.map((i) => i.id) } } }));
   const paths = (menu: { menuItems: { path: string; children: { path: string }[] }[] }) =>
@@ -124,13 +124,15 @@ test('pages with sample data are hidden when preview features are off', async (t
 
   // Production-like
   assert.equal((await prod.api('GET', '/bff/auth/me', { cookie: s.cookie })).json.features.preview, false);
-  assert.equal((await prod.api('GET', '/deployments', { cookie: s.cookie })).status, 404);
-  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 404);
+  // Real figures and enforced settings now: shown in production too
+  assert.equal((await prod.api('GET', '/deployments', { cookie: s.cookie })).status, 200);
+  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 200);
   const dash = await prod.api('GET', '/bff/dashboard', { cookie: s.cookie });
   assert.equal(dash.status, 200);
   assert.equal(dash.json.applications, null);
   const prodMenu = paths((await prod.api('GET', '/menu-items/portal/TENANT', { cookie: s.cookie })).json);
-  assert.ok(!prodMenu.includes('/infrastructure'));
+  // No tenant page is a preview any more: the menu shows them all
+  assert.ok(prodMenu.includes('/api'));
   assert.ok(prodMenu.includes('/users'));
   // Backup and encryption are switches only; the storage note still saves
   assert.equal((await prod.api('PATCH', '/database', { cookie: s.cookie, body: { backupEnabled: false } })).status, 400);
@@ -140,7 +142,7 @@ test('pages with sample data are hidden when preview features are off', async (t
   assert.equal((await api('GET', '/bff/auth/me', { cookie: s.cookie })).json.features.preview, true);
   assert.equal((await api('GET', '/deployments', { cookie: s.cookie })).status, 200);
   assert.ok((await api('GET', '/bff/dashboard', { cookie: s.cookie })).json.applications);
-  assert.ok(paths((await api('GET', '/menu-items/portal/TENANT', { cookie: s.cookie })).json).includes('/infrastructure'));
+  assert.ok(paths((await api('GET', '/menu-items/portal/TENANT', { cookie: s.cookie })).json).includes('/api'));
 });
 
 // ------------------------------------------------------------ the release step
