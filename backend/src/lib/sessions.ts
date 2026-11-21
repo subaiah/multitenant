@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { controlDb } from './prisma.js';
+import { controlDb, type ControlDb } from './prisma.js';
 import { dbForTenant, type TenantDb } from './tenant-db.js';
 import { AppError } from '../middleware/error-handler.js';
 import { touchSession } from './sign-in.js';
@@ -24,10 +24,10 @@ export function endAllSessions(db: Pick<TenantDb, 'user' | 'refreshToken'>, user
 }
 
 /** endAllSessions for a platform user (control plane). */
-export function endAllPlatformSessions(userId: string, at = new Date()) {
+export function endAllPlatformSessions(userId: string, at = new Date(), db: Pick<ControlDb, 'platformUser' | 'platformRefreshToken'> = controlDb) {
   return [
-    controlDb.platformUser.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
-    controlDb.platformRefreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
+    db.platformUser.update({ where: { id: userId }, data: { sessionsValidAfter: at } }),
+    db.platformRefreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: at } }),
   ];
 }
 

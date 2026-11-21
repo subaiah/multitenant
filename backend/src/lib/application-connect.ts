@@ -36,7 +36,7 @@ import { issuer } from './oidc/provider.js';
 import { newClientSecret } from './oidc/uris.js';
 import { controlDb } from './prisma.js';
 import { ROTATION_OVERLAP_MS, callbackUrlProblem, newCallbackSecret, trustedCallback } from './product-lifecycle.js';
-import { importManifest, manifestProblems, manifestSchema, type ImportResult, type ProductManifest } from './product-manifest.js';
+import { importManifest, manifestProblems, manifestSchema, type ImportResult, type ProductManifest, type ImportOptions } from './product-manifest.js';
 import { API_RESOURCE, newServiceClientId, newServiceSecret } from './product-service.js';
 import { decryptSecret, secretContext } from './secrets.js';
 import { SERVICE_SCOPES, isServiceScope, type ServiceScope } from './service-scopes.js';
@@ -182,12 +182,17 @@ export async function checkConnect(input: ConnectRequest) {
  * Approve: import the manifest, make the credentials, and keep them behind a
  * one-time code. Returns where to send the browser.
  */
-export async function approveConnect(request: FastifyRequest, input: ConnectRequest): Promise<{ redirectTo: string; result: ImportResult }> {
+export async function approveConnect(
+  request: FastifyRequest,
+  input: ConnectRequest,
+  /** The import's audit entry, saved in its transaction */
+  inTransaction?: ImportOptions['inTransaction'],
+): Promise<{ redirectTo: string; result: ImportResult }> {
   const { origin, redirect } = addressesOf(input);
   const { manifest, hash } = await fetchManifest(origin);
   if (!input.manifestHash) throw refuse('Check the request first, and approve what it showed (manifestHash)');
   if (input.manifestHash !== hash) throw new AppError('The application changed its manifest after it was checked: review it again', 409, true, 'MANIFEST_CHANGED');
-  const result = await importManifest(manifest, { confirmClientTypeChange: input.confirmClientTypeChange });
+  const result = await importManifest(manifest, { confirmClientTypeChange: input.confirmClientTypeChange, inTransaction });
   const app = await controlDb.applicationRegistry.findUniqueOrThrow({ where: { id: result.application.id }, include: { signIn: true } });
   const scopes = [...new Set(input.scopes)];
   const code = randomBytes(32).toString('base64url');

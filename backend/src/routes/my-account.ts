@@ -14,7 +14,7 @@ import { AppError } from '../middleware/error-handler.js';
 import { AUTHENTICATED } from '../middleware/authorize.js';
 import { controlDb } from '../lib/prisma.js';
 import { dbForTenant } from '../lib/tenant-db.js';
-import { audit } from '../lib/audit.js';
+import { audit, withAudit, withPlatformAudit } from '../lib/audit.js';
 import { logActivity } from '../lib/activity.js';
 import { sendMail } from '../lib/mailer.js';
 import { appOriginForTenant } from '../lib/domains.js';
@@ -112,19 +112,19 @@ export const myAccountRoutes: FastifyPluginAsync = async (fastify) => {
     // access tokens run out within minutes); this one carries on
     const others = { userId: user.id, revokedAt: null, NOT: { familyId: request.user.sid ?? '' } };
     if (owner === 'platform') {
-      await controlDb.$transaction([
-        controlDb.platformUser.update({ where: { id: user.id }, data: { passwordHash } }),
-        controlDb.platformRefreshToken.updateMany({ where: others, data: { revokedAt: new Date() } }),
-      ]);
+      await withPlatformAudit(request, async (tx, record) => {
+        await tx.platformUser.update({ where: { id: user.id }, data: { passwordHash } });
+        await tx.platformRefreshToken.updateMany({ where: others, data: { revokedAt: new Date() } });
+        await record('platform.account.password_changed');
+      });
     } else {
-      const db = await dbForTenant(owner.tenantId);
-      await db.$transaction([
-        db.user.update({ where: { id: user.id }, data: { passwordHash } }),
-        db.refreshToken.updateMany({ where: { ...others, tenantId: owner.tenantId }, data: { revokedAt: new Date() } }),
-      ]);
+      await withAudit(request, async (tx, record) => {
+        await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
+        await tx.refreshToken.updateMany({ where: { ...others, tenantId: owner.tenantId }, data: { revokedAt: new Date() } });
+        await record('account.password_changed');
+      }, { tenantId: owner.tenantId });
     }
     await logActivity({ tenantId: owner === 'platform' ? null : owner.tenantId, userId: user.id, action: 'changed password', target: user.email, type: 'AUTH' });
-    await audit(request, owner === 'platform' ? 'platform.account.password_changed' : 'account.password_changed');
     await sendMail(passwordChangedEmail(user.email, await labelOf(owner))).catch(() => {});
     return { changed: true };
   });

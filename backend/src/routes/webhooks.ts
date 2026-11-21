@@ -15,7 +15,7 @@ import { hiddenProductTypes, refreshProductCatalog } from '../lib/product-catalo
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../middleware/error-handler.js';
-import { audit, diff, withAudit } from '../lib/audit.js';
+import { diff, withAudit } from '../lib/audit.js';
 import { assertWebhookUrl, newSigningSecret, retryDelivery, sendTestEvent, webhookEvents } from '../lib/webhooks.js';
 
 const MAX_ENDPOINTS = 20;
@@ -114,10 +114,13 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       // Back on: a fresh start
       if (body.enabled) Object.assign(data, { disabledReason: null, consecutiveFailures: 0 });
     }
-    await request.db.webhookEndpoint.updateMany({ where: { id: before.id, tenantId: request.tenant.id }, data });
-    const after = (await request.db.webhookEndpoint.findFirst({ where: { id: before.id, tenantId: request.tenant.id } }))!;
     const changes = diff(view(before) as Record<string, unknown>, data);
-    if (Object.keys(changes).length) await audit(request, 'webhook.updated', { resource: { type: 'webhook', id: before.id, label: after.url }, changes });
+    const after = await withAudit(request, async (tx, record) => {
+      await tx.webhookEndpoint.updateMany({ where: { id: before.id, tenantId: request.tenant.id }, data });
+      const updated = (await tx.webhookEndpoint.findFirst({ where: { id: before.id, tenantId: request.tenant.id } }))!;
+      if (Object.keys(changes).length) await record('webhook.updated', { resource: { type: 'webhook', id: before.id, label: updated.url }, changes });
+      return updated;
+    });
     return view(after);
   });
 
