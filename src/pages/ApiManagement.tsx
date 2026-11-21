@@ -92,7 +92,7 @@ function ApiConfigForm({ config, gateways, onSaved }: { config: ApiConfig; gatew
   };
 
   return (
-    <Card title="Configuration">
+    <Card title="Configuration" description="The rate limit and allowed origins are enforced. The gateway, authentication, versioning and backend-for-frontend choices are kept for reference: the platform doesn't act on them.">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <label className="block text-sm">
           <span className="text-slate-600 dark:text-slate-300">API gateway</span>
@@ -105,6 +105,7 @@ function ApiConfigForm({ config, gateways, onSaved }: { config: ApiConfig; gatew
           <span className="text-slate-600 dark:text-slate-300">Rate limit (requests per minute)</span>
           <input type="number" min={100} max={100000} step={100} value={form.rateLimit}
             onChange={(e) => setForm({ ...form, rateLimit: Number(e.target.value) })} className={`${inputClass} mt-1`} />
+          <span className="block text-xs text-slate-500 mt-1">Your API keys share this allowance; each application calling about your organization gets its own. Calls over it get a 429 and when to try again.</span>
         </label>
         <label className="block text-sm">
           <span className="text-slate-600 dark:text-slate-300">Authentication</span>
@@ -125,7 +126,7 @@ function ApiConfigForm({ config, gateways, onSaved }: { config: ApiConfig; gatew
           <textarea aria-label="Allowed origins" rows={3} disabled={!form.corsEnabled} value={form.allowedOrigins}
             onChange={(e) => setForm({ ...form, allowedOrigins: e.target.value })}
             placeholder={'https://app.example.com\nhttps://admin.example.com'} className={`${inputClass} font-mono`} />
-          <p className="text-xs text-slate-500">One origin per line, including the scheme.</p>
+          <p className="text-xs text-slate-500">One origin per line, including the scheme. Web pages on these sites may call the API with your organization's API keys (never with anyone's sign-in); calls from any other site are refused.</p>
         </div>
         <div className="md:col-span-2 space-y-2">
           <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">

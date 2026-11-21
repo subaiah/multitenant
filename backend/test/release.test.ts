@@ -125,7 +125,8 @@ test('pages with sample data are hidden when preview features are off', async (t
   // Production-like
   assert.equal((await prod.api('GET', '/bff/auth/me', { cookie: s.cookie })).json.features.preview, false);
   assert.equal((await prod.api('GET', '/deployments', { cookie: s.cookie })).status, 404);
-  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 404);
+  // Enforced settings now: shown in production too
+  assert.equal((await prod.api('GET', '/api-config', { cookie: s.cookie })).status, 200);
   const dash = await prod.api('GET', '/bff/dashboard', { cookie: s.cookie });
   assert.equal(dash.status, 200);
   assert.equal(dash.json.applications, null);

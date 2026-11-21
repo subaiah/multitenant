@@ -10,6 +10,9 @@ import { activeSupportSession, type ActiveSupportSession } from '../lib/support.
 import { trialEnded } from '../lib/tenant-lifecycle.js';
 import { enabledProviders } from '../lib/billing/providers.js';
 import { apiKeyUserId, keyFromRequest, verifyApiKey } from '../lib/api-keys.js';
+import { appOriginsOf, corsAllows, withinRateLimit } from '../lib/api-gateway.js';
+
+const APP_ORIGINS = appOriginsOf(config.corsOrigin);
 
 const billingAvailable = () => enabledProviders().length > 0;
 
@@ -151,6 +154,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     request.tenant = tenantInfo;
     // The config's version, so a change made on another server (rotated credentials) applies at once
     request.db = await dbForTenant(tenant.id, databaseConfig?.updatedAt, { readOnly });
+    // An API key: the organization's API settings apply (allowed origins, rate limit)
+    if (request.apiKey) {
+      if (!(await corsAllows(request, reply, tenant.id, APP_ORIGINS))) return reply;
+      if (!(await withinRateLimit(request, reply, tenant.id, 'keys'))) return reply;
+    }
     return;
   }
 
