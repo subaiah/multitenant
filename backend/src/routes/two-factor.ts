@@ -36,7 +36,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     if (!state) throw new AppError('Account not found', 404);
     return {
       enabled: state.enabled,
-      required: await mfaRequired(owner),
+      required: await mfaRequired(owner, request.user.userType),
       recoveryCodesLeft: state.enabled ? state.recoveryHashes.length : 0,
     };
   });
@@ -85,7 +85,7 @@ export const twoFactorRoutes: FastifyPluginAsync = async (fastify) => {
     config: { permission: AUTHENTICATED, rateLimit: signedInCodeRateLimit('disable') },
   }, async (request) => {
     const owner = ownerOfRequest(request);
-    if (await mfaRequired(owner)) {
+    if (await mfaRequired(owner, request.user.userType)) {
       throw new AppError('Two-factor is required for your organization and cannot be turned off', 403);
     }
     await checkCode(request);

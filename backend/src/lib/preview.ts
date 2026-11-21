@@ -5,12 +5,11 @@
  *
  * - The backup and encryption-at-rest switches: recorded, but nothing acts on
  *   them; backups are the operator's job (docs/DEPLOYMENT.md).
- * - The platform's Global Policies page: "coming soon" only.
  */
 import { config } from '../config/env.js';
 
 /** Menu entries for preview pages (both portals) */
-export const PREVIEW_MENU_PATHS = ['/platform/policies'];
+export const PREVIEW_MENU_PATHS: string[] = [];
 
 /** Database settings that are switches only */
 export const PREVIEW_DATABASE_FIELDS = ['backupEnabled', 'encryptionAtRest'];

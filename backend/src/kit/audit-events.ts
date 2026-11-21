@@ -46,6 +46,7 @@ export const KIT_AUDIT_EVENTS = {
   'platform.account.password_changed': p('Platform user changed their password', 'account'),
   'platform.account.email_change_requested': p('Platform user asked to change their email', 'account'),
   'platform.account.email_changed': p('Platform user changed their email', 'account'),
+  'platform.security_baseline_updated': p('Security baseline changed', 'security'),
   'platform.account.password_reset': p('Platform user reset their password', 'security'),
   'platform.account.invitation_accepted': p('Platform user accepted their invitation', 'account'),
   'platform.account.mfa_disabled': p('Platform user turned off two-factor', 'account'),

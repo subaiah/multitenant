@@ -124,7 +124,7 @@ try {
   await admin.waitForLoadState('networkidle');
   await admin.screenshot({ path: `${SHOTS}/platform-dashboard.png`, fullPage: true });
   const platformMenu = await admin.locator('nav').innerText();
-  check('platform "coming soon" pages are hidden', !/Global policies/i.test(platformMenu), platformMenu.replace(/\s+/g, ' '));
+  check('Global policies is shown', /Global policies/i.test(platformMenu), platformMenu.replace(/\s+/g, ' '));
 
   // ---- 2. a tenant in its own database
   await admin.goto(`${APP}/platform/tenants`);

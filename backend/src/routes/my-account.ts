@@ -22,6 +22,7 @@ import { emailChangeConfirmEmail, emailChangeRequestedEmail, passwordChangedEmai
 import { EMAIL_CHANGE_TTL_HOURS, cancelUserTokens, issueUserToken, pendingEmailChange } from '../lib/user-tokens.js';
 import { signedInCodeRateLimit } from '../lib/rate-limits.js';
 import { checkPasswordPolicy, hashPassword, verifyPassword, type PasswordPolicy } from '../utils/auth.js';
+import { securityBaseline, stricterPolicy } from '../lib/security-baseline.js';
 
 const PLATFORM_POLICY: PasswordPolicy = 'STRONG';
 const PLATFORM_LABEL = 'Platform Administration';
@@ -40,9 +41,10 @@ async function accountOf(owner: SessionOwner, userId: string) {
 }
 
 async function policyOf(owner: SessionOwner): Promise<PasswordPolicy> {
-  if (owner === 'platform') return PLATFORM_POLICY;
+  const { minPasswordPolicy } = await securityBaseline();
+  if (owner === 'platform') return stricterPolicy(PLATFORM_POLICY, minPasswordPolicy);
   const cfg = await (await dbForTenant(owner.tenantId)).authConfig.findUnique({ where: { tenantId: owner.tenantId }, select: { passwordPolicy: true } });
-  return (cfg?.passwordPolicy as PasswordPolicy | undefined) ?? 'STANDARD';
+  return stricterPolicy((cfg?.passwordPolicy as PasswordPolicy | undefined) ?? 'STANDARD', minPasswordPolicy);
 }
 
 const labelOf = async (owner: SessionOwner) =>

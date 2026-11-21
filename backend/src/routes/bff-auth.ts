@@ -23,6 +23,7 @@ import { appOriginFor, assertSignInHost } from '../lib/domains.js';
 import { tokenSlug } from '../lib/auth-planes.js';
 import { logActivity } from '../lib/activity.js';
 import { emailInput, findUserByEmail } from '../lib/emails.js';
+import { securityBaseline } from '../lib/security-baseline.js';
 import { derivedKeys } from '../lib/signing-keys.js';
 
 // Validation schemas
@@ -191,7 +192,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       throw new AppError('SSO authentication required', 403);
     }
     // Check if OTP is enabled
-    if (!authConfig?.otpEnabled) {
+    if (!authConfig?.otpEnabled || !(await securityBaseline()).emailedCodesAllowed) {
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
     }
 
@@ -282,7 +283,7 @@ export const bffAuthRoutes: FastifyPluginAsync = async (fastify) => {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'single sign-on only' });
       throw new AppError('SSO authentication required', 403);
     }
-    if (!authConfig?.otpEnabled) {
+    if (!authConfig?.otpEnabled || !(await securityBaseline()).emailedCodesAllowed) {
       await recordSignInFailure(request, owner, { email, method: 'email-code', reason: 'emailed codes are off' });
       throw new AppError('OTP authentication is not enabled for this tenant', 400);
     }

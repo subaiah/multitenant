@@ -70,6 +70,7 @@ import { oidcRoutes } from './routes/oidc.js';
 import { productV1Routes } from './routes/product-v1.js';
 import { embedRoutes } from './routes/embed.js';
 import { platformBillingRoutes } from './routes/platform-billing.js';
+import { securityBaselineRoutes } from './routes/security-baseline.js';
 import { notificationRoutes, notificationSettingRoutes } from './routes/notifications.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { authenticate } from './middleware/authenticate.js';
@@ -371,6 +372,7 @@ async function registerRoutes() {
     // Platform portal data (platform users only)
     await protectedRoutes.register(platformScoped(platformRoutes), { prefix: '/platform' });
     await protectedRoutes.register(platformScoped(platformBillingRoutes), { prefix: '/platform/billing' });
+    await protectedRoutes.register(platformScoped(securityBaselineRoutes), { prefix: '/platform/security-baseline' });
     await protectedRoutes.register(platformScoped(platformRoleRoutes), { prefix: '/platform-roles' });
 
     // Current tenant's deployed applications: sample data until deployments

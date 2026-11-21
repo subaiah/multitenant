@@ -836,6 +836,25 @@ model NotificationWork {
 // Request counters for the rate limits that must hold across every server
 // (sign-in, one-time and two-factor codes): lib/rate-limit-store.ts. The key
 // is a hash, so no email addresses are stored here.
+/// The platform's security baseline (Global policies, lib/security-baseline.ts): one row, id "platform"
+model SecurityBaseline {
+  id                  String   @id @default("platform")
+  /// STANDARD, STRONG or VERY_STRONG: the weakest password policy an organization may use
+  minPasswordPolicy   String   @default("STANDARD") @map("min_password_policy")
+  /// NONE, ADMINS (TENANT_ADMIN and platform staff) or EVERYONE
+  mfaRequiredFor      String   @default("NONE") @map("mfa_required_for")
+  /// Longest idle timeout an organization may set, in minutes (null: no cap)
+  maxIdleMinutes      Int?     @map("max_idle_minutes")
+  /// Longest session an organization may allow, in hours (null: no cap)
+  maxSessionHours     Int?     @map("max_session_hours")
+  emailedCodesAllowed Boolean  @default(true) @map("emailed_codes_allowed")
+  /// Addresses or CIDR ranges platform staff may work from (empty: anywhere)
+  staffIpAllowlist    String[] @default([]) @map("staff_ip_allowlist")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("security_baseline")
+}
+
 /// Each health check's outcome (lib/product-health.ts), kept 31 days for uptime figures (lib/app-figures.ts)
 model ApplicationHealthSample {
   id            BigInt              @id @default(autoincrement())
